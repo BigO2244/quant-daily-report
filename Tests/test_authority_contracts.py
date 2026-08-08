@@ -104,6 +104,21 @@ def test_wrap_precompute_requires_explicit_targets_and_auditor_is_read_only():
         wrap_precompute_payload({"trade_date": "2026-08-07"}, evidence_refs=["x"], decision_id="d", risk_id="r")
 
 
+def test_auditor_accepts_mechanical_exit_of_pretrade_holding():
+    _, _, _, execution = wrap_precompute_payload(
+        {"trade_date": "2026-08-07", "target_portfolio": _rows()},
+        evidence_refs=["signals.json"],
+        decision_id="decision:test",
+        risk_id="risk:test",
+    )
+    audit = audit_execution_package(
+        execution,
+        [{"symbol": "MSFT", "side": "SELL", "shares": 1}],
+        authorized_exit_symbols=["MSFT"],
+    )
+    assert audit.findings == ()
+
+
 def test_wrap_precompute_preserves_explicit_no_action_decision():
     evidence, decision, risk, execution = wrap_precompute_payload(
         {"trade_date": "2026-08-07", "target_portfolio": []},

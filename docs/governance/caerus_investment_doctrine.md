@@ -399,6 +399,15 @@ This makes Phoenix complementary to momentum-based sleeves rather than duplicati
 
 ## Lyra and Orion
 
+Owner amendment, 2026-08-08: Orion is approved as the PAPER-only operational
+execution authority. The approval is implemented by wrapping the exact same-day
+governed Orion shadow snapshot into immutable Decision, Risk, Execution, and
+Audit packages. Decision alone authors targets; Risk may only constrain; Trader
+may only consume the approved package; Auditor is read-only. The operating target
+retains 5% cash and a 2% post-trade attainment tolerance. This amendment does not
+authorize live capital, weaken the separate FR-104 gates, or erase outstanding
+research-evidence limitations. Polaris remains the historical research control.
+
 Lyra and Orion will not be selected based on preference.
 
 Their future status will be determined through:

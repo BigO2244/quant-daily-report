@@ -23,13 +23,15 @@ strategy, review, and task delegation.
 Caerus is a paper-traded quantitative investment platform with deterministic
 artifacts and an explicit research-to-production promotion ladder.
 
-- Polaris is the current paper execution baseline.
-- Orion is the primary shadow candidate and the default FR-104 live-pilot
-  sleeve only when all live-pilot approval gates pass.
+- Orion is the current PAPER-only execution authority under the owner decision
+  recorded 2026-08-08. Decision consumes its exact same-day governed shadow
+  snapshot, Risk may only constrain, and Trader consumes only the approved package.
+- Polaris remains the historical research baseline and daily shadow comparison control.
 - Lyra is the shadow challenger.
 - SPY is the benchmark anchor.
-- Polaris sends regular paper orders. Outside the separately gated `$500` FR-104
-  live-pilot lane, Orion and Lyra produce artifacts only.
+- Orion sends PAPER orders only after immutable package validation. The `$500`
+  FR-104 live-pilot lane remains blocked and separately governed; no live
+  credential, approval, or kill-switch state is changed by the PAPER promotion.
 - Execution integrity and target attainment are in observation after the June
   12 FR-070 remediation. New FR-070 implementation work requires classified
   evidence from the next run.
@@ -73,13 +75,14 @@ artifacts and an explicit research-to-production promotion ladder.
 
 ## Current Priority Stack
 
-1. FR-070 execution integrity / target attainment observation is the highest
-   immediate operational priority until the next live-run validation gates
-   pass or produce a classified failure.
+1. Observe the first governed Orion PAPER convergence run and require clean
+   fills/rejections, reconciliation, 2% target attainment, immutable lineage,
+   and universal GREEN health before declaring migration complete.
 2. FR-069 research lab modular sleeve architecture is the next major
    architecture workstream; it remains research-only unless a separately
    governed implementation phase is approved.
-3. Continued Orion/Lyra evaluation before any retirement decision.
+3. Continued Polaris/Orion/Lyra research comparison before any retirement decision;
+   PAPER execution authority does not settle long-horizon research viability.
 4. FR-063 remains active supporting differentiation evidence under FR-069; no
    retirement decision is approved, and any Orion/Lyra disposition belongs
    inside FR-069 after sufficient canonical new-series evidence exists.

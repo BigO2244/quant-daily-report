@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import pandas as pd
 
 from scripts.live_vs_shadow_reconciliation import build_reconciliation, render_markdown, write_artifacts
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _write_shadow_day(root: Path, date: str, *, polaris_return: float, spy_return: float, weights: dict[str, float]) -> None:
@@ -20,8 +26,8 @@ def _write_shadow_day(root: Path, date: str, *, polaris_return: float, spy_retur
                 "data_status": "OK",
                 "return_convention": "weights_as_of_t",
                 "strategies": {
-                    "caerus_polaris": {
-                        "strategy_name": "Caerus Polaris",
+                    "caerus_orion": {
+                        "strategy_name": "Caerus Orion",
                         "daily_return": polaris_return,
                         "nav": 1.0 + polaris_return,
                     },
@@ -34,11 +40,12 @@ def _write_shadow_day(root: Path, date: str, *, polaris_return: float, spy_retur
             }
         )
     )
-    (day / "caerus_polaris.json").write_text(
+    (day / "caerus_orion.json").write_text(
         json.dumps(
             {
-                "strategy_name": "Caerus Polaris",
-                "strategy_slug": "caerus_polaris",
+                "strategy_name": "Caerus Orion",
+                "strategy_slug": "caerus_orion",
+                "source_variant": "h2_rank_decay_exit_h6_top5",
                 "trade_date": date,
                 "target_weights": weights,
             }
@@ -77,11 +84,13 @@ def _write_live_targets(root: Path, date: str, weights: dict[str, float], *, liv
                 "snapshot_date": date,
                 "strategy_identity": {
                     "live_strategy_id": live_strategy_id,
+                    "execution_target_strategy_id": live_strategy_id,
                     "execution_target_source": f"{day}/signals.json",
                     "execution_target_type": "precompute_signals",
-                    "shadow_baseline_strategy": "caerus_polaris",
-                    "shadow_baseline_source": f"shadow/{date}/caerus_polaris.json",
+                    "shadow_baseline_strategy": "caerus_orion",
+                    "shadow_baseline_source": f"shadow/{date}/caerus_orion.json",
                     "live_tracks_shadow_baseline": tracks_shadow,
+                    "paper_tracks_shadow_baseline": tracks_shadow,
                 },
                 "signals": [
                     {"ticker": symbol, "target_weight": weight}
@@ -120,8 +129,8 @@ def test_reconciled_case(tmp_path: Path) -> None:
     )
     assert payload["status"] == "RECONCILED"
     assert payload["classification"] == "RECONCILED"
-    assert payload["live_strategy_id"] == "growth_engine_v4"
-    assert payload["shadow_baseline_strategy"] == "caerus_polaris"
+    assert payload["live_strategy_id"] == "caerus_orion"
+    assert payload["shadow_baseline_strategy"] == "caerus_orion"
     assert payload["generated_at"].endswith("Z")
     assert "RETURNS_RECONCILED" in payload["reason_codes"]
     assert "HOLDINGS_RECONCILED" in payload["reason_codes"]
@@ -177,6 +186,64 @@ def test_not_comparable_due_to_missing_live_data(tmp_path: Path) -> None:
     )
     assert payload["status"] == "NOT_COMPARABLE"
     assert "MISSING_LIVE_DATA" in payload["reason_codes"]
+
+
+def test_first_orion_run_is_green_initializing_when_package_lineage_and_target_attainment_are_verified(
+    tmp_path: Path,
+) -> None:
+    trade_date = "2026-04-24"
+    shadow_dir = tmp_path / "outputs" / "shadow_candidates"
+    _write_shadow_day(
+        shadow_dir,
+        trade_date,
+        polaris_return=0.01,
+        spy_return=0.001,
+        weights={"AAA": 0.5, "BBB": 0.5},
+    )
+    source_path = shadow_dir / trade_date / "caerus_orion.json"
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    positions = tmp_path / "positions.json"
+    _write_positions(positions, {"AAA": 0.5, "BBB": 0.5})
+    run_root = tmp_path / "outputs" / "paper_lane" / "runs" / "orion-first"
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "approved_execution_package": {
+                "content_hash": "approved-hash",
+                "approved_target_rows": [
+                    {"symbol": "AAA", "target_weight": 0.5},
+                    {"symbol": "BBB", "target_weight": 0.5},
+                ],
+                "approved_cash_weight": 0.0,
+            },
+            "decision_source_artifact": {
+                "path": str(source_path),
+                "sha256": source_hash,
+                "strategy_id": "caerus_orion",
+            },
+        },
+    )
+    _write_json(
+        run_root / "audit" / f"execution_target_attainment_{trade_date}.json",
+        {"status": "OK_TARGET_ATTAINED"},
+    )
+    _write_json(
+        tmp_path / "outputs" / "workflow" / trade_date / "execution.json",
+        {"trade_date": trade_date, "run_root": str(run_root), "status": "success"},
+    )
+
+    payload = build_reconciliation(
+        trade_date=trade_date,
+        shadow_dir=shadow_dir,
+        precompute_dir=tmp_path / "outputs" / "precompute",
+        live_nav_path=tmp_path / "missing.csv",
+        broker_positions_path=positions,
+    )
+
+    assert payload["status"] == "ALIGNED_INITIALIZING"
+    assert payload["immutable_lineage"]["verified"] is True
+    assert "IMMUTABLE_LINEAGE_VERIFIED" in payload["reason_codes"]
+    assert "TARGET_ATTAINED" in payload["reason_codes"]
 
 
 def test_not_comparable_due_to_missing_shadow_data(tmp_path: Path) -> None:
@@ -274,4 +341,4 @@ def test_strategy_mismatch_classification_and_target_comparison(tmp_path: Path) 
     markdown = render_markdown(payload)
     assert "## Strategy Identity" in markdown
     assert "## Target vs Target Comparison" in markdown
-    assert "not intended to track Shadow Polaris" in markdown
+    assert "different strategy paths" in markdown

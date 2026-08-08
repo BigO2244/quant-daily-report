@@ -27,7 +27,10 @@ from scripts.send_shadow_cio_report import build_report  # noqa: E402
 _REGISTRY = load_strategy_registry()
 BASELINE_SLUG = _REGISTRY.baseline_strategy_id()
 BENCHMARK_SLUG = "spy_benchmark"
-CHALLENGER_SLUGS = _REGISTRY.promotion_candidate_ids()
+# Research comparison membership is intentionally distinct from current
+# promotion eligibility. A challenger promoted to governed PAPER execution
+# remains in the read-only readiness audit against the historical baseline.
+CHALLENGER_SLUGS = _REGISTRY.research_challenger_ids()
 MODEL_SLUGS = (BASELINE_SLUG, *CHALLENGER_SLUGS, BENCHMARK_SLUG)
 DISPLAY_NAMES = {
     entry.strategy_id: entry.display_name.replace("Caerus ", "")

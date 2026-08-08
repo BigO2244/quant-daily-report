@@ -451,7 +451,10 @@ def _baseline_strategy_slug() -> str:
 
 
 def _promotion_candidate_slugs() -> tuple[str, ...]:
-    return load_strategy_registry().promotion_candidate_ids()
+    # Reporting comparisons are broader than promotion eligibility: a strategy
+    # promoted to PAPER remains a research challenger against the historical
+    # Polaris control even though it is no longer awaiting promotion.
+    return load_strategy_registry().research_challenger_ids()
 
 
 def _scoreboard_slugs(evaluation: dict | None) -> list[str]:

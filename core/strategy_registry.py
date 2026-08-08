@@ -186,6 +186,35 @@ class StrategyRegistry:
     def promotion_candidate_ids(self) -> tuple[str, ...]:
         return tuple(entry.strategy_id for entry in self.entries if entry.promotion_candidate)
 
+    def research_challenger_ids(self) -> tuple[str, ...]:
+        """Strategies compared with the research baseline, including PAPER names."""
+        return tuple(
+            entry.strategy_id
+            for entry in self.active_shadow_security_selection_entries()
+            if entry.role == "challenger"
+        )
+
+    def paper_execution_entries(self) -> tuple[StrategyRegistryEntry, ...]:
+        return tuple(
+            entry
+            for entry in self.entries
+            if entry.status == "paper"
+            and entry.execution_impact == "PAPER"
+            and bool((entry.raw or {}).get("paper_execution", {}).get("enabled"))
+        )
+
+    def paper_execution_strategy_id(self) -> str:
+        entries = self.paper_execution_entries()
+        if len(entries) != 1:
+            raise ValueError(
+                "strategy registry must contain exactly one enabled PAPER execution strategy"
+            )
+        return entries[0].strategy_id
+
+    def paper_execution_config(self) -> dict[str, Any]:
+        entry = self.require(self.paper_execution_strategy_id())
+        return dict((entry.raw or {}).get("paper_execution") or {})
+
     def baseline_strategy_id(self) -> str:
         baselines = [
             entry.strategy_id

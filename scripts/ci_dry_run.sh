@@ -85,6 +85,7 @@ export MODE="paper"
 export TRADING_MODE="paper"
 export ALPACA_PAPER="1"
 export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
+export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-caerus_orion}"
 
 # Suppress any real-money arming
 unset CAERUS_LIVE_PILOT_KILL_SWITCH 2>/dev/null || true
@@ -212,7 +213,8 @@ else
     BUILD_OUTPUT="$(
         "${PYTHON_BIN}" scripts/live_pilot_build_plan_from_precompute.py \
             ${PAYLOAD_ARG} \
-            --approved-sleeve orion \
+            --lane paper \
+            --approved-sleeve "${CAERUS_LIVE_PILOT_SLEEVE_ID}" \
             --capital-cap "${CAERUS_LIVE_PILOT_CAPITAL_CAP}" \
             --max-orders "${CAERUS_LIVE_PILOT_MAX_ORDERS}" \
             --output-dir "${PAPER_PLANS_DIR}" \

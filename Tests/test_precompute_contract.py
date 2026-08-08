@@ -58,15 +58,15 @@ def test_write_and_load_precompute_bundle(tmp_path: Path, monkeypatch) -> None:
     assert snapshot["signals_snapshot_path"].endswith("outputs/precompute/2026-03-17/signals.json")
     assert payload["trades"][0]["ticker"] == "AAPL"
     assert payload["live_strategy_id"] == "growth_engine_v4"
-    assert payload["execution_target_strategy_id"] == "growth_engine_v4"
-    assert payload["paper_governed_strategy_id"] == "caerus_polaris"
-    assert payload["paper_mapping_status"] == "ENGINE_BASELINE_ALIAS"
+    assert payload["execution_target_strategy_id"] == "caerus_orion"
+    assert payload["paper_governed_strategy_id"] == "caerus_orion"
+    assert payload["paper_mapping_status"] == "DIRECT_APPROVED_PACKAGE"
     assert payload["live_pilot_governed_strategy_id"] == "caerus_orion"
     assert payload["live_pilot_tracks_approved_strategy"] is False
-    assert payload["execution_target_source"] == "outputs/precompute/2026-03-17/signals.json"
-    assert payload["execution_target_type"] == "precompute_signals"
-    assert payload["shadow_baseline_strategy"] == "caerus_polaris"
-    assert payload["shadow_baseline_source"] == "outputs/shadow_candidates/2026-03-17/caerus_polaris.json"
+    assert payload["execution_target_source"] == "outputs/shadow_candidates/2026-03-17/caerus_orion.json"
+    assert payload["execution_target_type"] == "approved_execution_package"
+    assert payload["shadow_baseline_strategy"] == "caerus_orion"
+    assert payload["shadow_baseline_source"] == "outputs/shadow_candidates/2026-03-17/caerus_orion.json"
     assert payload["live_tracks_shadow_baseline"] is False
     assert payload["target_book_metrics"]["metric_scope"] == (
         "desired_target_book_not_executed_fills"

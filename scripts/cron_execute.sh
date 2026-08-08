@@ -94,8 +94,11 @@ export CAERUS_LIVE_PILOT_CAPITAL_CAP="10000"
 # staging scale (it only ever TIGHTENS; unset on the live lane -> live sizes
 # against real equity, unchanged).
 export CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP}"
-export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-caerus_polaris}"
-export CAERUS_PAPER_RECOVERY_POLICY="${CAERUS_PAPER_RECOVERY_POLICY:-weekly_rotation_guard_v1}"
+export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-caerus_orion}"
+# Empty by design. The governed PAPER lane consumes only the same-day Orion
+# snapshot; any explicitly supplied recovery policy is fail-closed by the plan
+# builder as downstream target substitution.
+export CAERUS_PAPER_RECOVERY_POLICY="${CAERUS_PAPER_RECOVERY_POLICY:-}"
 # Sells run through the SAME fail-closed gates as live (master flag + whitelist);
 # paper arms them with the wildcard so the full buy/sell/hold model is exercised.
 export CAERUS_LIVE_PILOT_SELLS_ENABLED="1"
@@ -117,6 +120,7 @@ export CAERUS_LIVE_PILOT_APPROVED="1"
 export CAERUS_LIVE_PILOT_CRON_APPROVED="1"
 export CAERUS_LIVE_PILOT_SCHEDULE_ENABLED="1"
 export CAERUS_LIVE_PILOT_SUBMIT_APPROVED="1"
+export CAERUS_REQUIRE_APPROVED_EXECUTION_PACKAGE="1"
 # Deliberately NOT exported here: CAERUS_LIVE_PILOT_KILL_SWITCH. The kill switch
 # is a LIVE-lane safety gate; the paper gate stack short-circuits on the paper
 # broker before ever consulting it, so exporting =0 here would be inert for
@@ -370,17 +374,21 @@ write_paper_pointer \
 
 # --- Build the full-rebalance plan (same builder as live; paper-scoped dirs) ---
 set +e
+BUILD_ARGS=(
+    --trade-date "${REPORT_DATE}"
+    --lane paper
+    --recovery-policy-config "${REPO_ROOT}/config/paper_recovery_policy.json"
+    --approved-sleeve "${CAERUS_LIVE_PILOT_SLEEVE_ID}"
+    --capital-cap "${PLAN_CAP}"
+    --max-orders "${CAERUS_LIVE_PILOT_MAX_ORDERS}"
+    --output-dir "${PAPER_PLANS_DIR}"
+    --state-dir "${PAPER_STATE_DIR}"
+)
+if [[ -n "${CAERUS_PAPER_RECOVERY_POLICY}" ]]; then
+    BUILD_ARGS+=(--recovery-policy "${CAERUS_PAPER_RECOVERY_POLICY}")
+fi
 BUILD_OUTPUT="$(
-    "${PYTHON_BIN}" scripts/live_pilot_build_plan_from_precompute.py \
-        --trade-date "${REPORT_DATE}" \
-        --lane paper \
-        --recovery-policy "${CAERUS_PAPER_RECOVERY_POLICY}" \
-        --recovery-policy-config "${REPO_ROOT}/config/paper_recovery_policy.json" \
-        --approved-sleeve "${CAERUS_LIVE_PILOT_SLEEVE_ID}" \
-        --capital-cap "${PLAN_CAP}" \
-        --max-orders "${CAERUS_LIVE_PILOT_MAX_ORDERS}" \
-        --output-dir "${PAPER_PLANS_DIR}" \
-        --state-dir "${PAPER_STATE_DIR}"
+    "${PYTHON_BIN}" scripts/live_pilot_build_plan_from_precompute.py "${BUILD_ARGS[@]}"
 )"
 BUILD_STATUS=$?
 set -e
@@ -458,6 +466,39 @@ LANE_OK="$(summary_field "${POINTER_OUTPUT}" lane_exit_ok || true)"
 EXIT_CODE=1
 if [[ "${LANE_OK}" == "True" || "${LANE_OK}" == "true" ]]; then
     EXIT_CODE=0
+fi
+
+# Reconcile the exact approved package against broker truth, then require the
+# complete daily health surface to be green. This runs after the terminal
+# pointer is published so reconciliation resolves this PAPER run rather than a
+# stale legacy latest-run artifact.
+if [[ ${EXIT_CODE} -eq 0 ]]; then
+    "${PYTHON_BIN}" -m scripts.live_vs_shadow_reconciliation \
+        --trade-date "${REPORT_DATE}" \
+        --broker-positions-path "${SUBMIT_RUN_ROOT}/live_pilot_broker_snapshot_post.json" || EXIT_CODE=$?
+fi
+if [[ ${EXIT_CODE} -eq 0 ]]; then
+    "${PYTHON_BIN}" -m scripts.caerus_daily_health_check \
+        --trade-date "${REPORT_DATE}" \
+        --root "${REPO_ROOT}" || EXIT_CODE=$?
+fi
+if [[ ${EXIT_CODE} -eq 0 ]]; then
+    HEALTH_STATUS="$(
+        HEALTH_PATH="${REPO_ROOT}/outputs/health/caerus_daily_health_check/${REPORT_DATE}/health_check.json" \
+            "${PYTHON_BIN}" - <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["HEALTH_PATH"])
+payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+print(str(payload.get("overall_status") or "MISSING"))
+PY
+    )"
+    if [[ "${HEALTH_STATUS}" != "GREEN" ]]; then
+        echo "ERROR: universal health gate is ${HEALTH_STATUS}, expected GREEN"
+        EXIT_CODE=1
+    fi
 fi
 
 # --- Options overlay execution (unchanged from the legacy paper lane) ---

@@ -2,13 +2,11 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-06-23 (Polaris_Alpha and Orion_Alpha promoted to official
-SHADOW status for forward concentration evidence collection; Polaris and Orion
-baselines are preserved as comparison controls. This is non-capital,
-non-executing, and does not alter paper, live, allocator, broker, scheduler, or
-production behavior.)
-Governance Label: RESEARCH_ONLY
-Execution Impact: NON_EXECUTIONAL (this document changes no execution, broker, cron, registry, or paper/live behavior)
+Last Updated: 2026-08-08 (owner-approved Orion promotion to PAPER-only execution
+authority through immutable Decision → Risk → Execution → Audit packages;
+Polaris remains the historical research control; live remains blocked.)
+Governance Label: PAPER_AUTHORITY_MIGRATION
+Execution Impact: PAPER_ONLY (no live credentials, approvals, or capital enabled)
 
 The Caerus Investment Doctrine at `docs/governance/caerus_investment_doctrine.md`
 is the canonical strategic north star for strategy, sleeve, promotion, and
@@ -53,7 +51,7 @@ editing code or specs.
 
 ---
 
-## 1. Verified state (as of 2026-06-17)
+## 1. Verified state (as of 2026-08-08)
 
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
 - **Pre-triage deployed baseline:** `efd193dc3520e7383ced00e6e0bc6e4f0c431e78`
@@ -62,11 +60,14 @@ editing code or specs.
   forward broker/operational evidence only when explicitly approved; it is not
   production, not dynamic allocation, and not proof of promotion readiness. No
   shorting, no leverage.
-- **Active paper strategy:** Caerus Polaris (`caerus_polaris`), wired to the `growth_engine_v4` baseline engine.
-- **Shadow (non-blocking):** Caerus Orion, Caerus Lyra, Polaris_Alpha,
-  Orion_Alpha. SPY = benchmark.
-- **Default FR-104 live-pilot sleeve:** Caerus Orion, only when all live-pilot
-  approval gates pass; otherwise Orion remains non-blocking shadow.
+- **Active PAPER strategy:** Caerus Orion (`caerus_orion`), sourced from the exact
+  same-day `h2_rank_decay_exit_h6_top5` shadow snapshot, with 5% target cash and
+  2% target-attainment tolerance. Execution requires a hash-verified approved package.
+- **Historical research control:** Caerus Polaris (`caerus_polaris`), retained in
+  daily shadow comparison and research reporting but without PAPER authority.
+- **Shadow tracking:** Polaris, Orion, Lyra, Polaris_Alpha, Orion_Alpha. SPY = benchmark.
+- **Live posture:** blocked. Orion's PAPER authority does not approve FR-104 live
+  submission and does not change credentials, endpoint pins, or kill-switches.
 - **Concentration alpha shadows:** Polaris_Alpha (`caerus_polaris_alpha`) and
   Orion_Alpha (`caerus_orion_alpha`) are forward shadow-only concentration
   variants activated 2026-06-23. Polaris_Alpha is Top 4 / 20% cap versus the
@@ -120,9 +121,9 @@ framework, and FR-065 dashboard decision-grade consolidation.
 
 | Strategy | Registry type / family | Registry status | Module | CLI | Shadow | Promotion-eligible | Actual state |
 |----------|------------------------|-----------------|--------|-----|--------|--------------------|--------------|
-| Polaris | security_selection / core_momentum | paper | growth_engine_v4 | yes | yes | no | paper_control |
+| Polaris | security_selection / core_momentum | shadow | growth_engine_v4 | yes | yes | no | historical_research_control; no PAPER authority |
 | Polaris_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 4 / 20% cap; compare only against preserved Polaris baseline; no capital |
-| Orion | security_selection / core_momentum | shadow | (variant) | — | yes | yes | shadow_challenger; default_fr104_live_pilot_sleeve_when_approved |
+| Orion | security_selection / core_momentum | paper | h2_rank_decay_exit_h6_top5 | — | yes | no | PAPER-only execution authority; immutable package handoff; live disabled |
 | Orion_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 3 / 25% cap; compare only against preserved Orion baseline; no capital |
 | Lyra | security_selection / core_momentum | shadow | constrained_lyra.py | yes | yes | yes | shadow_only |
 | Phoenix | security_selection / crisis_reversal | research / not_viable_current_phase_b | phoenix.py | run_phoenix_research.py | no | no | research_module / produces_artifacts; PIT liquidity evidence is decision-grade but current Phase B candidate fails 5% ADV capacity policy; not Shadow-readiness eligible |
@@ -130,7 +131,7 @@ framework, and FR-065 dashboard decision-grade consolidation.
 | Cassiopeia | security_selection / event_driven | research | none (spec-only) | none | no | no | spec_only — canonical EVENT-DRIVEN strategy (FR-052); selector code re-homed to Argo 2026-06-08 |
 | Argo | meta_model / regime_overlay | research | argo.py | run_argo_regime_selection.py; build_argo_phase_a_evidence_framework.py; build_argo_phase_b_research_priority.py | no | no | regime overlay / model-selection layer (FR-053); active selector re-homed from Cassiopeia 2026-06-08; Phase A evidence consumer and Phase B research-priority engine are research-only |
 | SPY | benchmark | shadow | n/a | n/a | no | no | benchmark |
-| growth_engine_v4 | (engine behind Polaris) | n/a | core/growth_engine_v4.py | n/a | n/a | n/a | live paper baseline engine |
+| growth_engine_v4 | (legacy engine behind Polaris evidence) | n/a | core/growth_engine_v4.py | n/a | n/a | n/a | retained evidence path; no canonical PAPER target authority |
 
 **FR-053 evidence state (2026-06-08):** Argo now emits a governance-valid
 `argo_regime_selection.*` artifact even when evidence is stale or sparse. The

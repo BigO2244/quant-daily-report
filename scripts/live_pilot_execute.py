@@ -1110,6 +1110,148 @@ def _orders_payload_rows(payload: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in rows if isinstance(row, Mapping)]
 
 
+def _pretrade_symbols(snapshot: Mapping[str, Any]) -> list[str]:
+    return sorted(
+        {
+            str(row.get("symbol") or row.get("ticker") or "").strip().upper()
+            for row in snapshot.get("positions") or []
+            if isinstance(row, Mapping)
+            and str(row.get("symbol") or row.get("ticker") or "").strip()
+        }
+    )
+
+
+def _write_canonical_authority_artifacts(
+    *,
+    run_root: Path,
+    run_id: str,
+    trade_date: str,
+    plan: Mapping[str, Any],
+    preflight: Mapping[str, Any],
+    pre_snapshot: Mapping[str, Any],
+    submitted: list[dict[str, Any]],
+    reconciliation: Mapping[str, Any],
+    target_attainment: Mapping[str, Any],
+    summary: Mapping[str, Any],
+) -> None:
+    """Persist canonical Trader/Auditor artifacts for an approved package run."""
+    package_payload = plan.get("approved_execution_package")
+    if not isinstance(package_payload, Mapping):
+        return
+
+    findings: list[str] = []
+    audit_payload: dict[str, Any] = {}
+    package_hash = str(package_payload.get("content_hash") or "")
+    try:
+        from authority.pipeline import audit_execution_package, execution_package_from_dict
+
+        package = execution_package_from_dict(package_payload)
+        audit = audit_execution_package(
+            package,
+            submitted,
+            authorized_exit_symbols=_pretrade_symbols(pre_snapshot),
+        )
+        audit_payload = audit.to_dict()
+        findings.extend(audit.findings)
+        package_hash = package.content_hash
+    except Exception as exc:
+        findings.append(f"EXECUTION_PACKAGE_INVALID:{exc}")
+
+    decision_source = (
+        dict(plan.get("decision_source_artifact") or {})
+        if isinstance(plan.get("decision_source_artifact"), Mapping)
+        else {}
+    )
+    source_path_raw = str(decision_source.get("path") or "").strip()
+    expected_source_hash = str(decision_source.get("sha256") or "").strip()
+    if source_path_raw and expected_source_hash:
+        source_path = Path(source_path_raw)
+        if not source_path.is_absolute():
+            source_path = REPO_ROOT / source_path
+        if not source_path.exists():
+            findings.append("DECISION_SOURCE_MISSING")
+        else:
+            import hashlib
+
+            actual_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+            if actual_hash != expected_source_hash:
+                findings.append("DECISION_SOURCE_HASH_MISMATCH")
+            decision_source["verified_sha256"] = actual_hash
+            decision_source["hash_verified"] = actual_hash == expected_source_hash
+    else:
+        findings.append("DECISION_SOURCE_PROVENANCE_MISSING")
+
+    reconciliation_status = str(reconciliation.get("status") or "").upper()
+    target_status = str(target_attainment.get("status") or "").upper()
+    integrity_status = (
+        "OK"
+        if not findings
+        and reconciliation_status in {"CLEAN", "DRY_RUN", "DRY_RUN_NO_SUBMISSION"}
+        and target_status
+        in {"OK_TARGET_ATTAINED", "DRY_RUN_NOT_APPLICABLE"}
+        else "FAIL"
+    )
+    canonical_payload = {
+        "schema_version": "caerus.execution_payload.v1",
+        "generated_at": _now_utc(),
+        "run_id": run_id,
+        "trade_date": trade_date,
+        "mode": summary.get("mode"),
+        "execution_source": "approved_execution_package",
+        "price_freshness_scope": "approved_target_package_and_broker_snapshot",
+        "planning_price_basis": "BROKER_SNAPSHOT",
+        "pricing_asof": trade_date,
+        "execution_price_requirement": "BROKER_SNAPSHOT_VALIDATED",
+        "asset_validation_status": preflight.get("asset_validation_status") or "PASS",
+        "approved_execution_package": dict(package_payload),
+        "approved_execution_package_hash": package_hash,
+        "target_portfolio": [dict(row) for row in package_payload.get("approved_target_rows") or []],
+        "cash_target_weight": package_payload.get("approved_cash_weight"),
+        "decision_source_artifact": decision_source,
+        "target_attainment_tolerance": plan.get("target_attainment_tolerance"),
+    }
+    canonical_summary = {
+        **dict(summary),
+        "schema_version": "caerus.operator_summary.v1",
+        "execution_source": "approved_execution_package",
+        "approved_execution_package_hash": package_hash,
+        "execution_integrity_status": integrity_status,
+        "audit_findings_count": len(findings),
+    }
+    integrity = {
+        "schema_version": "caerus.execution_integrity.v1",
+        "generated_at": _now_utc(),
+        "run_id": run_id,
+        "trade_date": trade_date,
+        "status": integrity_status,
+        "findings": findings,
+        "approved_execution_package_hash": package_hash,
+        "decision_source_artifact": decision_source,
+        "reconciliation_status": reconciliation_status,
+        "target_attainment_status": target_status,
+        "read_only_auditor": True,
+    }
+    audit_dir = run_root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    if audit_payload:
+        _write_json(run_root / "authority_audit_package.json", audit_payload)
+    _write_json(run_root / "execution_payload.json", canonical_payload)
+    _write_json(run_root / "operator_summary.json", canonical_summary)
+    _write_json(audit_dir / "execution_integrity.json", integrity)
+    try:
+        from core.execution_lifecycle_timeline import write_execution_lifecycle_timeline
+
+        write_execution_lifecycle_timeline(
+            run_root=run_root,
+            trade_date=trade_date,
+            run_id=run_id,
+        )
+    except Exception as exc:
+        integrity["status"] = "FAIL"
+        integrity["findings"] = [*findings, f"EXECUTION_TIMELINE_BUILD_FAILED:{exc}"]
+        _write_json(audit_dir / "execution_integrity.json", integrity)
+
+
 def _order_side(row: Mapping[str, Any]) -> str:
     return str(row.get("side") or "").strip().upper()
 
@@ -3048,6 +3190,9 @@ def _run_live_pilot_core_path(
             trade_date=trade_date,
             mode=str(getattr(gate, "requested_mode", "") or LIVE_PILOT_MODE),
             dry_run=bool(gate.dry_run),
+            drift_tolerance=float(
+                _finite_float(plan.get("target_attainment_tolerance")) or 0.02
+            ),
         )
         (run_root / "audit").mkdir(parents=True, exist_ok=True)
         _write_json(
@@ -3188,6 +3333,18 @@ def _run_live_pilot_core_path(
                 "execution_target_attainment_reason": target_attainment.get("reason_code"),
             },
         ),
+    )
+    _write_canonical_authority_artifacts(
+        run_root=run_root,
+        run_id=run_id,
+        trade_date=trade_date,
+        plan=plan,
+        preflight=preflight,
+        pre_snapshot=pre_snapshot,
+        submitted=submitted,
+        reconciliation=reconciliation,
+        target_attainment=target_attainment,
+        summary=summary,
     )
     return summary
 
@@ -3367,6 +3524,25 @@ def run_live_pilot(
     )
     preflight.update(fractional_policy)
     _write_json(run_root / "live_pilot_preflight.json", preflight)
+
+    require_approved_package = str(
+        environ.get("CAERUS_REQUIRE_APPROVED_EXECUTION_PACKAGE") or ""
+    ).strip().lower() in {"1", "true", "yes", "y", "on"}
+    if require_approved_package and not isinstance(
+        plan.get("approved_execution_package"), Mapping
+    ):
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
+            reason_code="approved_execution_package_required",
+            operator_action=(
+                "Rebuild the plan through Decision and Pre-Trade Risk; Trader "
+                "may not execute mutable target rows directly."
+            ),
+            preflight=preflight,
+        )
 
     payload = {
         "schema_version": "live_pilot_execution_payload.v1",
@@ -3664,6 +3840,11 @@ def refresh_live_pilot_reconciliation(
         if (run_root / "live_pilot_execution_payload.json").exists()
         else {}
     )
+    canonical_execution_payload = (
+        _load_plan(run_root / "execution_payload.json")
+        if (run_root / "execution_payload.json").exists()
+        else {}
+    )
     trade_date = str(
         preflight_payload.get("trade_date")
         or execution_payload.get("trade_date")
@@ -3726,6 +3907,14 @@ def refresh_live_pilot_reconciliation(
                 trade_date=trade_date,
                 mode=_derive_execution_mode(run_root),
                 dry_run=False,
+                drift_tolerance=float(
+                    _finite_float(
+                        canonical_execution_payload.get(
+                            "target_attainment_tolerance"
+                        )
+                    )
+                    or 0.02
+                ),
             )
             target_sources = dict(target_attainment.get("source_artifacts") or {})
             target_sources["plan"] = target_plan_source
@@ -3890,6 +4079,34 @@ def refresh_live_pilot_reconciliation(
                 ),
             },
         ),
+    )
+    authority_plan = {
+        "approved_execution_package": canonical_execution_payload.get(
+            "approved_execution_package"
+        ),
+        "decision_source_artifact": canonical_execution_payload.get(
+            "decision_source_artifact"
+        ),
+        "target_attainment_tolerance": canonical_execution_payload.get(
+            "target_attainment_tolerance"
+        ),
+    }
+    pre_snapshot = (
+        _load_plan(run_root / "live_pilot_broker_snapshot_pre.json")
+        if (run_root / "live_pilot_broker_snapshot_pre.json").exists()
+        else {}
+    )
+    _write_canonical_authority_artifacts(
+        run_root=run_root,
+        run_id=run_root.name,
+        trade_date=trade_date,
+        plan=authority_plan,
+        preflight=preflight_payload,
+        pre_snapshot=pre_snapshot,
+        submitted=refreshed,
+        reconciliation=reconciliation,
+        target_attainment=target_attainment,
+        summary=summary,
     )
     return summary
 

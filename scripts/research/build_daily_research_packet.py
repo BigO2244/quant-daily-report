@@ -30,7 +30,7 @@ OPTIONAL_PRE_INCEPTION_STRATEGIES = {
     for entry in _REGISTRY.active_shadow_security_selection_entries()
     if (entry.shadow_tracking or {}).get("baseline_strategy_id")
 }
-PROMOTION_CANDIDATES = set(_REGISTRY.promotion_candidate_ids())
+PROMOTION_CANDIDATES = set(_REGISTRY.research_challenger_ids())
 EXPOSURE_SOURCE_ARTIFACTS = (
     "exposures_snapshot.json",
     "exposure_summary.json",

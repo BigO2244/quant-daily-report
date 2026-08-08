@@ -267,6 +267,35 @@ def test_yellow_not_comparable_explicit_reasons(tmp_path: Path) -> None:
     assert _status(payload, "Live vs shadow reconciliation") == "YELLOW"
 
 
+def test_aligned_initializing_is_green_only_with_lineage_and_attainment(tmp_path: Path) -> None:
+    _write_base_artifacts(
+        tmp_path,
+        reconciliation={
+            "trade_date": TRADE_DATE,
+            "classification": "ALIGNED_INITIALIZING",
+            "status": "ALIGNED_INITIALIZING",
+            "reason_codes": [
+                "INSUFFICIENT_HISTORY",
+                "IMMUTABLE_LINEAGE_VERIFIED",
+                "TARGET_ATTAINED",
+                "PERFORMANCE_HISTORY_INITIALIZING",
+            ],
+            "live_strategy_id": "caerus_orion",
+            "shadow_baseline_strategy": "caerus_orion",
+            "strategy_alignment": {
+                "live_strategy_id": "caerus_orion",
+                "shadow_baseline_strategy": "caerus_orion",
+                "status": "ALIGNED",
+            },
+            "immutable_lineage": {"verified": True},
+        },
+    )
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+    assert _status(payload, "Live vs shadow reconciliation") == "GREEN"
+    assert _status(payload, "Strategy identity") == "GREEN"
+    assert payload["overall_status"] == "GREEN"
+
+
 def test_yellow_price_cache_stale_from_shadow_sidecars(tmp_path: Path) -> None:
     _write_base_artifacts(tmp_path)
     shadow_latest = tmp_path / "outputs" / "shadow_candidates" / "latest"

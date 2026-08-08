@@ -4,10 +4,10 @@ from core.strategy_identity import (
 )
 
 
-def test_paper_baseline_alias_is_explicitly_valid() -> None:
+def test_paper_orion_direct_package_is_explicitly_valid() -> None:
     result = validate_lane_strategy_identity(
         identity=strategy_identity_metadata("2026-07-29"),
-        approved_strategy="caerus_polaris",
+        approved_strategy="caerus_orion",
         lane="paper",
     )
     assert result["status"] == "PASS"

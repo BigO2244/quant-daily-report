@@ -8,7 +8,7 @@
       "delta_summary_name": "Caerus Polaris",
       "strategy_type": "security_selection",
       "family": "core_momentum",
-      "status": "paper",
+      "status": "shadow",
       "role": "baseline",
       "eligible_for_shadow": true,
       "eligible_for_promotion": false,
@@ -72,12 +72,12 @@
       "delta_summary_name": "Orion",
       "strategy_type": "security_selection",
       "family": "core_momentum",
-      "status": "shadow",
+      "status": "paper",
       "role": "challenger",
       "eligible_for_shadow": true,
-      "eligible_for_promotion": true,
+      "eligible_for_promotion": false,
       "benchmark": "SPY",
-      "execution_impact": "NON_EXECUTIONAL",
+      "execution_impact": "PAPER",
       "display_order": 20,
       "capabilities": {
         "produces_holdings": true,
@@ -89,6 +89,16 @@
       "shadow_tracking": {
         "enabled": true,
         "source_variant": "h2_rank_decay_exit_h6_top5"
+      },
+      "paper_execution": {
+        "enabled": true,
+        "source_kind": "shadow_snapshot",
+        "source_variant": "h2_rank_decay_exit_h6_top5",
+        "target_cash_weight": 0.05,
+        "target_attainment_tolerance": 0.02,
+        "owner_approved_at": "2026-08-08",
+        "approval_scope": "PAPER_ONLY",
+        "live_enabled": false
       }
     },
     {

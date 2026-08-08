@@ -292,6 +292,27 @@ def _check_reconciliation(root: Path) -> CheckResult:
         if reason_codes:
             return CheckResult("Live vs shadow reconciliation", "YELLOW", reason_codes, "NOT_COMPARABLE with explicit reason codes.", [str(path)])
         return CheckResult("Live vs shadow reconciliation", "RED", ["NOT_COMPARABLE_WITHOUT_REASON"], "NOT_COMPARABLE is missing reason codes.", [str(path)])
+    if classification == "ALIGNED_INITIALIZING":
+        required = {
+            "IMMUTABLE_LINEAGE_VERIFIED",
+            "TARGET_ATTAINED",
+            "PERFORMANCE_HISTORY_INITIALIZING",
+        }
+        if required.issubset(reason_codes):
+            return CheckResult(
+                "Live vs shadow reconciliation",
+                "GREEN",
+                reason_codes,
+                "First governed Orion run has verified package lineage and target attainment; return history is initializing.",
+                [str(path)],
+            )
+        return CheckResult(
+            "Live vs shadow reconciliation",
+            "RED",
+            sorted(required - set(reason_codes)),
+            "ALIGNED_INITIALIZING is missing required immutable-lineage evidence.",
+            [str(path)],
+        )
     if classification in {"RECONCILED", "GREEN"}:
         return CheckResult("Live vs shadow reconciliation", "GREEN", reason_codes, f"Classification is explicit: {classification}.", [str(path)])
     return CheckResult("Live vs shadow reconciliation", "YELLOW", reason_codes, f"Classification is explicit: {classification}.", [str(path)])
@@ -326,6 +347,20 @@ def _check_strategy_identity(root: Path, trade_date: str) -> CheckResult:
     evidence = [str(recon_path), str(signals_path)]
     if reason_codes:
         return CheckResult("Strategy identity", "RED", reason_codes, "Strategy identity is missing live or shadow identifiers.", evidence)
+    recon_alignment = (recon or {}).get("strategy_alignment") or {}
+    immutable_lineage = (recon or {}).get("immutable_lineage") or {}
+    if (
+        str(recon_alignment.get("status") or "").upper() == "ALIGNED"
+        and str(live_strategy) == str(shadow_baseline)
+        and immutable_lineage.get("verified") is True
+    ):
+        return CheckResult(
+            "Strategy identity",
+            "GREEN",
+            [],
+            f"PAPER execution strategy={live_strategy}; governed shadow baseline={shadow_baseline}; immutable lineage verified.",
+            evidence,
+        )
     if (
         identity.get("live_pilot_tracks_approved_strategy") is False
         or str(identity.get("live_pilot_mapping_status") or "").upper()

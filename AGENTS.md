@@ -78,20 +78,22 @@ Git hygiene:
 CURRENT STRATEGY STATE
 
 Paper (Active):
-- Caerus Polaris
+- Caerus Orion (owner-approved PAPER authority as of 2026-08-08)
 
 Shadow (Daily, Non-Blocking):
-- Caerus Orion (Primary Candidate)
+- Caerus Polaris (historical research control)
 - Caerus Lyra (Challenger)
 
 Benchmark:
 - SPY
 
 Execution:
-- Polaris sends regular paper orders
-- `LIVE_PILOT` is a separate gated FR-104 lane; Orion is the default
-  live-pilot sleeve only when all live-pilot approvals pass
-- Orion and Lyra otherwise generate artifacts only
+- Decision consumes the same-day Orion shadow snapshot and is the sole author
+  of PAPER targets; Risk may constrain but may not invent alpha
+- Trader consumes only the hash-verified approved execution package
+- Auditor is read-only and preserves Decision → Risk → Execution lineage
+- Live capital remains blocked; the PAPER promotion does not arm FR-104 or
+  modify live credentials
 
 Automation:
 - Shadow runs automatically after precompute via:
@@ -123,12 +125,13 @@ non-trading Artifact Governance + Operational Telemetry backlog phase.
 ## Named Strategy Framework
 
 - **Caerus Polaris** (`caerus_polaris`)
-  - current paper baseline / operational control
-  - current paper execution remains wired to this baseline behavior
+  - preserved historical research baseline / comparison control
+  - continues daily shadow evidence; no PAPER execution authority
 - **Caerus Orion** (`caerus_orion`)
-  - primary shadow candidate
+  - current PAPER execution authority, owner-approved 2026-08-08
   - derived from Alpha Lab v2 winner: H2 rank-decay exit + H6 top-5 concentration
-  - not promoted to paper
+  - exact same-day shadow snapshot is wrapped into immutable Decision/Risk/Execution packages
+  - 5% target cash and 2% target-attainment tolerance; live remains disabled
 - **Caerus Lyra** (`caerus_lyra`)
   - secondary shadow challenger
   - derived from Alpha Lab v2 challenger: H1 weekly rebalance + H6 top-5 concentration
@@ -247,14 +250,15 @@ sleeve scoring, allocation, reconciliation, and writes the precompute bundle.
 
 ### Current Strategy State
 
-- **Paper execution model**: Caerus Polaris
-- **Shadow daily models**: Caerus Orion, Caerus Lyra
+- **Paper execution model**: Caerus Orion, through an immutable approved package
+- **Historical research control**: Caerus Polaris
+- **Shadow daily models**: Caerus Polaris, Caerus Orion, Caerus Lyra
 - **Default FR-104 `LIVE_PILOT` sleeve**: Caerus Orion, only when all
   live-pilot approval gates pass
 - **Benchmark**: SPY
 - **Promotion state**:
-  - Polaris: paper
-  - Orion: shadow challenger / default live-pilot sleeve under FR-104 gates
+  - Polaris: shadow research control
+  - Orion: PAPER-only authority; live disabled and separately gated
   - Lyra: shadow only
 
 Named strategy labels are governance identities. They are distinct from
@@ -804,13 +808,13 @@ Runtime separation:
   `python3 scripts/check_shadow_scorecard_health.py --baseline-date 2026-05-11 --baseline-valid-days 16 --strict`.
 - For promotion governance review, run
   `python3 scripts/audit_shadow_promotion_readiness.py`; Polaris remains the
-  paper baseline, Orion is the default FR-104 live-pilot sleeve only under
-  explicit live-pilot approvals, and Lyra remains an artifact-only challenger
-  until explicitly promoted through governance.
+  historical research baseline, Orion is the PAPER-only execution authority,
+  live remains separately blocked, and Lyra remains an artifact-only challenger.
 - The VM cron is the production scheduler for precompute/live execution; GitHub
   daily precompute/live schedules are dispatch-only to avoid duplicate runs
-- Successful precompute now also triggers `scripts/run_shadow_candidates_daily.sh`
-  as a non-blocking reporting step for Polaris / Orion / Lyra shadow artifacts
+- Successful precompute triggers `scripts/run_shadow_candidates_daily.sh` for
+  Polaris / Orion / Lyra. Orion's same-day artifact is a mandatory, fail-closed
+  input to PAPER Decision; the other shadow reporting remains non-blocking.
 - Missing or invalid precompute bundles trigger `SELF_HEAL_PRECOMPUTE_ONLY=1`;
   execution continues only after full bundle validation passes
 - If a `SELF_HEAL` pretrade reconciliation occurs, the wrapper re-runs reconciliation
