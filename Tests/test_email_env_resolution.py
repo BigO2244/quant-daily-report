@@ -30,9 +30,17 @@ class _DummySMTP:
 
 
 def test_send_email_requires_email_secrets(monkeypatch):
-    monkeypatch.delenv("EMAIL_SENDER", raising=False)
-    monkeypatch.delenv("EMAIL_APP_PASSWORD", raising=False)
-    monkeypatch.delenv("EMAIL_RECIPIENT", raising=False)
+    for key in (
+        "EMAIL_SENDER",
+        "EMAIL_APP_PASSWORD",
+        "EMAIL_RECIPIENT",
+        "SMTP_USER",
+        "SMTP_PASSWORD",
+        "REPORT_TO_EMAIL",
+        "REPORT_EMAIL_FROM",
+        "REPORT_EMAIL_TO",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
     with pytest.raises(RuntimeError, match="Missing required email env vars"):
         quant_report.send_email(subject="subj", body_text="hello")
