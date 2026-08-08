@@ -1139,6 +1139,23 @@ def test_refresh_existing_market_order_updates_stale_pending_to_filled(tmp_path:
         ),
         encoding="utf-8",
     )
+    (run_root / "live_pilot_preflight.json").write_text(
+        json.dumps({"trade_date": "2026-03-17"}),
+        encoding="utf-8",
+    )
+    target_path = run_root / "audit" / "execution_target_attainment_2026-03-17.json"
+    target_path.parent.mkdir(parents=True)
+    target_path.write_text(
+        json.dumps(
+            {
+                "status": "FAIL_EXECUTION_INCOMPLETE",
+                "reason_code": "reconciliation_submitted_unfilled",
+                "target_cash_weight": 1.0,
+                "positions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = refresh_live_pilot_reconciliation(run_root=run_root, broker=broker)
 
@@ -1158,6 +1175,13 @@ def test_refresh_existing_market_order_updates_stale_pending_to_filled(tmp_path:
     assert results["open_orders_count"] == 0
     assert results["broker_status_refresh"] == "OK"
     assert results["idle_cash_reason"] != "submitted_not_filled"
+    target_attainment = json.loads(target_path.read_text())
+    assert target_attainment["status"] == "OK_TARGET_ATTAINED"
+    assert target_attainment["reason_code"] == "posttrade_weights_within_tolerance"
+    assert target_attainment["reconciliation_status"] == "CLEAN"
+    assert target_attainment["source_artifacts"]["plan"].endswith(":captured_targets")
+    assert result["execution_target_attainment_status"] == "OK_TARGET_ATTAINED"
+    assert results["execution_target_attainment_status"] == "OK_TARGET_ATTAINED"
 
 
 def test_refresh_live_pilot_rejects_wrong_broker_context_before_artifact_overwrite(
