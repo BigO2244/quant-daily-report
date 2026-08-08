@@ -393,8 +393,10 @@ def main(argv: list[str] | None = None) -> int:
     (dated_dir / "summary.json").write_text(json.dumps(comparison_payload, indent=2), encoding="utf-8")
     (dated_dir / "comparison.json").write_text(json.dumps(comparison_payload, indent=2), encoding="utf-8")
     (dated_dir / "shadow_performance.json").write_text(json.dumps(shadow_performance, indent=2), encoding="utf-8")
-    (dated_dir / "comparison.md").write_text(shadow.build_comparison_markdown(comparison_payload, dated_dir=dated_dir), encoding="utf-8")
-
+    (dated_dir / "comparison.md").write_text(
+        shadow.build_comparison_markdown(comparison_payload, dated_dir=dated_dir),
+        encoding="utf-8",
+    )
     nav_status = _append_nav_series(output_root=output_root, shadow_performance=shadow_performance)
     if nav_status.get("status") == "OK":
         # The NAV row must exist before evaluation and readiness are built.  The
@@ -402,6 +404,10 @@ def main(argv: list[str] | None = None) -> int:
         # longitudinal/readiness artifacts from the morning NO_DATA run.
         evaluation = shadow.build_shadow_evaluation_payload(output_root=output_root, trade_date=trade_date)
         (dated_dir / "shadow_evaluation.json").write_text(json.dumps(evaluation, indent=2), encoding="utf-8")
+        (dated_dir / "comparison.md").write_text(
+            shadow.build_comparison_markdown(comparison_payload, dated_dir=dated_dir),
+            encoding="utf-8",
+        )
         shadow.write_phase_c_promotion_artifacts(
             output_root=output_root,
             trade_date=trade_date,

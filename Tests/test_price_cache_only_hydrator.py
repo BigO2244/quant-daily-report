@@ -279,6 +279,20 @@ def test_shadow_scorecard_refresh_regenerates_feedback_before_latest_publish(tmp
         ),
         encoding="utf-8",
     )
+    stale_evaluation = output_dir / "2023-03-31" / "shadow_evaluation.json"
+    stale_evaluation.write_text(
+        json.dumps(
+            {
+                "trade_date": "2023-03-31",
+                "strategies": {
+                    slug: {"status": "NO_PRIOR", "data_status": "NO_DATA"}
+                    for slug in ("caerus_polaris", "caerus_orion", "caerus_lyra")
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     assert refresh_script.main(
         [
@@ -295,12 +309,17 @@ def test_shadow_scorecard_refresh_regenerates_feedback_before_latest_publish(tmp
 
     feedback = json.loads(stale_feedback.read_text(encoding="utf-8"))
     comparison = json.loads((output_dir / "2023-03-31" / "comparison.json").read_text(encoding="utf-8"))
+    comparison_markdown = (output_dir / "2023-03-31" / "comparison.md").read_text(encoding="utf-8")
     latest_feedback = output_dir / "latest" / "feedback_loop_summary.json"
+    latest_comparison_markdown = output_dir / "latest" / "comparison.md"
     rolling_index = output_dir / "performance" / "feedback_loop_rolling_index.csv"
 
     assert set(comparison["strategies"]) == {"caerus_polaris", "caerus_orion", "caerus_lyra"}
     assert feedback["status"] != "NO_DATA"
     assert feedback["strategies"]["polaris"]["primary_learning_gap"] != "stale placeholder"
+    assert "- Any NO_DATA: NO" in comparison_markdown
+    assert "- Any NO_DATA: YES" not in comparison_markdown
+    assert latest_comparison_markdown.read_text(encoding="utf-8") == comparison_markdown
     assert latest_feedback.exists()
     assert json.loads(latest_feedback.read_text(encoding="utf-8")) == feedback
     assert rolling_index.exists()
