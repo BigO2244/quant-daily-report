@@ -34,7 +34,9 @@ ESTABLISHED_MODEL_ORDER = [
     ),
     "spy_benchmark",
 ]
-PROMOTION_SLUGS = list(reversed(_REGISTRY.promotion_candidate_ids()))
+# Keep governed PAPER challengers visible in research-only comparison reports;
+# execution status and promotion eligibility are separate authority concepts.
+PROMOTION_SLUGS = list(reversed(_REGISTRY.research_challenger_ids()))
 BASELINE_SLUG = _REGISTRY.baseline_strategy_id()
 BENCHMARK_SLUG = "spy_benchmark"
 MIN_VALID_DAYS = 10

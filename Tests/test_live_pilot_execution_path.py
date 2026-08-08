@@ -15,12 +15,93 @@ from scripts.live_pilot_execute import (
     LIVE_PILOT_FRACTIONAL_POLICY_MISMATCH,
     LIVE_PILOT_SELL_SETTLEMENT_CASH_NOT_REFLECTED,
     _resolve_fractional_policy,
+    _write_canonical_authority_artifacts,
     refresh_live_pilot_reconciliation,
     run_live_pilot,
 )
 
+from authority.contracts import build_decision_package, build_evidence_package, build_risk_package
+from authority.pipeline import execution_package_from_risk
+
 
 ET = ZoneInfo("America/New_York")
+
+
+@pytest.mark.parametrize(
+    ("reconciliation_status", "target_attainment_status"),
+    [
+        ("CLEAN", "OK_TARGET_ATTAINED"),
+        ("DRY_RUN_NO_SUBMISSION", "DRY_RUN_NOT_APPLICABLE"),
+    ],
+)
+def test_canonical_authority_artifacts_preserve_immutable_lineage(
+    tmp_path: Path,
+    reconciliation_status: str,
+    target_attainment_status: str,
+) -> None:
+    trade_date = "2026-03-17"
+    source_path = tmp_path / "caerus_orion.json"
+    source_path.write_text('{"strategy_slug":"caerus_orion"}\n', encoding="utf-8")
+    import hashlib
+
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    decision_rows = [{"symbol": "AAPL", "target_weight": 0.95}]
+    evidence = build_evidence_package(
+        package_id="evidence:test",
+        trade_date=trade_date,
+        source_refs=[str(source_path)],
+        observations=decision_rows,
+    )
+    decision = build_decision_package(
+        package_id="decision:test",
+        trade_date=trade_date,
+        evidence=evidence,
+        target_rows=decision_rows,
+        target_cash_weight=0.05,
+        source_refs=[str(source_path)],
+    )
+    risk = build_risk_package(
+        package_id="risk:test",
+        decision=decision,
+        approved_target_rows=[
+            {"symbol": "AAPL", "target_weight": 0.95, "price": 100.0}
+        ],
+        approved_cash_weight=0.05,
+        constraints={"max_position_weight": 1.0},
+        source_refs=["decision:decision:test"],
+    )
+    execution = execution_package_from_risk(risk)
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    _write_canonical_authority_artifacts(
+        run_root=run_root,
+        run_id="paper-orion",
+        trade_date=trade_date,
+        plan={
+            "approved_execution_package": execution.to_dict(),
+            "decision_source_artifact": {
+                "path": str(source_path),
+                "sha256": source_hash,
+                "strategy_id": "caerus_orion",
+            },
+            "target_attainment_tolerance": 0.02,
+        },
+        preflight={"asset_validation_status": "PASS"},
+        pre_snapshot={"positions": []},
+        submitted=[{"symbol": "AAPL", "side": "BUY", "status": "filled"}],
+        reconciliation={"status": reconciliation_status},
+        target_attainment={"status": target_attainment_status},
+        summary={"mode": "PAPER", "terminal_status": "SUBMITTED"},
+    )
+    integrity = json.loads((run_root / "audit" / "execution_integrity.json").read_text())
+    payload = json.loads((run_root / "execution_payload.json").read_text())
+    audit = json.loads((run_root / "authority_audit_package.json").read_text())
+    assert integrity["status"] == "OK"
+    assert integrity["findings"] == []
+    assert payload["execution_source"] == "approved_execution_package"
+    assert payload["approved_execution_package_hash"] == execution.content_hash
+    assert audit["execution_hash"] == execution.content_hash
+    assert (run_root / "execution_timeline.json").exists()
 
 
 class FakeBroker:

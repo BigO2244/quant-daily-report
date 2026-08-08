@@ -43,6 +43,7 @@ if str(REPO_ROOT) not in sys.path:
 from core.run_pointer import (
     TERMINAL_STATUS_NO_ACTION,
     TERMINAL_STATUS_SUCCESS,
+    write_latest_run_pointer,
     write_trade_stage_pointer,
 )
 
@@ -100,6 +101,17 @@ def write_paper_lane_pointers(
         status_message=message,
         workspace_root=workspace_root,
     )
+    latest_pointer_path = write_latest_run_pointer(
+        run_id=run_id,
+        trade_date=trade_date,
+        mode="PAPER",
+        run_root=run_root,
+        status=status,
+        substatus=substatus,
+        status_message=message,
+        workflow_stage="execution",
+        workspace_root=workspace_root,
+    )
 
     lane_pointer_path = (
         Path(workspace_root) if workspace_root else Path.cwd()
@@ -124,6 +136,7 @@ def write_paper_lane_pointers(
 
     return {
         "execution_pointer": str(execution_pointer_path),
+        "latest_run_pointer": str(latest_pointer_path),
         "paper_lane_pointer": str(lane_pointer_path),
         "status": status,
         "substatus": substatus,

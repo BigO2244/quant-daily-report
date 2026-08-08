@@ -25,12 +25,14 @@ def test_default_registry_preserves_current_active_shadow_strategies() -> None:
         "caerus_lyra",
     )
     assert registry.baseline_strategy_id() == "caerus_polaris"
+    assert registry.paper_execution_strategy_id() == "caerus_orion"
+    assert registry.paper_execution_config()["target_cash_weight"] == 0.05
     assert registry.promotion_candidate_ids() == (
         "caerus_polaris_alpha",
-        "caerus_orion",
         "caerus_orion_alpha",
         "caerus_lyra",
     )
+    assert "caerus_orion" in registry.research_challenger_ids()
 
 
 def test_repo_registry_loader_prefers_repo_local_config(tmp_path: Path) -> None:

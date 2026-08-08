@@ -4,11 +4,11 @@ from typing import Any, Mapping
 
 
 LIVE_STRATEGY_ID = "growth_engine_v4"
-EXECUTION_TARGET_STRATEGY_ID = LIVE_STRATEGY_ID
-EXECUTION_TARGET_TYPE = "precompute_signals"
-SHADOW_BASELINE_STRATEGY = "caerus_polaris"
+EXECUTION_TARGET_STRATEGY_ID = "caerus_orion"
+EXECUTION_TARGET_TYPE = "approved_execution_package"
+SHADOW_BASELINE_STRATEGY = "caerus_orion"
 LIVE_TRACKS_SHADOW_BASELINE = False
-PAPER_GOVERNED_STRATEGY_ID = "caerus_polaris"
+PAPER_GOVERNED_STRATEGY_ID = "caerus_orion"
 LIVE_PILOT_GOVERNED_STRATEGY_ID = "caerus_orion"
 
 
@@ -48,9 +48,12 @@ def validate_lane_strategy_identity(
             identity.get("paper_governed_strategy_id") or PAPER_GOVERNED_STRATEGY_ID
         )
         mapping = str(identity.get("paper_mapping_status") or "").upper()
-        legacy_alias = target == "growth_engine_v4" and approved == "caerus_polaris"
-        if approved == governed and (
-            mapping == "ENGINE_BASELINE_ALIAS" or legacy_alias
+        tracks = identity.get("paper_tracks_approved_strategy")
+        if (
+            approved == governed
+            and target == governed
+            and mapping == "DIRECT_APPROVED_PACKAGE"
+            and tracks is True
         ):
             result.update(
                 {
@@ -100,14 +103,16 @@ def strategy_identity_metadata(trade_date: str) -> dict[str, object]:
     return {
         "live_strategy_id": LIVE_STRATEGY_ID,
         "execution_target_strategy_id": EXECUTION_TARGET_STRATEGY_ID,
-        "execution_target_source": f"outputs/precompute/{trade_date}/signals.json",
+        "execution_target_source": f"outputs/shadow_candidates/{trade_date}/caerus_orion.json",
         "execution_target_type": EXECUTION_TARGET_TYPE,
         "paper_governed_strategy_id": PAPER_GOVERNED_STRATEGY_ID,
-        "paper_mapping_status": "ENGINE_BASELINE_ALIAS",
+        "paper_mapping_status": "DIRECT_APPROVED_PACKAGE",
+        "paper_tracks_approved_strategy": True,
+        "paper_tracks_shadow_baseline": True,
         "live_pilot_governed_strategy_id": LIVE_PILOT_GOVERNED_STRATEGY_ID,
         "live_pilot_mapping_status": "NOT_TRACKING_GOVERNED_STRATEGY",
         "live_pilot_tracks_approved_strategy": False,
         "shadow_baseline_strategy": SHADOW_BASELINE_STRATEGY,
-        "shadow_baseline_source": f"outputs/shadow_candidates/{trade_date}/caerus_polaris.json",
+        "shadow_baseline_source": f"outputs/shadow_candidates/{trade_date}/caerus_orion.json",
         "live_tracks_shadow_baseline": LIVE_TRACKS_SHADOW_BASELINE,
     }

@@ -52,14 +52,22 @@ def execution_package_from_risk(risk: RiskPackage) -> ExecutionPackage:
 def audit_execution_package(
     execution: ExecutionPackage,
     observed_orders: Sequence[Mapping[str, Any]],
+    *,
+    authorized_exit_symbols: Sequence[str] = (),
 ) -> AuditPackage:
-    """Produce a read-only audit and flag orders outside approved symbols."""
+    """Produce a read-only audit and preserve zero-target exit authority."""
     approved = {row["symbol"] for row in execution.approved_target_rows}
+    authorized_exits = {
+        str(symbol).strip().upper() for symbol in authorized_exit_symbols
+    }
     observed = tuple(dict(row) for row in observed_orders)
     findings: list[str] = []
     for row in observed:
         symbol = str(row.get("symbol") or row.get("ticker") or "").upper()
-        if symbol not in approved:
+        side = str(row.get("side") or "").strip().upper()
+        if symbol not in approved and not (
+            side == "SELL" and symbol in authorized_exits
+        ):
             findings.append(f"UNAPPROVED_SYMBOL:{symbol}")
         if str(row.get("status") or "").lower() in {"rejected", "canceled", "expired"}:
             findings.append(f"ORDER_{str(row.get('status')).upper()}:{symbol}")

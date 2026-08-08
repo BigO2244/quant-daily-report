@@ -42,9 +42,9 @@ def test_intended_orders_artifact_with_trades(tmp_path, monkeypatch):
     assert payload["execution_blocked"] is False
     assert payload["block_reasons"] == []
     assert payload["live_strategy_id"] == "growth_engine_v4"
-    assert payload["execution_target_source"] == "outputs/precompute/2026-03-06/signals.json"
-    assert payload["execution_target_type"] == "precompute_signals"
-    assert payload["shadow_baseline_strategy"] == "caerus_polaris"
+    assert payload["execution_target_source"] == "outputs/shadow_candidates/2026-03-06/caerus_orion.json"
+    assert payload["execution_target_type"] == "approved_execution_package"
+    assert payload["shadow_baseline_strategy"] == "caerus_orion"
     assert payload["live_tracks_shadow_baseline"] is False
     tickers = [o["ticker"] for o in payload["orders_intended"]]
     assert "AAPL" in tickers and "MSFT" in tickers

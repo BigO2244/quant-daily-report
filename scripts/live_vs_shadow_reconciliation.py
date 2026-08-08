@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,10 +11,11 @@ from typing import Any
 import pandas as pd
 
 from core.strategy_identity import strategy_identity_metadata
+from core.strategy_registry import load_strategy_registry
 
 
 BENCHMARK_SYMBOL = "SPY"
-SHADOW_POLARIS = "caerus_polaris"
+SHADOW_BASELINE = load_strategy_registry().paper_execution_strategy_id()
 SPY_SLUG = "spy_benchmark"
 
 RECONCILED_RETURN_THRESHOLD = 0.005
@@ -89,7 +91,11 @@ def _compound(returns: list[float]) -> float | None:
     return round(value - 1.0, 10)
 
 
-def _load_shadow_daily_returns(shadow_dir: Path, trade_date: str) -> tuple[pd.DataFrame, list[str]]:
+def _load_shadow_daily_returns(
+    shadow_dir: Path,
+    trade_date: str,
+    strategy_id: str,
+) -> tuple[pd.DataFrame, list[str]]:
     rows: list[dict[str, Any]] = []
     reason_codes: list[str] = []
     for date in _date_dirs(shadow_dir, trade_date):
@@ -99,18 +105,18 @@ def _load_shadow_daily_returns(shadow_dir: Path, trade_date: str) -> tuple[pd.Da
         if payload.get("data_status") != "OK":
             continue
         strategies = payload.get("strategies") or {}
-        polaris = strategies.get(SHADOW_POLARIS) or {}
+        baseline = strategies.get(strategy_id) or {}
         spy = strategies.get(SPY_SLUG) or {}
-        polaris_return = _to_float(polaris.get("daily_return"))
+        baseline_return = _to_float(baseline.get("daily_return"))
         spy_return = _to_float(spy.get("daily_return"))
-        if polaris_return is None:
+        if baseline_return is None:
             continue
         if spy_return is None:
             reason_codes.append("BENCHMARK_MISSING")
         rows.append(
             {
                 "date": date,
-                "shadow_polaris_daily_return": polaris_return,
+                "shadow_daily_return": baseline_return,
                 "spy_daily_return": spy_return,
                 "shadow_status": payload.get("status"),
                 "shadow_data_status": payload.get("data_status"),
@@ -227,8 +233,12 @@ def _load_live_positions(trade_date: str, explicit_path: Path | None = None) -> 
     return LoadedPositions(weights={}, source_path=None, missing=True)
 
 
-def _load_shadow_weights(shadow_dir: Path, trade_date: str) -> tuple[dict[str, float], str | None]:
-    path = shadow_dir / trade_date / "caerus_polaris.json"
+def _load_shadow_weights(
+    shadow_dir: Path,
+    trade_date: str,
+    strategy_id: str,
+) -> tuple[dict[str, float], str | None]:
+    path = shadow_dir / trade_date / f"{strategy_id}.json"
     payload = _read_json(path)
     if not payload:
         return {}, None
@@ -240,11 +250,68 @@ def _load_shadow_weights(shadow_dir: Path, trade_date: str) -> tuple[dict[str, f
     return weights, str(path)
 
 
-def _load_live_target_weights(precompute_dir: Path, trade_date: str) -> tuple[dict[str, float], str | None, dict[str, Any]]:
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _load_live_target_weights(
+    precompute_dir: Path,
+    trade_date: str,
+) -> tuple[dict[str, float], str | None, dict[str, Any], dict[str, Any]]:
+    outputs_root = precompute_dir.parent
+    repo_root = outputs_root.parent
+    pointer_path = outputs_root / "workflow" / trade_date / "execution.json"
+    pointer = _read_json(pointer_path)
+    if pointer and pointer.get("run_root"):
+        run_root = Path(str(pointer["run_root"]))
+        if not run_root.is_absolute():
+            run_root = repo_root / run_root
+        execution_path = run_root / "execution_payload.json"
+        execution_payload = _read_json(execution_path)
+        package = (execution_payload or {}).get("approved_execution_package")
+        if isinstance(package, dict):
+            rows = package.get("approved_target_rows") or []
+            weights = {
+                str(row.get("symbol") or row.get("ticker") or "").upper(): float(
+                    row.get("target_weight") or 0.0
+                )
+                for row in rows
+                if isinstance(row, dict)
+                and str(row.get("symbol") or row.get("ticker") or "").strip()
+                and (_to_float(row.get("target_weight")) or 0.0) > 0.0
+            }
+            source = dict((execution_payload or {}).get("decision_source_artifact") or {})
+            strategy_id = str(source.get("strategy_id") or "")
+            identity = {
+                "execution_target_strategy_id": strategy_id,
+                "paper_governed_strategy_id": strategy_id,
+                "paper_mapping_status": "DIRECT_APPROVED_PACKAGE",
+                "paper_tracks_approved_strategy": True,
+                "paper_tracks_shadow_baseline": True,
+                "execution_target_type": "approved_execution_package",
+                "execution_target_source": str(execution_path),
+            }
+            attainment_path = run_root / "audit" / f"execution_target_attainment_{trade_date}.json"
+            attainment = _read_json(attainment_path) or {}
+            context = {
+                "run_root": str(run_root),
+                "execution_payload_path": str(execution_path),
+                "approved_execution_package_hash": package.get("content_hash"),
+                "decision_source_artifact": source,
+                "target_attainment_status": attainment.get("status"),
+                "target_attainment_path": str(attainment_path),
+            }
+            return (
+                {symbol: round(weight, 10) for symbol, weight in sorted(weights.items())},
+                str(execution_path),
+                identity,
+                context,
+            )
+
     path = precompute_dir / trade_date / "signals.json"
     payload = _read_json(path)
     if not payload:
-        return {}, None, {}
+        return {}, None, {}, {}
     rows = payload.get("signals") or payload.get("weights") or []
     weights: dict[str, float] = {}
     if isinstance(rows, list):
@@ -255,7 +322,12 @@ def _load_live_target_weights(precompute_dir: Path, trade_date: str) -> tuple[di
             weight = _to_float(row.get("target_weight") or row.get("weight"))
             if symbol and symbol != "CASH" and weight is not None and float(weight) > 0:
                 weights[symbol] = weights.get(symbol, 0.0) + float(weight)
-    return {symbol: round(weight, 10) for symbol, weight in sorted(weights.items())}, str(path), dict(payload.get("strategy_identity") or {})
+    return (
+        {symbol: round(weight, 10) for symbol, weight in sorted(weights.items())},
+        str(path),
+        dict(payload.get("strategy_identity") or {}),
+        {},
+    )
 
 
 def _holdings_reconciliation(live_weights: dict[str, float], shadow_weights: dict[str, float]) -> dict[str, Any]:
@@ -294,7 +366,16 @@ def _holdings_reconciliation(live_weights: dict[str, float], shadow_weights: dic
     }
 
 
-def _classify(*, reason_codes: list[str], live_minus_shadow: float | None, overlap_weight: float | None, valid_days: int) -> str:
+def _classify(
+    *,
+    reason_codes: list[str],
+    live_minus_shadow: float | None,
+    overlap_weight: float | None,
+    valid_days: int,
+    initializing_alignment_verified: bool = False,
+) -> str:
+    if initializing_alignment_verified:
+        return "ALIGNED_INITIALIZING"
     blocking = {"MISSING_LIVE_DATA", "MISSING_SHADOW_DATA", "MISSING_BROKER_POSITIONS", "INSUFFICIENT_HISTORY"}
     if blocking & set(reason_codes) or valid_days < 2:
         return "NOT_COMPARABLE"
@@ -322,13 +403,18 @@ def build_reconciliation(
     live_nav_path: Path = Path("outputs/perf/live_overlay_nav_series.csv"),
     broker_positions_path: Path | None = None,
 ) -> dict[str, Any]:
-    shadow_returns, shadow_reasons = _load_shadow_daily_returns(shadow_dir, trade_date)
+    shadow_baseline_strategy = SHADOW_BASELINE
+    shadow_returns, shadow_reasons = _load_shadow_daily_returns(
+        shadow_dir,
+        trade_date,
+        shadow_baseline_strategy,
+    )
     live_returns, live_reasons = _load_live_returns(live_nav_path)
     reason_codes = list(shadow_reasons + live_reasons)
 
     if not shadow_returns.empty and not live_returns.empty:
         aligned = shadow_returns.merge(live_returns, on="date", how="inner")
-        aligned = aligned.dropna(subset=["live_daily_return", "shadow_polaris_daily_return"])
+        aligned = aligned.dropna(subset=["live_daily_return", "shadow_daily_return"])
     else:
         aligned = pd.DataFrame()
     if not aligned.empty and "spy_daily_return" in aligned.columns:
@@ -345,7 +431,7 @@ def build_reconciliation(
         reason_codes.append("INSUFFICIENT_HISTORY")
 
     live_cum = _compound(aligned["live_daily_return"].astype(float).tolist()) if valid_days else None
-    shadow_cum = _compound(aligned["shadow_polaris_daily_return"].astype(float).tolist()) if valid_days else None
+    shadow_cum = _compound(aligned["shadow_daily_return"].astype(float).tolist()) if valid_days else None
     spy_cum = _compound(aligned["spy_daily_return"].astype(float).tolist()) if valid_days and "spy_daily_return" in aligned else None
     if spy_cum is None:
         reason_codes.append("BENCHMARK_MISSING")
@@ -356,11 +442,20 @@ def build_reconciliation(
     live_positions = _load_live_positions(trade_date, broker_positions_path)
     if live_positions.missing:
         reason_codes.append("MISSING_BROKER_POSITIONS")
-    shadow_weights, shadow_weight_source = _load_shadow_weights(shadow_dir, trade_date)
+    shadow_weights, shadow_weight_source = _load_shadow_weights(
+        shadow_dir,
+        trade_date,
+        shadow_baseline_strategy,
+    )
     if not shadow_weights:
         reason_codes.append("MISSING_SHADOW_DATA")
     holdings = _holdings_reconciliation(live_positions.weights, shadow_weights)
-    live_target_weights, live_target_source, identity_from_signals = _load_live_target_weights(precompute_dir, trade_date)
+    (
+        live_target_weights,
+        live_target_source,
+        identity_from_signals,
+        execution_context,
+    ) = _load_live_target_weights(precompute_dir, trade_date)
     target_comparison = _holdings_reconciliation(live_target_weights, shadow_weights)
     identity = strategy_identity_metadata(trade_date)
     identity.update(identity_from_signals)
@@ -368,9 +463,19 @@ def build_reconciliation(
         identity["execution_target_source"] = live_target_source
     if shadow_weight_source:
         identity["shadow_baseline_source"] = shadow_weight_source
-    live_strategy_id = str(identity.get("live_strategy_id") or "")
-    shadow_baseline_strategy = str(identity.get("shadow_baseline_strategy") or SHADOW_POLARIS)
-    live_tracks_shadow_baseline = bool(identity.get("live_tracks_shadow_baseline"))
+    live_strategy_id = str(
+        identity.get("execution_target_strategy_id")
+        or identity.get("live_strategy_id")
+        or ""
+    )
+    shadow_baseline_strategy = str(
+        identity.get("shadow_baseline_strategy") or shadow_baseline_strategy
+    )
+    live_tracks_shadow_baseline = bool(
+        identity.get("paper_tracks_shadow_baseline")
+        if "paper_tracks_shadow_baseline" in identity
+        else identity.get("live_tracks_shadow_baseline")
+    )
     strategy_mismatch = bool(
         live_target_source
         and live_strategy_id
@@ -379,15 +484,14 @@ def build_reconciliation(
     )
     if strategy_mismatch:
         alignment_status = "STRATEGY_MISMATCH"
-        alignment_message = "Live execution is driven by precompute/signals and is not intended to track Shadow Polaris."
+        alignment_message = "PAPER execution and the governed shadow baseline are different strategy paths."
     elif live_target_source:
         alignment_status = "ALIGNED"
-        alignment_message = "Live strategy identity is aligned with the shadow baseline metadata."
+        alignment_message = "PAPER execution is aligned with the governed shadow baseline metadata."
     else:
         alignment_status = "UNKNOWN"
         alignment_message = (
-            "Live target source is unavailable; default strategy metadata says live does not track the shadow baseline, "
-            "so this artifact should not be read as Polaris tracking evidence."
+            "Execution target source is unavailable; alignment cannot be verified."
         )
     if strategy_mismatch:
         reason_codes.append("DIFFERENT_STRATEGY_PATH")
@@ -404,6 +508,38 @@ def build_reconciliation(
         reason_codes.append("LIVE_ONLY_POSITIONS")
     if holdings["shadow_only_symbols"]:
         reason_codes.append("SHADOW_ONLY_POSITIONS")
+
+    source_meta = dict(execution_context.get("decision_source_artifact") or {})
+    lineage_verified = False
+    if shadow_weight_source and source_meta:
+        expected_hash = str(source_meta.get("sha256") or "")
+        source_strategy = str(source_meta.get("strategy_id") or "")
+        try:
+            actual_hash = _sha256(Path(shadow_weight_source))
+        except Exception:
+            actual_hash = ""
+        lineage_verified = bool(
+            expected_hash
+            and actual_hash == expected_hash
+            and source_strategy == shadow_baseline_strategy
+        )
+    target_attainment_status = str(
+        execution_context.get("target_attainment_status") or ""
+    ).upper()
+    initializing_alignment_verified = bool(
+        valid_days < 2
+        and not strategy_mismatch
+        and lineage_verified
+        and target_attainment_status == "OK_TARGET_ATTAINED"
+        and target_comparison["overlap_weight"] >= RECONCILED_OVERLAP_THRESHOLD
+        and not live_positions.missing
+    )
+    if lineage_verified:
+        reason_codes.append("IMMUTABLE_LINEAGE_VERIFIED")
+    if target_attainment_status == "OK_TARGET_ATTAINED":
+        reason_codes.append("TARGET_ATTAINED")
+    if initializing_alignment_verified:
+        reason_codes.append("PERFORMANCE_HISTORY_INITIALIZING")
     reason_codes = sorted(set(reason_codes))
 
     status = _classify(
@@ -411,6 +547,7 @@ def build_reconciliation(
         live_minus_shadow=live_minus_shadow,
         overlap_weight=holdings["overlap_weight"],
         valid_days=valid_days,
+        initializing_alignment_verified=initializing_alignment_verified,
     )
     daily = aligned.iloc[-1].to_dict() if valid_days else {}
     return {
@@ -438,12 +575,15 @@ def build_reconciliation(
             "shadow_dir": str(shadow_dir),
             "live_nav_path": str(live_nav_path),
             "broker_positions_path": live_positions.source_path,
+            "shadow_baseline_path": shadow_weight_source,
             "shadow_polaris_path": shadow_weight_source,
             "live_target_path": live_target_source,
+            "target_attainment_path": execution_context.get("target_attainment_path"),
         },
         "returns": {
             "live_daily_return": _to_float(daily.get("live_daily_return")),
-            "shadow_polaris_daily_return": _to_float(daily.get("shadow_polaris_daily_return")),
+            "shadow_daily_return": _to_float(daily.get("shadow_daily_return")),
+            "shadow_polaris_daily_return": _to_float(daily.get("shadow_daily_return")),
             "spy_daily_return": _to_float(daily.get("spy_daily_return")),
             "live_cumulative_return": live_cum,
             "shadow_polaris_cumulative_return": shadow_cum,
@@ -451,6 +591,17 @@ def build_reconciliation(
             "live_excess_vs_spy": live_excess,
             "shadow_polaris_excess_vs_spy": shadow_excess,
             "live_minus_shadow_polaris": live_minus_shadow,
+        },
+        "immutable_lineage": {
+            "verified": lineage_verified,
+            "approved_execution_package_hash": execution_context.get(
+                "approved_execution_package_hash"
+            ),
+            "decision_source_expected_sha256": source_meta.get("sha256"),
+            "shadow_source_actual_sha256": (
+                actual_hash if shadow_weight_source and source_meta else None
+            ),
+            "target_attainment_status": target_attainment_status or None,
         },
         "holdings": {key: value for key, value in holdings.items() if key != "rows"},
         "holdings_rows": holdings["rows"],
@@ -462,20 +613,26 @@ def build_reconciliation(
 def _operator_conclusion(payload: dict[str, Any]) -> str:
     status = payload.get("status")
     reasons = set(payload.get("reason_codes") or [])
+    baseline = str(payload.get("shadow_baseline_strategy") or "governed shadow")
+    if status == "ALIGNED_INITIALIZING":
+        return (
+            "ALIGNED_INITIALIZING; immutable package lineage and target attainment "
+            f"are verified for {baseline}; return history is still initializing."
+        )
     if status == "NOT_COMPARABLE":
         return "NOT_COMPARABLE; missing or insufficient artifacts prevent a live-vs-shadow judgment."
     if status == STRATEGY_MISMATCH_STATUS or "DIFFERENT_STRATEGY_PATH" in reasons:
-        return "NOT_ALIGNED; live execution and Shadow Polaris are different strategy paths, so return differences are observational and not tracking underperformance."
+        return f"NOT_ALIGNED; PAPER execution and {baseline} are different strategy paths."
     if status == "RECONCILED":
-        return "RECONCILED; live paper behavior is tracking Shadow Polaris within configured return and holdings thresholds."
+        return f"RECONCILED; PAPER behavior is tracking {baseline} within configured thresholds."
     if status == "MINOR_DRIFT":
-        return "MINOR_DRIFT; live paper behavior is close to Shadow Polaris but outside the strict reconciled band."
+        return f"MINOR_DRIFT; PAPER behavior is close to {baseline} but outside the strict reconciled band."
     if "RETURNS_DRIFT" in reasons and "HOLDINGS_DRIFT" in reasons:
-        return "MAJOR_DRIFT; both returns and holdings diverge from Shadow Polaris."
+        return f"MAJOR_DRIFT; both returns and holdings diverge from {baseline}."
     if "RETURNS_DRIFT" in reasons:
-        return "MAJOR_DRIFT; return path diverges from Shadow Polaris."
+        return f"MAJOR_DRIFT; return path diverges from {baseline}."
     if "HOLDINGS_DRIFT" in reasons:
-        return "MAJOR_DRIFT; live holdings diverge from Shadow Polaris."
+        return f"MAJOR_DRIFT; PAPER holdings diverge from {baseline}."
     return f"{status}; review reason codes."
 
 
@@ -483,6 +640,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     returns = payload.get("returns") or {}
     holdings = payload.get("holdings") or {}
     alignment = payload.get("strategy_alignment") or {}
+    baseline = str(payload.get("shadow_baseline_strategy") or "Governed Shadow")
     lines = [
         "# Live vs Shadow Reconciliation",
         "",
@@ -493,7 +651,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Shadow baseline: {payload.get('shadow_baseline_strategy') or alignment.get('shadow_baseline_strategy') or 'N/A'}",
         f"- Strategy alignment: {alignment.get('status') or 'N/A'}",
         f"- Live return: {_fmt_pct(returns.get('live_cumulative_return'))}",
-        f"- Shadow Polaris return: {_fmt_pct(returns.get('shadow_polaris_cumulative_return'))}",
+        f"- Governed shadow return: {_fmt_pct(returns.get('shadow_polaris_cumulative_return'))}",
         f"- SPY return: {_fmt_pct(returns.get('spy_cumulative_return'))}",
         f"- Live minus Shadow: {_fmt_signed_pct(returns.get('live_minus_shadow_polaris'))}",
         f"- Holdings overlap: {_fmt_pct(holdings.get('overlap_weight'))}",
@@ -508,7 +666,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Interpretation: {alignment.get('message') or 'N/A'}",
         "",
         "## Return Comparison",
-        "| Metric | Live | Shadow Polaris | SPY | Live minus Shadow |",
+        f"| Metric | PAPER | {baseline} | SPY | PAPER minus Shadow |",
         "|---|---:|---:|---:|---:|",
         f"| Daily Return | {_fmt_pct(returns.get('live_daily_return'))} | {_fmt_pct(returns.get('shadow_polaris_daily_return'))} | {_fmt_pct(returns.get('spy_daily_return'))} | N/A |",
         f"| Cumulative Return | {_fmt_pct(returns.get('live_cumulative_return'))} | {_fmt_pct(returns.get('shadow_polaris_cumulative_return'))} | {_fmt_pct(returns.get('spy_cumulative_return'))} | {_fmt_signed_pct(returns.get('live_minus_shadow_polaris'))} |",
@@ -528,7 +686,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         [
             "",
             "## Target vs Target Comparison",
-            "| Symbol | Live Target Weight | Shadow Polaris Weight | Difference | Category |",
+            f"| Symbol | PAPER Target Weight | {baseline} Weight | Difference | Category |",
             "|---|---:|---:|---:|---|",
         ]
     )
@@ -604,7 +762,7 @@ def write_artifacts(payload: dict[str, Any], output_dir: Path) -> tuple[Path, Pa
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Artifact-only live paper vs Shadow Polaris reconciliation.")
+    parser = argparse.ArgumentParser(description="Artifact-only PAPER vs governed-shadow reconciliation.")
     parser.add_argument("--trade-date", required=True)
     parser.add_argument("--shadow-dir", default="outputs/shadow_candidates")
     parser.add_argument("--precompute-dir", default="outputs/precompute")

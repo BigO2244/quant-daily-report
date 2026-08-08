@@ -85,6 +85,79 @@ def _build(tmp_path: Path, payload_path: Path, *, prices: dict[str, float], **kw
     return build_live_pilot_plan(payload_path=payload_path, **defaults)
 
 
+def _orion_shadow(
+    tmp_path: Path,
+    *,
+    trade_date: str = "2026-06-22",
+    weights: dict[str, float] | None = None,
+) -> Path:
+    path = (
+        tmp_path
+        / "outputs"
+        / "shadow_candidates"
+        / trade_date
+        / "caerus_orion.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "strategy_name": "Caerus Orion",
+                "strategy_slug": "caerus_orion",
+                "source_variant": "h2_rank_decay_exit_h6_top5",
+                "trade_date": trade_date,
+                "effective_trade_date": trade_date,
+                "target_weights": weights
+                or {"AAPL": 0.2, "MSFT": 0.2, "JNJ": 0.2, "PNC": 0.2, "SPG": 0.2},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_paper_lane_uses_exact_governed_orion_snapshot(tmp_path: Path) -> None:
+    payload_path = _bundle(
+        tmp_path,
+        signals=[{"ticker": "JNJ", "target_weight": 1.0, "sleeve": "sleeve_quality"}],
+    )
+    source_path = _orion_shadow(tmp_path)
+
+    plan = _build(
+        tmp_path,
+        payload_path,
+        prices={"AAPL": 100.0, "MSFT": 200.0, "JNJ": 150.0, "PNC": 170.0, "SPG": 180.0},
+        approved_sleeve="caerus_orion",
+        lane="paper",
+        shadow_root=tmp_path / "outputs" / "shadow_candidates",
+    )
+
+    assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
+    assert {row["symbol"] for row in plan["target_portfolio"]} == {"AAPL", "MSFT", "JNJ", "PNC", "SPG"}
+    assert plan["decision_source_artifact"]["path"] == str(source_path)
+    assert len(plan["decision_source_artifact"]["sha256"]) == 64
+    assert plan["cash_target_weight"] == pytest.approx(0.05)
+    assert plan["strategy_identity_validation"]["status"] == "PASS"
+    assert plan["execution_lane"] == "paper"
+    assert "ALPACA_PAPER=1" in plan["required_dry_run_command"]
+    assert "ALPACA_BASE_URL=https://paper-api.alpaca.markets" in plan["required_dry_run_command"]
+    assert "ALPACA_BASE_URL=https://api.alpaca.markets" not in plan["required_dry_run_command"]
+    assert "CAERUS_REQUIRE_APPROVED_EXECUTION_PACKAGE=1" in plan["required_live_command"]
+    assert "ALPACA_BASE_URL=https://api.alpaca.markets" not in plan["required_live_command"]
+    decision_path = Path(plan["source_signals"])
+    decision_input = json.loads(decision_path.read_text(encoding="utf-8"))
+    assert decision_input["schema_version"] == "caerus.decision_input.v1"
+    assert decision_input["source_strategy_artifact"]["sha256"] == plan["decision_source_artifact"]["sha256"]
+    assert sum(
+        row["target_weight"]
+        for row in decision_input["signals"]
+        if row["ticker"] != "CASH"
+    ) == pytest.approx(0.95)
+
+
 def test_full_target_all_names_emitted_and_priced(tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path,
@@ -155,7 +228,7 @@ def test_live_lane_blocks_orion_label_when_targets_are_growth_engine(
     assert validation["reason_code"] == "live_pilot_approved_strategy_target_mismatch"
 
 
-def test_paper_recovery_policy_uses_weekly_source_and_cannot_leak_to_live(
+def test_paper_recovery_policy_is_rejected_as_downstream_target_substitution(
     tmp_path: Path,
 ) -> None:
     identity = {
@@ -223,10 +296,8 @@ def test_paper_recovery_policy_uses_weekly_source_and_cannot_leak_to_live(
         factor_history_fetcher=lambda _start, _end: factors,
         output_dir=tmp_path / "outputs" / "paper_lane" / "plans",
     )
-    assert paper_plan["status"] == "READY_FOR_MANUAL_APPROVAL"
-    assert {row["symbol"] for row in paper_plan["target_portfolio"]} == {"AAPL"}
-    assert paper_plan["paper_recovery_policy"]["weekly_decision_date"] == "2026-07-06"
-    assert paper_plan["paper_recovery_policy"]["live_eligible"] is False
+    assert paper_plan["status"] == "BLOCKED"
+    assert paper_plan["reason_code"] == "paper_downstream_target_substitution_disabled"
 
     live_plan = _build(
         tmp_path,
@@ -382,3 +453,5 @@ def test_plan_files_written_and_executor_consumable_shape(tmp_path: Path) -> Non
     for key in ("symbol", "target_weight", "price", "sleeve", "order_type"):
         assert key in row
     assert "CAERUS_LIVE_PILOT_DRY_RUN=0" in written["required_live_command"]
+    assert written["execution_lane"] == "live_pilot"
+    assert "ALPACA_BASE_URL=https://api.alpaca.markets" in written["required_live_command"]

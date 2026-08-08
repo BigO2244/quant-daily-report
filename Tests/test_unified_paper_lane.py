@@ -420,6 +420,33 @@ def test_cron_execute_does_not_export_kill_switch() -> None:
     child process."""
     text = (REPO_ROOT / "scripts" / "cron_execute.sh").read_text(encoding="utf-8")
     assert 'export CAERUS_LIVE_PILOT_KILL_SWITCH' not in text
+    assert 'export CAERUS_REQUIRE_APPROVED_EXECUTION_PACKAGE="1"' in text
+
+
+def test_ci_dry_run_builds_the_canonical_governed_paper_lane() -> None:
+    text = (REPO_ROOT / "scripts" / "ci_dry_run.sh").read_text(encoding="utf-8")
+    assert '--lane paper' in text
+    assert 'CAERUS_LIVE_PILOT_SLEEVE_ID:-caerus_orion' in text
+    assert '--approved-sleeve "${CAERUS_LIVE_PILOT_SLEEVE_ID}"' in text
+
+
+def test_production_paper_gate_rejects_mutable_plan_without_approved_package(
+    tmp_path: Path,
+) -> None:
+    env = _paper_env(dry_run="1")
+    env["CAERUS_REQUIRE_APPROVED_EXECUTION_PACKAGE"] = "1"
+    broker = FakePaperBroker()
+    result = run_live_pilot(
+        plan=_plan(),
+        broker=broker,
+        env=env,
+        run_id="paper-missing-approved-package",
+        output_root=tmp_path / "outputs" / "paper_lane",
+        now_et=_market_open_now(),
+    )
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "approved_execution_package_required"
+    assert broker.submit_calls == 0
 
 
 def test_summary_field_extracts_last_json_object_from_noisy_output(tmp_path: Path) -> None:
@@ -804,6 +831,9 @@ def test_paper_lane_writes_compatible_execution_pointer(tmp_path: Path) -> None:
     assert pointer["run_id"] == "paper-ptr"
     assert pointer["status"] == "success"
     assert (Path(pointer["run_root"]) / "execution_results.json").exists()
+    latest = json.loads((tmp_path / "outputs" / "latest_run.json").read_text())
+    assert latest["run_id"] == "paper-ptr"
+    assert latest["workflow_stage"] == "execution"
 
     # Lane-scoped pointer written beside it.
     lane_pointer = json.loads(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import math
 import os
@@ -38,6 +39,9 @@ DEFAULT_CAPITAL_CAP = LIVE_PILOT_APPROVED_MAX_CAP_USD
 DEFAULT_MAX_ORDERS = 50
 DEFAULT_OUTPUT_DIR = Path("outputs/live_pilot/plans")
 DEFAULT_PRECOMPUTE_ROOT = Path("outputs/precompute")
+DEFAULT_SHADOW_ROOT = Path("outputs/shadow_candidates")
+DEFAULT_STRATEGY_REGISTRY_PATH = Path("config/research/strategy_registry.json")
+DECISION_INPUT_SCHEMA_VERSION = "caerus.decision_input.v1"
 
 # Live-pilot peak-equity state is isolated from paper's state dir. Reusing paper's
 # peak (built from paper's ~$10k equity) against the live account's small portfolio
@@ -64,6 +68,128 @@ def _write_text(path: Path, text: str) -> None:
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     _write_text(path, json.dumps(dict(payload), indent=2, sort_keys=True, default=str) + "\n")
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _canonical_strategy_id(value: object) -> str:
+    raw = str(value or "").strip().lower()
+    return {"orion": "caerus_orion", "polaris": "caerus_polaris"}.get(raw, raw)
+
+
+def _build_paper_decision_input(
+    *,
+    trade_date: str,
+    approved_sleeve: str,
+    output_dir: Path,
+    shadow_root: Path,
+    strategy_registry_path: Path,
+) -> tuple[Path, dict[str, Any]]:
+    """Materialize Decision's immutable PAPER input from the governed Orion snapshot."""
+    from core.strategy_identity import strategy_identity_metadata
+    from core.strategy_registry import load_strategy_registry
+
+    registry = load_strategy_registry(strategy_registry_path)
+    strategy_id = registry.paper_execution_strategy_id()
+    config = registry.paper_execution_config()
+    if _canonical_strategy_id(approved_sleeve) != strategy_id:
+        raise ValueError(
+            f"approved PAPER strategy {_canonical_strategy_id(approved_sleeve)!r} "
+            f"does not match registry authority {strategy_id!r}"
+        )
+    if str(config.get("approval_scope") or "").upper() != "PAPER_ONLY":
+        raise ValueError("paper execution approval_scope must be PAPER_ONLY")
+    if bool(config.get("live_enabled")):
+        raise ValueError("paper execution strategy must not enable live trading")
+    if str(config.get("source_kind") or "") != "shadow_snapshot":
+        raise ValueError("paper execution source_kind must be shadow_snapshot")
+
+    source_path = shadow_root / trade_date / f"{strategy_id}.json"
+    if not source_path.exists():
+        raise FileNotFoundError(f"governed PAPER source artifact missing: {source_path}")
+    source = _read_json(source_path)
+    if not isinstance(source, Mapping):
+        raise ValueError("governed PAPER source artifact must be a JSON object")
+    if str(source.get("trade_date") or "") != trade_date:
+        raise ValueError("governed PAPER source trade_date mismatch")
+    if str(source.get("strategy_slug") or "") != strategy_id:
+        raise ValueError("governed PAPER source strategy_slug mismatch")
+    expected_variant = str(config.get("source_variant") or "")
+    if expected_variant and str(source.get("source_variant") or "") != expected_variant:
+        raise ValueError("governed PAPER source variant mismatch")
+
+    raw_weights = source.get("target_weights")
+    if not isinstance(raw_weights, Mapping) or not raw_weights:
+        raise ValueError("governed PAPER source has no target_weights")
+    normalized: dict[str, float] = {}
+    for raw_symbol, raw_weight in raw_weights.items():
+        symbol = _clean_symbol(raw_symbol)
+        weight = _safe_float(raw_weight)
+        if not _is_supported_equity_symbol(symbol) or weight is None or weight <= 0.0:
+            raise ValueError(f"invalid governed PAPER target weight: {raw_symbol!r}")
+        normalized[symbol] = normalized.get(symbol, 0.0) + float(weight)
+    gross = sum(normalized.values())
+    if gross <= 0.0:
+        raise ValueError("governed PAPER source target gross must be positive")
+    target_cash_weight = _safe_float(config.get("target_cash_weight"))
+    if target_cash_weight is None or not 0.0 <= target_cash_weight < 1.0:
+        raise ValueError("paper target_cash_weight must be in [0, 1)")
+    invested_weight = 1.0 - float(target_cash_weight)
+    signals = [
+        {
+            "ticker": symbol,
+            "target_weight": round(weight / gross * invested_weight, 10),
+            "sleeve": "sleeve_trend",
+            "source_strategy_id": strategy_id,
+            "source_signal_target_weight": float(weight),
+        }
+        for symbol, weight in sorted(normalized.items())
+    ]
+    signals.append({"ticker": "CASH", "target_weight": float(target_cash_weight)})
+    source_hash = _file_sha256(source_path)
+    identity = strategy_identity_metadata(trade_date)
+    identity.update(
+        {
+            "execution_target_strategy_id": strategy_id,
+            "execution_target_source": str(source_path),
+            "execution_target_source_sha256": source_hash,
+            "execution_target_type": "governed_shadow_snapshot",
+            "paper_governed_strategy_id": strategy_id,
+            "paper_mapping_status": "DIRECT_APPROVED_PACKAGE",
+            "paper_tracks_approved_strategy": True,
+            "paper_tracks_shadow_baseline": True,
+        }
+    )
+    decision_input = {
+        "schema_version": DECISION_INPUT_SCHEMA_VERSION,
+        "trade_date": trade_date,
+        "snapshot_date": trade_date,
+        "cash_target_weight": float(target_cash_weight),
+        "signals": signals,
+        "strategy_identity": identity,
+        "source_strategy_artifact": {
+            "path": str(source_path),
+            "sha256": source_hash,
+            "strategy_id": strategy_id,
+            "source_variant": source.get("source_variant"),
+            "trade_date": source.get("trade_date"),
+            "effective_trade_date": source.get("effective_trade_date"),
+            "target_attainment_tolerance": float(
+                config.get("target_attainment_tolerance") or 0.02
+            ),
+        },
+    }
+    decision_dir = output_dir / "decision_inputs" / trade_date
+    decision_path = decision_dir / f"{strategy_id}.json"
+    decision_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(decision_path, decision_input)
+    return decision_path, dict(decision_input["source_strategy_artifact"])
 
 
 def _safe_float(value: object) -> float | None:
@@ -288,6 +414,8 @@ def build_live_pilot_plan(
     recovery_policy: str | None = None,
     recovery_policy_config: Path = Path("config/paper_recovery_policy.json"),
     factor_history_fetcher: Callable[[str, str], pd.DataFrame] | None = None,
+    shadow_root: Path = DEFAULT_SHADOW_ROOT,
+    strategy_registry_path: Path = DEFAULT_STRATEGY_REGISTRY_PATH,
 ) -> dict[str, Any]:
     """Build a FULL rebalance target plan for the live pilot.
 
@@ -316,11 +444,47 @@ def build_live_pilot_plan(
     trade_date = str(payload.get("trade_date") or payload_path.parent.name)
 
     signals_path = _resolve_signals_path(payload_path, payload)
-    if not signals_path.exists():
+    decision_source_artifact: dict[str, Any] | None = None
+    lane_id = str(lane or "").strip().lower()
+    if lane_id == "paper" and recovery_policy:
         return _emit_blocked_plan(
             output_dir=output_dir,
             trade_date=trade_date,
             approved_sleeve=approved_sleeve,
+            lane=lane,
+            capital_cap=float(capital_cap),
+            max_orders=int(max_orders),
+            allow_fractional=bool(allow_fractional),
+            reason_code="paper_downstream_target_substitution_disabled",
+            diagnostics={"recovery_policy": recovery_policy},
+        )
+    if lane_id == "paper":
+        try:
+            signals_path, decision_source_artifact = _build_paper_decision_input(
+                trade_date=trade_date,
+                approved_sleeve=approved_sleeve,
+                output_dir=output_dir,
+                shadow_root=Path(shadow_root),
+                strategy_registry_path=Path(strategy_registry_path),
+            )
+        except Exception as exc:
+            return _emit_blocked_plan(
+                output_dir=output_dir,
+                trade_date=trade_date,
+                approved_sleeve=approved_sleeve,
+                lane=lane,
+                capital_cap=float(capital_cap),
+                max_orders=int(max_orders),
+                allow_fractional=bool(allow_fractional),
+                reason_code="paper_governed_decision_source_invalid",
+                diagnostics={"error": str(exc), "shadow_root": str(shadow_root)},
+            )
+    elif not signals_path.exists():
+        return _emit_blocked_plan(
+            output_dir=output_dir,
+            trade_date=trade_date,
+            approved_sleeve=approved_sleeve,
+            lane=lane,
             capital_cap=float(capital_cap),
             max_orders=int(max_orders),
             allow_fractional=bool(allow_fractional),
@@ -335,6 +499,7 @@ def build_live_pilot_plan(
                 output_dir=output_dir,
                 trade_date=trade_date,
                 approved_sleeve=approved_sleeve,
+                lane=lane,
                 capital_cap=float(capital_cap),
                 max_orders=int(max_orders),
                 allow_fractional=bool(allow_fractional),
@@ -385,6 +550,7 @@ def build_live_pilot_plan(
                 output_dir=output_dir,
                 trade_date=trade_date,
                 approved_sleeve=approved_sleeve,
+                lane=lane,
                 capital_cap=float(capital_cap),
                 max_orders=int(max_orders),
                 allow_fractional=bool(allow_fractional),
@@ -417,6 +583,7 @@ def build_live_pilot_plan(
                 output_dir=output_dir,
                 trade_date=trade_date,
                 approved_sleeve=approved_sleeve,
+                lane=lane,
                 capital_cap=float(capital_cap),
                 max_orders=int(max_orders),
                 allow_fractional=bool(allow_fractional),
@@ -450,6 +617,7 @@ def build_live_pilot_plan(
             output_dir=output_dir,
             trade_date=trade_date,
             approved_sleeve=approved_sleeve,
+            lane=lane,
             capital_cap=float(capital_cap),
             max_orders=int(max_orders),
             allow_fractional=bool(allow_fractional),
@@ -491,6 +659,7 @@ def build_live_pilot_plan(
             output_dir=output_dir,
             trade_date=trade_date,
             approved_sleeve=approved_sleeve,
+            lane=lane,
             capital_cap=float(capital_cap),
             max_orders=int(max_orders),
             allow_fractional=bool(allow_fractional),
@@ -513,6 +682,7 @@ def build_live_pilot_plan(
             output_dir=output_dir,
             trade_date=trade_date,
             approved_sleeve=approved_sleeve,
+            lane=lane,
             capital_cap=float(capital_cap),
             max_orders=int(max_orders),
             allow_fractional=bool(allow_fractional),
@@ -533,6 +703,7 @@ def build_live_pilot_plan(
             output_dir=output_dir,
             trade_date=trade_date,
             approved_sleeve=approved_sleeve,
+            lane=lane,
             capital_cap=float(capital_cap),
             max_orders=int(max_orders),
             allow_fractional=bool(allow_fractional),
@@ -551,8 +722,8 @@ def build_live_pilot_plan(
     )
     from authority.pipeline import execution_package_from_risk
 
-    lane_id = str(lane or "manual")
-    authority_stem = f"{trade_date}:{lane_id}:{approved_sleeve}"
+    authority_lane_id = str(lane or "manual")
+    authority_stem = f"{trade_date}:{authority_lane_id}:{approved_sleeve}"
     decision_target_rows = [
         {
             "symbol": _clean_symbol(row.get("ticker")),
@@ -564,7 +735,15 @@ def build_live_pilot_plan(
     evidence = build_evidence_package(
         package_id=f"evidence:{authority_stem}",
         trade_date=trade_date,
-        source_refs=(str(signals_path), str(payload_path)),
+        source_refs=(
+            str(signals_path),
+            str(payload_path),
+            *(
+                (f"sha256:{decision_source_artifact['sha256']}",)
+                if decision_source_artifact
+                else ()
+            ),
+        ),
         observations=decision_target_rows,
     )
     decision = build_decision_package(
@@ -573,7 +752,15 @@ def build_live_pilot_plan(
         evidence=evidence,
         target_rows=decision_target_rows,
         target_cash_weight=float(cash_target_weight),
-        source_refs=(str(signals_path), str(payload_path)),
+        source_refs=(
+            str(signals_path),
+            str(payload_path),
+            *(
+                (f"sha256:{decision_source_artifact['sha256']}",)
+                if decision_source_artifact
+                else ()
+            ),
+        ),
     )
     risk = build_risk_package(
         package_id=f"risk:{authority_stem}",
@@ -604,6 +791,7 @@ def build_live_pilot_plan(
     plan = _plan_scaffold(
         trade_date=trade_date,
         approved_sleeve=approved_sleeve,
+        lane=lane,
         capital_cap=float(capital_cap),
         max_orders=int(max_orders),
         allow_missing_sleeve=bool(allow_missing_sleeve),
@@ -628,6 +816,11 @@ def build_live_pilot_plan(
                 "reason_code": "lane_not_supplied_to_builder",
             },
             "paper_recovery_policy": recovery_policy_meta,
+            "decision_source_artifact": decision_source_artifact,
+            "target_attainment_tolerance": float(
+                (decision_source_artifact or {}).get("target_attainment_tolerance")
+                or 0.02
+            ),
             "approved_execution_package": execution.to_dict(),
             "authority_package_paths": {
                 name: str(path) for name, path in authority_paths.items()
@@ -649,6 +842,7 @@ def _plan_scaffold(
     *,
     trade_date: str,
     approved_sleeve: str,
+    lane: str | None,
     capital_cap: float,
     max_orders: int,
     allow_missing_sleeve: bool,
@@ -658,19 +852,34 @@ def _plan_scaffold(
     signals_path: Path,
 ) -> dict[str, Any]:
     plan_path = output_dir / f"live_pilot_plan_{trade_date}.json"
+    lane_id = str(lane or "live_pilot").strip().lower()
+    paper_lane = lane_id == "paper"
+    environment_prefix = (
+        "MODE=paper TRADING_MODE=paper WORKFLOW_KIND=paper ALPACA_PAPER=1 "
+        "ALPACA_BASE_URL=https://paper-api.alpaca.markets "
+        if paper_lane
+        else "TRADING_MODE=live_pilot ALPACA_PAPER=0 ALPACA_BASE_URL=https://api.alpaca.markets "
+    )
+    approved_package_gate = (
+        "CAERUS_REQUIRE_APPROVED_EXECUTION_PACKAGE=1 " if paper_lane else ""
+    )
     dry_run_command = (
-        "TRADING_MODE=live_pilot ALPACA_PAPER=0 ALPACA_BASE_URL=https://api.alpaca.markets "
-        f"CAERUS_LIVE_PILOT_APPROVED=1 CAERUS_LIVE_PILOT_CAPITAL_CAP={float(capital_cap):g} "
+        environment_prefix
+        + f"CAERUS_LIVE_PILOT_APPROVED=1 CAERUS_LIVE_PILOT_CAPITAL_CAP={float(capital_cap):g} "
         f"CAERUS_LIVE_PILOT_SLEEVE_ID={approved_sleeve} "
         "CAERUS_LIVE_PILOT_ACCOUNT_ID_HASH=<SHA256_ACCOUNT_ID> "
         f"CAERUS_LIVE_PILOT_MAX_ORDERS={int(max_orders)} "
         f"CAERUS_LIVE_PILOT_ALLOW_MISSING_SLEEVE={1 if allow_missing_sleeve else 0} "
-        f"CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL={1 if allow_fractional else 0} CAERUS_LIVE_PILOT_DRY_RUN=1 "
+        f"CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL={1 if allow_fractional else 0} "
+        f"{approved_package_gate}CAERUS_LIVE_PILOT_DRY_RUN=1 "
         f".venv/bin/python3 scripts/live_pilot_execute.py --plan {plan_path.as_posix()}"
     )
-    live_command = dry_run_command.replace("CAERUS_LIVE_PILOT_DRY_RUN=1", "CAERUS_LIVE_PILOT_DRY_RUN=0")
+    submit_command = dry_run_command.replace(
+        "CAERUS_LIVE_PILOT_DRY_RUN=1", "CAERUS_LIVE_PILOT_DRY_RUN=0"
+    )
     return {
         "schema_version": PLAN_SCHEMA_VERSION,
+        "execution_lane": lane_id,
         "generated_at": _now_utc(),
         "source_precompute_payload": str(payload_path),
         "source_signals": str(signals_path),
@@ -681,7 +890,11 @@ def _plan_scaffold(
         "allow_missing_sleeve": bool(allow_missing_sleeve),
         "allow_fractional": bool(allow_fractional),
         "order_policy": {
-            "scope": "FR-104 LIVE_PILOT full rebalance",
+            "scope": (
+                "governed PAPER full rebalance"
+                if paper_lane
+                else "FR-104 LIVE_PILOT full rebalance"
+            ),
             "model": "rebalance_to_risk_adjusted_target_weight",
             "order_type": "market",
             "time_in_force": "day",
@@ -689,10 +902,15 @@ def _plan_scaffold(
             "buys_capped_by": "CAERUS_LIVE_PILOT_MAX_ORDERS",
             "sells_gated_by": "CAERUS_LIVE_PILOT_SELLS_ENABLED + sell whitelist/wildcard",
             "sizing": "live portfolio value via execution core (same engine as paper)",
-            "paper_or_production_impact": "none",
+            "paper_or_production_impact": (
+                "PAPER only; live capital prohibited" if paper_lane else "none"
+            ),
         },
         "required_dry_run_command": dry_run_command,
-        "required_live_command": live_command,
+        # Retained for v2 schema compatibility. On a PAPER plan this is the
+        # PAPER submit command and never references the live broker endpoint.
+        "required_live_command": submit_command,
+        "required_submit_command": submit_command,
         "operator_confirmation": {
             "approved_sleeve": approved_sleeve,
             "capital_cap": float(capital_cap),
@@ -710,6 +928,7 @@ def _emit_blocked_plan(
     output_dir: Path,
     trade_date: str,
     approved_sleeve: str,
+    lane: str | None = None,
     capital_cap: float,
     max_orders: int,
     allow_fractional: bool,
@@ -720,6 +939,7 @@ def _emit_blocked_plan(
     plan = _plan_scaffold(
         trade_date=trade_date,
         approved_sleeve=approved_sleeve,
+        lane=lane,
         capital_cap=float(capital_cap),
         max_orders=int(max_orders),
         allow_missing_sleeve=False,
@@ -812,6 +1032,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     source.add_argument("--payload-path", default=None, help="Explicit planned_execution_payload.json path")
     source.add_argument("--trade-date", default=None, help="Trade date under outputs/precompute/<DATE>")
     parser.add_argument("--precompute-root", default=str(DEFAULT_PRECOMPUTE_ROOT))
+    parser.add_argument("--shadow-root", default=str(DEFAULT_SHADOW_ROOT))
+    parser.add_argument(
+        "--strategy-registry-path",
+        default=str(DEFAULT_STRATEGY_REGISTRY_PATH),
+    )
     parser.add_argument("--approved-sleeve", required=True)
     parser.add_argument(
         "--lane",
@@ -878,6 +1103,8 @@ def main(argv: list[str] | None = None) -> int:
         lane=args.lane,
         recovery_policy=args.recovery_policy,
         recovery_policy_config=Path(args.recovery_policy_config),
+        shadow_root=Path(args.shadow_root),
+        strategy_registry_path=Path(args.strategy_registry_path),
     )
     print(
         json.dumps(
