@@ -645,6 +645,8 @@ def test_core_routed_live_rotation_sells_settles_rebudgets_and_buys(tmp_path: Pa
     broker = RotatingFakeBroker(sell_fills=True)
     env = _env(dry_run="0", max_orders="1")
     env["CAERUS_LIVE_PILOT_SELL_WHITELIST"] = "OLD"
+    # Even an inherited PAPER-only flag must not weaken the live endpoint's GFV clamp.
+    env["CAERUS_PAPER_REUSE_CONFIRMED_SELL_PROCEEDS"] = "1"
 
     result = run_live_pilot(
         plan=_rotation_plan(),
@@ -675,6 +677,12 @@ def test_core_routed_live_rotation_sells_settles_rebudgets_and_buys(tmp_path: Pa
     assert capital_gate["post_sell_buy_budget"]["buy_budget_after_safeguards"] == (250.0 - 100.0) * 0.98
     assert capital_gate["post_sell_buy_budget"]["settled_cash_guard"]["buy_buffer_pct"] == 0.98
     assert capital_gate["post_sell_buy_budget"]["settled_cash_guard"]["settled_cash"] == 150.0
+    assert (
+        capital_gate["post_sell_buy_budget"]["settled_cash_guard"][
+            "execution_spendable_cash"
+        ]
+        is None
+    )
 
 
 def test_sell_inventory_is_rechecked_immediately_before_fake_submission(tmp_path: Path) -> None:

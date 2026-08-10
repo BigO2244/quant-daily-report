@@ -28,6 +28,7 @@ from core.live_pilot_guardrails import (
     PAPER_MODE,
     LIVE_PILOT_MAX_SLIPPAGE_BPS_ENV,
     _is_live_host,
+    _is_paper_host,
     account_id_hash,
     build_live_pilot_gate_result,
     expected_account_matches,
@@ -221,11 +222,12 @@ LIVE_PILOT_SETTLEMENT_DEFAULT_BASE_DELAY_SECONDS = 2.0
 LIVE_PILOT_SETTLEMENT_DEFAULT_MAX_DELAY_SECONDS = 30.0
 LIVE_PILOT_SETTLEMENT_REFLECTION_FACTOR = 0.95
 LIVE_PILOT_SETTLEMENT_DOLLAR_TOLERANCE = 0.01
+PAPER_CONFIRMED_PROCEEDS_REUSE_ENV = "CAERUS_PAPER_REUSE_CONFIRMED_SELL_PROCEEDS"
 
 # Settled-cash / GFV guard (PRE_ARM_SWEEP Blocker #2). US equities settle T+1; Alpaca
-# credits sale proceeds to cash immediately though unsettled. The buy budget is clamped
-# to settled cash (broker cash - unsettled sale proceeds from filled sell history) times
-# a slippage buffer so no buy ever spends unsettled funds (=> no lot is GFV-vulnerable).
+# credits sale proceeds to cash immediately though unsettled. Live-capital buys remain
+# clamped to settled cash (broker cash - unsettled sale proceeds) times a slippage
+# buffer. The separately pinned PAPER lane may reuse only current-run confirmed fills.
 LIVE_PILOT_BUY_BUFFER_PCT_ENV = "CAERUS_LIVE_PILOT_BUY_BUFFER_PCT"
 LIVE_PILOT_BUY_BUFFER_PCT_DEFAULT = 0.98
 LIVE_PILOT_SETTLED_CASH_LOOKBACK_ENV = "CAERUS_LIVE_PILOT_SETTLED_CASH_ORDER_LOOKBACK"
@@ -336,6 +338,7 @@ CAPITAL_GATE_REPORT_KEYS = (
     "tradable_capital_usd",
     "buy_block_reason",
     "settled_cash_usd",
+    "execution_spendable_cash_usd",
     "unsettled_proceeds_usd",
     "buy_buffer_pct",
     "settled_cash_fail_closed",
@@ -930,6 +933,7 @@ def _settled_cash_gate_fields(capital_budget: Mapping[str, Any] | None) -> dict[
         unsettled = max(0.0, float(broker_cash) - float(settled))
     return {
         "settled_cash_usd": settled,
+        "execution_spendable_cash_usd": guard.get("execution_spendable_cash"),
         "unsettled_proceeds_usd": unsettled,
         "buy_buffer_pct": guard.get("buy_buffer_pct"),
         "settled_cash_fail_closed": bool(guard.get("settled_cash_fail_closed")),
@@ -1955,6 +1959,16 @@ class LivePilotCoreAdapter:
         self.pre_sell_account = dict(pre_sell_account or {})
         self.source_by_symbol = _plan_rows_by_symbol(source_plan or {})
         self.trade_date = str(trade_date or "")
+        self.execution_mode = _derive_execution_mode(run_root)
+        reuse_policy = _parse_optional_policy_bool(
+            env.get(PAPER_CONFIRMED_PROCEEDS_REUSE_ENV)
+        )
+        self.reuse_confirmed_sell_proceeds = bool(
+            reuse_policy is True
+            and self.execution_mode == PAPER_MODE.upper()
+            and bool(getattr(broker, "paper", False))
+            and _is_paper_host(str(getattr(broker, "base_url", "") or ""))
+        )
         self.submitted_rows: list[dict[str, Any]] = []
         self.submit_errors: list[str] = []
         self._sequence = 0
@@ -2144,8 +2158,8 @@ class LivePilotCoreAdapter:
         positions = self.broker.get_positions() if hasattr(self.broker, "get_positions") else []
         # PRIMARY GFV DEFENSE: recompute settled cash from CURRENT broker truth. After
         # sells fill, broker cash includes today's freshly credited (but unsettled)
-        # proceeds; the post-sell rebudget must clamp to settled cash so no buy spends
-        # them. Stamp settled_cash onto the account the core budget functions read.
+        # proceeds. Live capital remains clamped to settled cash; the explicitly pinned
+        # PAPER lane may add only this run's confirmed fills to its execution ceiling.
         settled_result, _orders, availability = _settled_cash_context(
             self.broker,
             broker_cash=account.get("cash"),
@@ -2156,8 +2170,42 @@ class LivePilotCoreAdapter:
         account["settled_cash"] = float(settled_result.settled_cash)
         account["settled_cash_fail_closed"] = bool(settled_result.fail_closed)
         settled_report = settled_result.to_report()
+        confirmed_proceeds = float(
+            sum(
+                max(0.0, float(row.get("proceeds") or 0.0))
+                for row in self._confirmed_sell_fills
+            )
+        )
+        broker_cash = _finite_float(account.get("cash"))
+        execution_spendable_cash: float | None = None
+        if (
+            self.reuse_confirmed_sell_proceeds
+            and not settled_result.fail_closed
+            and broker_cash is not None
+        ):
+            # PAPER-only correction: a fully confirmed current-run sell may fund the
+            # mechanical buy phase after broker cash and buying power reflect it. Keep
+            # any unrelated unsettled proceeds excluded by adding only this run's
+            # confirmed fills to the regulatory settled-cash ledger, capped by broker
+            # cash. The live-capital lane never sets this override.
+            execution_spendable_cash = min(
+                max(0.0, float(broker_cash)),
+                max(0.0, float(settled_result.settled_cash)) + confirmed_proceeds,
+            )
+            account["execution_spendable_cash"] = execution_spendable_cash
+            account["execution_spendable_cash_source"] = (
+                "paper_settled_plus_confirmed_current_run_sells"
+            )
         settled_report["order_history_availability"] = availability
         settled_report["phase"] = "post_sell"
+        settled_report["confirmed_current_run_sell_proceeds"] = confirmed_proceeds
+        settled_report["confirmed_proceeds_reuse_enabled"] = bool(
+            self.reuse_confirmed_sell_proceeds
+        )
+        settled_report["execution_spendable_cash"] = execution_spendable_cash
+        settled_report["execution_spendable_cash_source"] = account.get(
+            "execution_spendable_cash_source"
+        )
         self.settled_cash_post_sell = settled_report
         return CoreAccountSnapshot(
             account=account,

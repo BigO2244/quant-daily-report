@@ -109,6 +109,16 @@ export CAERUS_LIVE_PILOT_SELL_WHITELIST="*"
 # ancestry, so this flag is inert on the real-money live-pilot lane.
 export CAERUS_PAPER_FRACTIONAL_EXIT_ENABLED="1"
 export CAERUS_PAPER_FRACTIONAL_EXIT_MIN_NOTIONAL_USD="1.00"
+# PAPER sell-first rotation contract: poll for up to two minutes for every sell
+# to become terminal and for broker cash/buying power to reflect confirmed fills.
+# Once clean, only the current run's confirmed proceeds may augment the buy cash
+# ceiling. The shared executor additionally requires PAPER mode + paper endpoint,
+# so none of these pins can weaken the real-money settled-cash/GFV guard.
+export CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS="120"
+export CAERUS_LIVE_PILOT_SETTLEMENT_MAX_ATTEMPTS="61"
+export CAERUS_LIVE_PILOT_SETTLEMENT_BASE_DELAY_SECONDS="2"
+export CAERUS_LIVE_PILOT_SETTLEMENT_MAX_DELAY_SECONDS="2"
+export CAERUS_PAPER_REUSE_CONFIRMED_SELL_PROCEEDS="1"
 # Approval-style gates: set inline =1 for paper. WHY: these flags exist to force
 # a HUMAN arming step before real-money submission on the live lane. The paper
 # lane submits only to the paper endpoint (asserted above; the gate stack and the

@@ -15,6 +15,15 @@ packages fail closed. An explicit empty package remains an approved no-action
 decision. Audit records observed orders and lineage findings without changing
 any upstream package.
 
+The PAPER Trader executes rotations in two mechanical phases without changing
+Decision targets: submit approved sells, poll for at most 120 seconds until all
+sells are terminal and broker cash/buying power reflect confirmed fills, then
+rebuild approved buys against actual post-sell holdings and funds. Only proceeds
+from current-run confirmed PAPER fills may augment the execution cash ceiling;
+partial, open, rejected, or unreflected sells keep the buy phase closed. The
+live-capital lane retains the stricter settled-cash/GFV clamp and cannot inherit
+the PAPER proceeds-reuse policy.
+
 The existing legacy execution callers remain compatible while migration is
 staged. New callers should pass `ExecutionRequest.approved_execution_package`
 and use `authority.pipeline.execution_package_from_risk`.
