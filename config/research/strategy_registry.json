@@ -94,6 +94,8 @@
         "enabled": true,
         "source_kind": "shadow_snapshot",
         "source_variant": "h2_rank_decay_exit_h6_top5",
+        "source_session_policy": "SAME_OR_PREVIOUS_TRADING_SESSION",
+        "max_source_trading_session_lag": 1,
         "target_cash_weight": 0.05,
         "target_attainment_tolerance": 0.02,
         "owner_approved_at": "2026-08-08",
