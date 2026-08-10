@@ -23,3 +23,10 @@ and use `authority.pipeline.execution_package_from_risk`.
 payload and writes the complete evidence, decision, risk, and execution chain.
 The unified plan builder embeds the risk-approved target and cash package; the
 Trader derives broker transitions mechanically from only that verified package.
+
+For pre-open PAPER execution, Decision accepts Orion evidence only from the
+current XNYS session or the immediately preceding XNYS session. The original
+source date, path, and SHA-256 remain unchanged in lineage while the Decision
+and Execution packages use the current session as their effective trade date.
+This bounded market-calendar rule is not a latest-file fallback: missing,
+malformed, or older snapshots fail closed.

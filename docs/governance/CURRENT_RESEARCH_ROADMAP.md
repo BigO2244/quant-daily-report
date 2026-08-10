@@ -60,9 +60,11 @@ editing code or specs.
   forward broker/operational evidence only when explicitly approved; it is not
   production, not dynamic allocation, and not proof of promotion readiness. No
   shorting, no leverage.
-- **Active PAPER strategy:** Caerus Orion (`caerus_orion`), sourced from the exact
-  same-day `h2_rank_decay_exit_h6_top5` shadow snapshot, with 5% target cash and
-  2% target-attainment tolerance. Execution requires a hash-verified approved package.
+- **Active PAPER strategy:** Caerus Orion (`caerus_orion`), sourced from the
+  `h2_rank_decay_exit_h6_top5` shadow snapshot for the current or immediately
+  preceding XNYS session, with 5% target cash and 2% target-attainment tolerance.
+  The original source date/path/hash are preserved; execution requires a
+  hash-verified approved package for the current session.
 - **Historical research control:** Caerus Polaris (`caerus_polaris`), retained in
   daily shadow comparison and research reporting but without PAPER authority.
 - **Shadow tracking:** Polaris, Orion, Lyra, Polaris_Alpha, Orion_Alpha. SPY = benchmark.

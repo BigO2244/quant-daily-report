@@ -151,11 +151,90 @@ def test_paper_lane_uses_exact_governed_orion_snapshot(tmp_path: Path) -> None:
     decision_input = json.loads(decision_path.read_text(encoding="utf-8"))
     assert decision_input["schema_version"] == "caerus.decision_input.v1"
     assert decision_input["source_strategy_artifact"]["sha256"] == plan["decision_source_artifact"]["sha256"]
+    assert decision_input["source_strategy_artifact"]["source_trade_date"] == "2026-06-22"
+    assert decision_input["source_strategy_artifact"]["decision_trade_date"] == "2026-06-22"
+    assert decision_input["source_strategy_artifact"]["source_trading_session_lag"] == 0
     assert sum(
         row["target_weight"]
         for row in decision_input["signals"]
         if row["ticker"] != "CASH"
     ) == pytest.approx(0.95)
+
+
+def test_paper_lane_uses_immediately_previous_trading_session_snapshot(
+    tmp_path: Path,
+) -> None:
+    trade_date = "2026-08-10"  # Monday
+    payload_path = _bundle(tmp_path, signals=[], trade_date=trade_date)
+    source_path = _orion_shadow(tmp_path, trade_date="2026-08-07")
+
+    plan = _build(
+        tmp_path,
+        payload_path,
+        prices={"AAPL": 100.0, "MSFT": 200.0, "JNJ": 150.0, "PNC": 170.0, "SPG": 180.0},
+        approved_sleeve="caerus_orion",
+        lane="paper",
+        shadow_root=tmp_path / "outputs" / "shadow_candidates",
+    )
+
+    assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
+    source = plan["decision_source_artifact"]
+    assert source["path"] == str(source_path)
+    assert source["source_trade_date"] == "2026-08-07"
+    assert source["source_effective_trade_date"] == "2026-08-07"
+    assert source["decision_trade_date"] == trade_date
+    assert source["effective_trade_date"] == trade_date
+    assert source["source_trading_session_lag"] == 1
+    assert source["source_session_policy"] == "SAME_OR_PREVIOUS_TRADING_SESSION"
+    assert len(source["sha256"]) == 64
+    identity = json.loads(Path(plan["source_signals"]).read_text())["strategy_identity"]
+    assert identity["execution_target_source"] == str(source_path)
+    assert identity["shadow_baseline_source"] == str(source_path)
+    assert identity["shadow_baseline_source_sha256"] == source["sha256"]
+    assert identity["shadow_baseline_source_trade_date"] == "2026-08-07"
+
+
+def test_paper_lane_rejects_snapshot_older_than_previous_trading_session(
+    tmp_path: Path,
+) -> None:
+    trade_date = "2026-08-10"  # Monday; Friday is the only permitted prior session.
+    payload_path = _bundle(tmp_path, signals=[], trade_date=trade_date)
+    _orion_shadow(tmp_path, trade_date="2026-08-06")
+
+    plan = _build(
+        tmp_path,
+        payload_path,
+        prices={},
+        approved_sleeve="caerus_orion",
+        lane="paper",
+        shadow_root=tmp_path / "outputs" / "shadow_candidates",
+    )
+
+    assert plan["status"] == "BLOCKED"
+    assert plan["reason_code"] == "paper_governed_decision_source_invalid"
+    assert "2026-08-07" in plan["block_diagnostics"]["error"]
+
+
+def test_paper_lane_previous_session_rule_skips_exchange_holiday(
+    tmp_path: Path,
+) -> None:
+    trade_date = "2026-09-08"  # Tuesday after Labor Day.
+    payload_path = _bundle(tmp_path, signals=[], trade_date=trade_date)
+    source_path = _orion_shadow(tmp_path, trade_date="2026-09-04")
+
+    plan = _build(
+        tmp_path,
+        payload_path,
+        prices={"AAPL": 100.0, "MSFT": 200.0, "JNJ": 150.0, "PNC": 170.0, "SPG": 180.0},
+        approved_sleeve="caerus_orion",
+        lane="paper",
+        shadow_root=tmp_path / "outputs" / "shadow_candidates",
+    )
+
+    assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
+    assert plan["decision_source_artifact"]["path"] == str(source_path)
+    assert plan["decision_source_artifact"]["source_trade_date"] == "2026-09-04"
+    assert plan["decision_source_artifact"]["source_trading_session_lag"] == 1
 
 
 def test_full_target_all_names_emitted_and_priced(tmp_path: Path) -> None:

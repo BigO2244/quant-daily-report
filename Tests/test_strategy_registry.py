@@ -27,6 +27,11 @@ def test_default_registry_preserves_current_active_shadow_strategies() -> None:
     assert registry.baseline_strategy_id() == "caerus_polaris"
     assert registry.paper_execution_strategy_id() == "caerus_orion"
     assert registry.paper_execution_config()["target_cash_weight"] == 0.05
+    assert (
+        registry.paper_execution_config()["source_session_policy"]
+        == "SAME_OR_PREVIOUS_TRADING_SESSION"
+    )
+    assert registry.paper_execution_config()["max_source_trading_session_lag"] == 1
     assert registry.promotion_candidate_ids() == (
         "caerus_polaris_alpha",
         "caerus_orion_alpha",

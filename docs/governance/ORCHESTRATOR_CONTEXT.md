@@ -24,8 +24,10 @@ Caerus is a paper-traded quantitative investment platform with deterministic
 artifacts and an explicit research-to-production promotion ladder.
 
 - Orion is the current PAPER-only execution authority under the owner decision
-  recorded 2026-08-08. Decision consumes its exact same-day governed shadow
-  snapshot, Risk may only constrain, and Trader consumes only the approved package.
+  recorded 2026-08-08. Decision consumes its governed shadow snapshot from the
+  current or immediately preceding XNYS session while preserving the exact
+  source date/path/hash. Risk may only constrain, and Trader consumes only the
+  approved package.
 - Polaris remains the historical research baseline and daily shadow comparison control.
 - Lyra is the shadow challenger.
 - SPY is the benchmark anchor.

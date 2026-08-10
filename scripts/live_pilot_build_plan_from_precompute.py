@@ -83,6 +83,51 @@ def _canonical_strategy_id(value: object) -> str:
     return {"orion": "caerus_orion", "polaris": "caerus_polaris"}.get(raw, raw)
 
 
+def _governed_paper_source_path(
+    *,
+    trade_date: str,
+    strategy_id: str,
+    shadow_root: Path,
+    config: Mapping[str, Any],
+) -> tuple[Path, str, int]:
+    """Resolve only the current or immediately prior governed market session.
+
+    Pre-open execution normally has no snapshot for the session that is about to
+    trade. In that case Decision may consume the immutable snapshot from the
+    immediately preceding XNYS session. This is an explicit freshness contract,
+    not a latest-file fallback: older artifacts and non-session execution dates
+    fail closed.
+    """
+    from paper.trading_calendar import is_trading_day, prev_trading_day
+
+    policy = str(config.get("source_session_policy") or "").strip().upper()
+    if policy != "SAME_OR_PREVIOUS_TRADING_SESSION":
+        raise ValueError(
+            "paper source_session_policy must be SAME_OR_PREVIOUS_TRADING_SESSION"
+        )
+    try:
+        max_lag = int(config.get("max_source_trading_session_lag"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("paper max_source_trading_session_lag must be 1") from exc
+    if max_lag != 1:
+        raise ValueError("paper max_source_trading_session_lag must be 1")
+    if not is_trading_day(trade_date):
+        raise ValueError(f"PAPER trade date is not an XNYS trading session: {trade_date}")
+
+    exact_path = shadow_root / trade_date / f"{strategy_id}.json"
+    if exact_path.exists():
+        return exact_path, trade_date, 0
+
+    source_trade_date = prev_trading_day(trade_date)
+    prior_path = shadow_root / source_trade_date / f"{strategy_id}.json"
+    if prior_path.exists():
+        return prior_path, source_trade_date, 1
+    raise FileNotFoundError(
+        "governed PAPER source artifact missing for both allowed sessions: "
+        f"{exact_path}, {prior_path}"
+    )
+
+
 def _build_paper_decision_input(
     *,
     trade_date: str,
@@ -110,14 +155,24 @@ def _build_paper_decision_input(
     if str(config.get("source_kind") or "") != "shadow_snapshot":
         raise ValueError("paper execution source_kind must be shadow_snapshot")
 
-    source_path = shadow_root / trade_date / f"{strategy_id}.json"
-    if not source_path.exists():
-        raise FileNotFoundError(f"governed PAPER source artifact missing: {source_path}")
+    source_path, source_trade_date, source_session_lag = (
+        _governed_paper_source_path(
+            trade_date=trade_date,
+            strategy_id=strategy_id,
+            shadow_root=shadow_root,
+            config=config,
+        )
+    )
     source = _read_json(source_path)
     if not isinstance(source, Mapping):
         raise ValueError("governed PAPER source artifact must be a JSON object")
-    if str(source.get("trade_date") or "") != trade_date:
+    if str(source.get("trade_date") or "") != source_trade_date:
         raise ValueError("governed PAPER source trade_date mismatch")
+    source_effective_trade_date = str(
+        source.get("effective_trade_date") or source_trade_date
+    )
+    if source_effective_trade_date != source_trade_date:
+        raise ValueError("governed PAPER source effective_trade_date mismatch")
     if str(source.get("strategy_slug") or "") != strategy_id:
         raise ValueError("governed PAPER source strategy_slug mismatch")
     expected_variant = str(config.get("source_variant") or "")
@@ -164,6 +219,9 @@ def _build_paper_decision_input(
             "paper_mapping_status": "DIRECT_APPROVED_PACKAGE",
             "paper_tracks_approved_strategy": True,
             "paper_tracks_shadow_baseline": True,
+            "shadow_baseline_source": str(source_path),
+            "shadow_baseline_source_sha256": source_hash,
+            "shadow_baseline_source_trade_date": source_trade_date,
         }
     )
     decision_input = {
@@ -178,8 +236,13 @@ def _build_paper_decision_input(
             "sha256": source_hash,
             "strategy_id": strategy_id,
             "source_variant": source.get("source_variant"),
-            "trade_date": source.get("trade_date"),
-            "effective_trade_date": source.get("effective_trade_date"),
+            "trade_date": source_trade_date,
+            "source_trade_date": source_trade_date,
+            "source_effective_trade_date": source_effective_trade_date,
+            "decision_trade_date": trade_date,
+            "effective_trade_date": trade_date,
+            "source_session_policy": config.get("source_session_policy"),
+            "source_trading_session_lag": source_session_lag,
             "target_attainment_tolerance": float(
                 config.get("target_attainment_tolerance") or 0.02
             ),
