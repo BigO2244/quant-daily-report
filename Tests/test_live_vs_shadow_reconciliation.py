@@ -246,6 +246,72 @@ def test_first_orion_run_is_green_initializing_when_package_lineage_and_target_a
     assert "TARGET_ATTAINED" in payload["reason_codes"]
 
 
+def test_prior_session_decision_source_drives_shadow_reconciliation(
+    tmp_path: Path,
+) -> None:
+    trade_date = "2026-08-10"
+    source_date = "2026-08-07"
+    shadow_dir = tmp_path / "outputs" / "shadow_candidates"
+    _write_shadow_day(
+        shadow_dir,
+        source_date,
+        polaris_return=0.01,
+        spy_return=0.001,
+        weights={"AAA": 0.5, "BBB": 0.5},
+    )
+    source_path = shadow_dir / source_date / "caerus_orion.json"
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    positions = tmp_path / "positions.json"
+    _write_positions(positions, {"AAA": 0.5, "BBB": 0.5})
+    run_root = tmp_path / "outputs" / "paper_lane" / "runs" / "orion-monday"
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "approved_execution_package": {
+                "content_hash": "approved-hash",
+                "approved_target_rows": [
+                    {"symbol": "AAA", "target_weight": 0.5},
+                    {"symbol": "BBB", "target_weight": 0.5},
+                ],
+                "approved_cash_weight": 0.0,
+            },
+            "decision_source_artifact": {
+                "path": str(source_path.relative_to(tmp_path)),
+                "sha256": source_hash,
+                "strategy_id": "caerus_orion",
+                "trade_date": source_date,
+                "source_trade_date": source_date,
+                "decision_trade_date": trade_date,
+                "effective_trade_date": trade_date,
+                "source_trading_session_lag": 1,
+            },
+        },
+    )
+    _write_json(
+        run_root / "audit" / f"execution_target_attainment_{trade_date}.json",
+        {"status": "OK_TARGET_ATTAINED"},
+    )
+    _write_json(
+        tmp_path / "outputs" / "workflow" / trade_date / "execution.json",
+        {"trade_date": trade_date, "run_root": str(run_root), "status": "success"},
+    )
+
+    payload = build_reconciliation(
+        trade_date=trade_date,
+        shadow_dir=shadow_dir,
+        precompute_dir=tmp_path / "outputs" / "precompute",
+        live_nav_path=tmp_path / "missing.csv",
+        broker_positions_path=positions,
+    )
+
+    assert payload["status"] == "ALIGNED_INITIALIZING"
+    assert payload["sources"]["shadow_baseline_path"] == str(source_path)
+    assert payload["immutable_lineage"]["verified"] is True
+    assert payload["immutable_lineage"]["decision_source_expected_sha256"] == source_hash
+    assert payload["immutable_lineage"]["shadow_source_actual_sha256"] == source_hash
+    assert payload["target_vs_target"]["overlap_weight"] == 1.0
+
+
 def test_not_comparable_due_to_missing_shadow_data(tmp_path: Path) -> None:
     live_nav = tmp_path / "live_nav.csv"
     _write_live_nav(live_nav, [("2026-04-23", 0.01), ("2026-04-24", 0.01)])
