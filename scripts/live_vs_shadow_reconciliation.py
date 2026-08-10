@@ -237,11 +237,35 @@ def _load_shadow_weights(
     shadow_dir: Path,
     trade_date: str,
     strategy_id: str,
+    *,
+    source_meta: dict[str, Any] | None = None,
+    repo_root: Path | None = None,
 ) -> tuple[dict[str, float], str | None]:
-    path = shadow_dir / trade_date / f"{strategy_id}.json"
+    source = dict(source_meta or {})
+    if source:
+        raw_path = str(source.get("path") or "").strip()
+        if not raw_path:
+            return {}, None
+        path = Path(raw_path)
+        if not path.is_absolute():
+            if repo_root is None:
+                return {}, None
+            path = repo_root / path
+    else:
+        path = shadow_dir / trade_date / f"{strategy_id}.json"
     payload = _read_json(path)
     if not payload:
         return {}, None
+    if str(payload.get("strategy_slug") or strategy_id) != strategy_id:
+        return {}, None
+    if source:
+        expected_date = str(
+            source.get("source_trade_date")
+            or source.get("trade_date")
+            or trade_date
+        )
+        if str(payload.get("trade_date") or "") != expected_date:
+            return {}, None
     weights = {
         str(symbol).upper(): float(weight)
         for symbol, weight in (payload.get("target_weights") or {}).items()
@@ -439,6 +463,13 @@ def build_reconciliation(
     shadow_excess = round(shadow_cum - spy_cum, 10) if shadow_cum is not None and spy_cum is not None else None
     live_minus_shadow = round(live_cum - shadow_cum, 10) if live_cum is not None and shadow_cum is not None else None
 
+    (
+        live_target_weights,
+        live_target_source,
+        identity_from_signals,
+        execution_context,
+    ) = _load_live_target_weights(precompute_dir, trade_date)
+    source_meta = dict(execution_context.get("decision_source_artifact") or {})
     live_positions = _load_live_positions(trade_date, broker_positions_path)
     if live_positions.missing:
         reason_codes.append("MISSING_BROKER_POSITIONS")
@@ -446,16 +477,12 @@ def build_reconciliation(
         shadow_dir,
         trade_date,
         shadow_baseline_strategy,
+        source_meta=source_meta,
+        repo_root=precompute_dir.parent.parent,
     )
     if not shadow_weights:
         reason_codes.append("MISSING_SHADOW_DATA")
     holdings = _holdings_reconciliation(live_positions.weights, shadow_weights)
-    (
-        live_target_weights,
-        live_target_source,
-        identity_from_signals,
-        execution_context,
-    ) = _load_live_target_weights(precompute_dir, trade_date)
     target_comparison = _holdings_reconciliation(live_target_weights, shadow_weights)
     identity = strategy_identity_metadata(trade_date)
     identity.update(identity_from_signals)
@@ -509,7 +536,6 @@ def build_reconciliation(
     if holdings["shadow_only_symbols"]:
         reason_codes.append("SHADOW_ONLY_POSITIONS")
 
-    source_meta = dict(execution_context.get("decision_source_artifact") or {})
     lineage_verified = False
     if shadow_weight_source and source_meta:
         expected_hash = str(source_meta.get("sha256") or "")
