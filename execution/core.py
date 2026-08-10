@@ -503,19 +503,23 @@ def _apply_settled_cash_and_buffer(
     PRIMARY GFV DEFENSE (PRE_ARM_SWEEP Blocker #2). On the live cash account, Alpaca
     credits sale proceeds to ``cash`` immediately though they are unsettled (T+1). The
     executor injects ``settled_cash`` (= broker cash - unsettled sale proceeds) and, on
-    a fail-closed history lookup, ``settled_cash_fail_closed=True``. Clamping the buy
-    budget to settled cash guarantees the invariant::
+    a fail-closed history lookup, ``settled_cash_fail_closed=True``. By default,
+    clamping the buy budget to settled cash guarantees the invariant::
 
         sum(buy_notional) <= settled_cash * buy_buffer_pct
 
-    so no buy ever spends unsettled funds and no held lot can become GFV-vulnerable.
-    The buffer then trims the whole budget (default 0.98 live) so market-order buys
-    sized at snapshot prices keep headroom against adverse fills.
+    so no live-capital buy spends unsettled funds and no held lot can become
+    GFV-vulnerable. The PAPER adapter may additionally provide an
+    ``execution_spendable_cash`` ceiling consisting only of regulatory settled cash
+    plus current-run confirmed sell fills. The buffer then trims the effective ceiling
+    (default 0.98) so market-order buys sized at snapshot prices keep headroom against
+    adverse fills.
     """
     buffer = float(policy.buy_buffer_pct if policy.buy_buffer_pct is not None else 1.0)
     if buffer < 0.0:
         buffer = 0.0
     settled_raw = account.get("settled_cash")
+    execution_spendable_raw = account.get("execution_spendable_cash")
     fail_closed = bool(account.get("settled_cash_fail_closed"))
     settled_ceiling: float | None = None
     if fail_closed:
@@ -523,15 +527,33 @@ def _apply_settled_cash_and_buffer(
     elif settled_raw is not None:
         settled_ceiling = max(0.0, _safe_float(settled_raw, 0.0))
 
+    execution_spendable_ceiling: float | None = None
+    if not fail_closed and execution_spendable_raw is not None:
+        execution_spendable_ceiling = max(
+            0.0, _safe_float(execution_spendable_raw, 0.0)
+        )
+    effective_cash_ceiling = (
+        execution_spendable_ceiling
+        if execution_spendable_ceiling is not None
+        else settled_ceiling
+    )
+
     budget_in = max(0.0, float(budget or 0.0))
     clamped = budget_in
     settled_clamp_applied = False
-    if settled_ceiling is not None and settled_ceiling < clamped:
-        clamped = settled_ceiling
+    if effective_cash_ceiling is not None and effective_cash_ceiling < clamped:
+        clamped = effective_cash_ceiling
         settled_clamp_applied = True
     buffered = clamped * buffer
     diag = {
         "settled_cash": settled_ceiling,
+        "execution_spendable_cash": execution_spendable_ceiling,
+        "effective_cash_ceiling": effective_cash_ceiling,
+        "cash_ceiling_source": (
+            str(account.get("execution_spendable_cash_source") or "")
+            if execution_spendable_ceiling is not None
+            else "regulatory_settled_cash"
+        ),
         "settled_cash_fail_closed": fail_closed,
         "buy_buffer_pct": buffer,
         "budget_before_settled_clamp": budget_in,
@@ -665,8 +687,9 @@ def _apply_configured_post_sell_budget(
         budget = min(budget, max(0.0, float(policy.approved_cap_usd)))
 
     # PRIMARY GFV DEFENSE: the post-sell account's cash now INCLUDES today's freshly
-    # credited (but unsettled) sale proceeds. Clamping to settled cash here is what
-    # actually sizes the submitted buys, so no buy can spend today's unsettled money.
+    # credited (but unsettled) sale proceeds. Live capital clamps strictly to settled
+    # cash. PAPER may supply a narrower explicit override containing only settled cash
+    # plus current-run confirmed fills; unrelated unsettled proceeds remain excluded.
     budget, settled_cash_diag = _apply_settled_cash_and_buffer(float(budget), account, policy)
 
     meta.update(

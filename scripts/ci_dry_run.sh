@@ -86,6 +86,11 @@ export TRADING_MODE="paper"
 export ALPACA_PAPER="1"
 export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-caerus_orion}"
+export CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS="120"
+export CAERUS_LIVE_PILOT_SETTLEMENT_MAX_ATTEMPTS="61"
+export CAERUS_LIVE_PILOT_SETTLEMENT_BASE_DELAY_SECONDS="2"
+export CAERUS_LIVE_PILOT_SETTLEMENT_MAX_DELAY_SECONDS="2"
+export CAERUS_PAPER_REUSE_CONFIRMED_SELL_PROCEEDS="1"
 
 # Suppress any real-money arming
 unset CAERUS_LIVE_PILOT_KILL_SWITCH 2>/dev/null || true
@@ -195,10 +200,13 @@ if [[ -f "${BUNDLE_DIR}/planned_execution_payload.json" ]]; then
     PAYLOAD_ARG="--trade-date ${REPORT_DATE}"
 else
     # Try to find any payload under outputs/precompute
-    LATEST_PAYLOAD="$(
-        find "${REPO_ROOT}/outputs/precompute" -name "planned_execution_payload.json" \
-            2>/dev/null | sort | tail -1
-    )"
+    LATEST_PAYLOAD=""
+    if [[ -d "${REPO_ROOT}/outputs/precompute" ]]; then
+        LATEST_PAYLOAD="$(
+            find "${REPO_ROOT}/outputs/precompute" -name "planned_execution_payload.json" \
+                2>/dev/null | sort | tail -1
+        )"
+    fi
     if [[ -n "${LATEST_PAYLOAD}" ]]; then
         PAYLOAD_ARG="--payload-path ${LATEST_PAYLOAD}"
         echo "  INFO: no bundle for ${REPORT_DATE}; using latest: ${LATEST_PAYLOAD}"

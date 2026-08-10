@@ -71,6 +71,11 @@ def _paper_env(*, dry_run: str = "0", base_url: str = PAPER_HOST) -> dict[str, s
         "CAERUS_LIVE_PILOT_DRY_RUN": dry_run,
         "CAERUS_LIVE_PILOT_SELLS_ENABLED": "1",
         "CAERUS_LIVE_PILOT_SELL_WHITELIST": "*",
+        "CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS": "120",
+        "CAERUS_LIVE_PILOT_SETTLEMENT_MAX_ATTEMPTS": "61",
+        "CAERUS_LIVE_PILOT_SETTLEMENT_BASE_DELAY_SECONDS": "0",
+        "CAERUS_LIVE_PILOT_SETTLEMENT_MAX_DELAY_SECONDS": "2",
+        "CAERUS_PAPER_REUSE_CONFIRMED_SELL_PROCEEDS": "1",
         "CAERUS_LIVE_PILOT_APPROVED": "1",
         "CAERUS_LIVE_PILOT_CRON_APPROVED": "1",
         "CAERUS_LIVE_PILOT_SUBMIT_APPROVED": "1",
@@ -129,6 +134,77 @@ class FakePaperBroker:
 
     def submit_limit_order(self, **kwargs):
         return self.submit_market_order(**kwargs)
+
+
+class ConfirmedProceedsPaperBroker(FakePaperBroker):
+    """Paper broker that reflects a filled sell in positions, cash, and history."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cash = 150.0
+        self.buying_power = 150.0
+        self.equity = 500.0
+        self.positions = [
+            {"symbol": "OLD", "qty": "1", "market_value": "100", "cost_basis": "100"}
+        ]
+        self.orders_by_id: dict[str, dict[str, object]] = {}
+        self.submitted_sides: list[str] = []
+
+    def get_account(self):
+        return {
+            "id": "paper-acct-1",
+            "status": "ACTIVE",
+            "cash": str(self.cash),
+            "equity": str(self.equity),
+            "buying_power": str(self.buying_power),
+            "portfolio_value": str(self.equity),
+        }
+
+    def get_positions(self):
+        return list(self.positions)
+
+    def list_orders(self, status="open", limit=100, after=None):
+        del limit, after
+        orders = list(self.orders_by_id.values())
+        if status == "open":
+            return [row for row in orders if row.get("status") not in {"filled", "rejected"}]
+        return orders
+
+    def get_order(self, order_id):
+        return dict(self.orders_by_id.get(order_id, {}))
+
+    def submit_market_order(self, **kwargs):
+        self.submit_calls += 1
+        side = str(kwargs.get("side") or "").upper()
+        symbol = str(kwargs.get("symbol") or "").upper()
+        qty = float(kwargs.get("qty") or 0.0)
+        notional = float(kwargs.get("estimated_notional") or 0.0)
+        order_id = f"paper-order-{self.submit_calls}"
+        order = {
+            "id": order_id,
+            "status": "filled",
+            "symbol": symbol,
+            "side": side,
+            "qty": str(qty),
+            "filled_qty": str(qty),
+            "filled_avg_price": str(notional / qty if qty else 0.0),
+            "client_order_id": kwargs.get("client_order_id"),
+            "submitted_at": "2026-03-17T13:35:00+00:00",
+            "filled_at": "2026-03-17T13:35:02+00:00",
+        }
+        self.orders_by_id[order_id] = order
+        self.submitted_sides.append(side)
+        if side == "SELL":
+            self.cash += notional
+            self.buying_power += notional
+            self.positions = [row for row in self.positions if row.get("symbol") != symbol]
+        elif side == "BUY":
+            self.cash -= notional
+            self.buying_power -= notional
+            self.positions.append(
+                {"symbol": symbol, "qty": str(qty), "market_value": str(notional)}
+            )
+        return order
 
 
 class FailingSnapshotPaperBroker(FakePaperBroker):
@@ -233,6 +309,53 @@ def test_paper_lane_submits_real_paper_orders_through_shared_engine(tmp_path: Pa
     submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
     assert submitted["orders"][0]["symbol"] == "AAPL"
     assert submitted["orders"][0]["status"] == "filled"
+
+
+def test_paper_rotation_reuses_only_confirmed_current_run_sell_proceeds(
+    tmp_path: Path,
+) -> None:
+    broker = ConfirmedProceedsPaperBroker()
+    env = _paper_env(dry_run="0")
+    env["CAERUS_LIVE_PILOT_CAPITAL_CAP"] = "500"
+    env["CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP"] = "500"
+    result = run_live_pilot(
+        plan={
+            "target_portfolio": [
+                {
+                    "ticker": "NEW",
+                    "symbol": "NEW",
+                    "side": "BUY",
+                    "target_weight": 0.4,
+                    "price": 100.0,
+                    "order_type": "market",
+                    "sleeve": "orion",
+                }
+            ],
+            "cash_target_weight": 0.0,
+        },
+        broker=broker,
+        env=env,
+        run_id="paper-confirmed-proceeds",
+        output_root=tmp_path / "outputs" / "paper_lane",
+        now_et=_market_open_now(),
+    )
+
+    assert result["terminal_status"] == "SUBMITTED"
+    assert broker.submitted_sides == ["SELL", "BUY"]
+    run_root = tmp_path / "outputs" / "paper_lane" / "runs" / "paper-confirmed-proceeds"
+    transition = json.loads((run_root / "live_pilot_transition_plan.json").read_text())
+    assert transition["buy_orders_intended"][0]["shares"] == pytest.approx(2.0)
+    guard = transition["diagnostics"]["post_sell_budget"]["settled_cash_guard"]
+    assert guard["settled_cash"] == pytest.approx(150.0)
+    assert guard["execution_spendable_cash"] == pytest.approx(250.0)
+    assert guard["effective_cash_ceiling"] == pytest.approx(250.0)
+    assert guard["cash_ceiling_source"] == (
+        "paper_settled_plus_confirmed_current_run_sells"
+    )
+    settled = json.loads((run_root / "live_pilot_settled_cash.json").read_text())
+    assert settled["confirmed_current_run_sell_proceeds"] == pytest.approx(100.0)
+    assert settled["confirmed_proceeds_reuse_enabled"] is True
+    assert settled["execution_spendable_cash"] == pytest.approx(250.0)
 
 
 def test_paper_lane_dry_pass_does_not_submit(tmp_path: Path) -> None:
@@ -401,6 +524,22 @@ def test_cron_execute_pins_planning_equity_to_capital_cap() -> None:
     # The live lane must NOT pin planning equity (live sizes against real equity).
     live = (REPO_ROOT / "scripts" / "cron_live_pilot_execute.sh").read_text(encoding="utf-8")
     assert "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP" not in live
+
+
+def test_cron_execute_pins_two_minute_confirmed_proceeds_rotation() -> None:
+    paper = (REPO_ROOT / "scripts" / "cron_execute.sh").read_text(encoding="utf-8")
+    ci_dry_run = (REPO_ROOT / "scripts" / "ci_dry_run.sh").read_text(encoding="utf-8")
+    live = (REPO_ROOT / "scripts" / "cron_live_pilot_execute.sh").read_text(encoding="utf-8")
+    for pin in (
+        'export CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS="120"',
+        'export CAERUS_LIVE_PILOT_SETTLEMENT_MAX_ATTEMPTS="61"',
+        'export CAERUS_LIVE_PILOT_SETTLEMENT_BASE_DELAY_SECONDS="2"',
+        'export CAERUS_LIVE_PILOT_SETTLEMENT_MAX_DELAY_SECONDS="2"',
+        'export CAERUS_PAPER_REUSE_CONFIRMED_SELL_PROCEEDS="1"',
+    ):
+        assert pin in paper
+        assert pin in ci_dry_run
+    assert "CAERUS_PAPER_REUSE_CONFIRMED_SELL_PROCEEDS" not in live
 
 
 def test_retry_harness_wraps_only_paper_cron() -> None:
