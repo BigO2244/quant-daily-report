@@ -2,9 +2,9 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-08-08 (owner-approved Orion promotion to PAPER-only execution
-authority through immutable Decision → Risk → Execution → Audit packages;
-Polaris remains the historical research control; live remains blocked.)
+Last Updated: 2026-08-11 (owner-approved deterministic whole-share PAPER
+attainment policy, 5% target / 2.5% hard cash floor, first-clean comparison
+epoch, and strict universal-GREEN propagation; live remains blocked.)
 Governance Label: PAPER_AUTHORITY_MIGRATION
 Execution Impact: PAPER_ONLY (no live credentials, approvals, or capital enabled)
 
@@ -51,7 +51,7 @@ editing code or specs.
 
 ---
 
-## 1. Verified state (as of 2026-08-08)
+## 1. Verified state (as of 2026-08-11)
 
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
 - **Pre-triage deployed baseline:** `efd193dc3520e7383ced00e6e0bc6e4f0c431e78`
@@ -62,9 +62,22 @@ editing code or specs.
   shorting, no leverage.
 - **Active PAPER strategy:** Caerus Orion (`caerus_orion`), sourced from the
   `h2_rank_decay_exit_h6_top5` shadow snapshot for the current or immediately
-  preceding XNYS session, with 5% target cash and 2% target-attainment tolerance.
-  The original source date/path/hash are preserved; execution requires a
-  hash-verified approved package for the current session.
+  preceding XNYS session, with 5% target cash, a 2.5% hard cash floor after
+  whole-share optimization, and a fixed 2-percentage-point target-attainment
+  tolerance. The original source date/path/hash are preserved; execution
+  requires a hash-verified approved package for the current session. Outside
+  the fixed tolerance, only exact agreement with the deterministic
+  nearest-feasible proof can pass.
+- **Execution convergence:** The Trader executes only the approved package,
+  mechanically sells first, waits for confirmed PAPER proceeds, and rebuilds
+  buys from the proven whole-share target. Execution equality must show the
+  final mechanical order frame equals the submitted frame.
+- **Comparison epoch:** The first clean post-fix PAPER run starts the new
+  live-vs-shadow comparison epoch. Earlier observations remain immutable legacy
+  history and are not relabeled.
+- **Universal GREEN:** Any nested audit FAIL, stale or missing required artifact,
+  execution equality divergence, open/partial/rejected order, lineage break, or
+  reconciliation failure prevents top-level GREEN.
 - **Historical research control:** Caerus Polaris (`caerus_polaris`), retained in
   daily shadow comparison and research reporting but without PAPER authority.
 - **Shadow tracking:** Polaris, Orion, Lyra, Polaris_Alpha, Orion_Alpha. SPY = benchmark.

@@ -1,5 +1,5 @@
 ---
-last_reviewed: 2026-05-18
+last_reviewed: 2026-08-11
 owner: architecture
 category: architecture
 criticality: medium
@@ -29,3 +29,15 @@ future operational and documentation updates.
 - Execution-semantic changes require explicit validation and observation notes.
 - Dev-only systems must remain clearly separated from runtime execution paths.
 
+## PAPER Authority and Whole-Share Convergence
+
+The governed PAPER path is an immutable Evidence → Decision → Risk →
+Execution → Audit chain. `core/target_attainment_policy.py` validates the
+owner-approved 5% cash target, 2.5% hard floor, exact nearest-feasible proof,
+first-clean comparison epoch, and strict GREEN propagation.
+`core/whole_share_feasibility.py` translates Decision's weights into a
+deterministic, provably bounded whole-share optimum without selecting symbols.
+`core/lane_target_attainment.py` compares reconciled broker quantities with that
+proof; it cannot relabel a missing or mismatched proof as attained. Execution
+package v2 carries Risk's immutable constraints to the Trader, while version 1
+remains read-compatible only for historical lineage.

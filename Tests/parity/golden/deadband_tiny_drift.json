@@ -17,6 +17,7 @@
       "buy_budget_after_safeguards": 8900.0,
       "buy_budget_basis": "broker_buying_power",
       "buy_budget_before_safeguards": 9000.0,
+      "minimum_cash_weight": 0.0,
       "post_sell_buying_power": "9000.0",
       "post_sell_cash": 9000.0,
       "post_sell_equity": 10000.0,
@@ -122,7 +123,8 @@
     "final_submitted_buy_notional": 0.0,
     "original_precomputed_buy_notional": 0.0,
     "reason_codes": [
-      "no_sell_orders"
+      "no_sell_orders_rebudgeted",
+      "legacy_approved_buys_cash_rebudgeted"
     ],
     "rebudget_total_equity": null,
     "rebuilt_buy_intents": [],
@@ -132,7 +134,7 @@
     "sell_orders_submitted": [],
     "sell_orders_submitted_count": 0,
     "skipped_buy_orders": [],
-    "status": "SKIPPED",
+    "status": "OK",
     "suppressed_by_post_sell_rebudget": []
   },
   "scenario": {

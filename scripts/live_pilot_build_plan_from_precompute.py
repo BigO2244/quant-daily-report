@@ -116,12 +116,30 @@ def _governed_paper_source_path(
 
     exact_path = shadow_root / trade_date / f"{strategy_id}.json"
     if exact_path.exists():
-        return exact_path, trade_date, 0
+        exact_payload = _read_json(exact_path)
+        if not isinstance(exact_payload, Mapping):
+            raise ValueError("governed PAPER exact source artifact must be a JSON object")
+        exact_pending = str(
+            exact_payload.get("observation_status") or ""
+        ).upper() == "PENDING_SESSION_CLOSE"
+        if exact_payload.get("decision_eligible") is not False and not exact_pending:
+            return exact_path, trade_date, 0
 
     source_trade_date = prev_trading_day(trade_date)
     prior_path = shadow_root / source_trade_date / f"{strategy_id}.json"
     if prior_path.exists():
-        return prior_path, source_trade_date, 1
+        prior_payload = _read_json(prior_path)
+        if not isinstance(prior_payload, Mapping):
+            raise ValueError("governed PAPER prior source artifact must be a JSON object")
+        prior_pending = str(
+            prior_payload.get("observation_status") or ""
+        ).upper() == "PENDING_SESSION_CLOSE"
+        if prior_payload.get("decision_eligible") is not False and not prior_pending:
+            return prior_path, source_trade_date, 1
+        raise ValueError(
+            "governed PAPER prior source artifact is reporting-only and not "
+            "Decision-eligible"
+        )
     raise FileNotFoundError(
         "governed PAPER source artifact missing for both allowed sessions: "
         f"{exact_path}, {prior_path}"
@@ -143,6 +161,12 @@ def _build_paper_decision_input(
     registry = load_strategy_registry(strategy_registry_path)
     strategy_id = registry.paper_execution_strategy_id()
     config = registry.paper_execution_config()
+    from core.target_attainment_policy import validate_target_attainment_policy
+
+    target_attainment_policy = validate_target_attainment_policy(
+        config.get("target_attainment_policy"),
+        expected_target_cash_weight=float(config.get("target_cash_weight") or 0.0),
+    )
     if _canonical_strategy_id(approved_sleeve) != strategy_id:
         raise ValueError(
             f"approved PAPER strategy {_canonical_strategy_id(approved_sleeve)!r} "
@@ -246,6 +270,7 @@ def _build_paper_decision_input(
             "target_attainment_tolerance": float(
                 config.get("target_attainment_tolerance") or 0.02
             ),
+            "target_attainment_policy": target_attainment_policy,
         },
     }
     decision_dir = output_dir / "decision_inputs" / trade_date
@@ -825,12 +850,20 @@ def build_live_pilot_plan(
             ),
         ),
     )
+    risk_constraints = dict(result.to_artifact())
+    if lane_id == "paper":
+        target_policy = dict(
+            (decision_source_artifact or {}).get("target_attainment_policy") or {}
+        )
+        if not target_policy:
+            raise ValueError("governed PAPER target-attainment policy missing")
+        risk_constraints["target_attainment_policy"] = target_policy
     risk = build_risk_package(
         package_id=f"risk:{authority_stem}",
         decision=decision,
         approved_target_rows=target_portfolio,
         approved_cash_weight=float(result.cash_target_weight),
-        constraints=result.to_artifact(),
+        constraints=risk_constraints,
         source_refs=(f"decision:{decision.package_id}",),
     )
     execution = execution_package_from_risk(risk)
@@ -883,6 +916,11 @@ def build_live_pilot_plan(
             "target_attainment_tolerance": float(
                 (decision_source_artifact or {}).get("target_attainment_tolerance")
                 or 0.02
+            ),
+            "target_attainment_policy": (
+                dict((decision_source_artifact or {}).get("target_attainment_policy") or {})
+                if lane_id == "paper"
+                else None
             ),
             "approved_execution_package": execution.to_dict(),
             "authority_package_paths": {

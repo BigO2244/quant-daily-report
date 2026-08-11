@@ -152,6 +152,16 @@ def _write_base_artifacts(root: Path, *, reconciliation: dict | None = None, vix
         },
     )
     _write_json(run_root / "audit" / "execution_integrity.json", {"status": "OK", "findings": []})
+    _write_json(
+        run_root / "equality_gate.json",
+        {
+            "decision": "WOULD_PROCEED",
+            "would_block": False,
+            "hashes_equal": True,
+            "pricing_asof_match": True,
+            "execution_source": "planned_payload_exact",
+        },
+    )
 
 
 def test_strategy_identity_warns_when_live_target_does_not_track_approved_strategy(
@@ -193,11 +203,11 @@ def test_green_case(tmp_path: Path) -> None:
     assert _status(payload, "VIX/regime") == "GREEN"
     assert _status(payload, "Shadow performance report") == "GREEN"
     assert _status(payload, "Execution timeline provenance") == "GREEN"
-    assert payload["equality_gate_observe"]["status"] == "unavailable"
+    assert payload["equality_gate_observe"]["status"] == "ok"
     assert "Caerus Daily Health Check" in render_console(payload)
 
 
-def test_equality_gate_divergence_is_advisory_not_health_degrading(tmp_path: Path) -> None:
+def test_equality_gate_divergence_blocks_universal_green(tmp_path: Path) -> None:
     _write_base_artifacts(tmp_path)
     _write_json(
         tmp_path / "outputs" / "runs" / "run-health" / "equality_gate.json",
@@ -212,7 +222,8 @@ def test_equality_gate_divergence_is_advisory_not_health_degrading(tmp_path: Pat
 
     payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
 
-    assert payload["overall_status"] == "GREEN"
+    assert payload["overall_status"] == "RED"
+    assert _status(payload, "Execution equality") == "RED"
     assert payload["equality_gate_observe"]["status"] == "divergence_observed"
     assert payload["equality_gate_observe"]["decision"] == "WOULD_HALT_HASH_MISMATCH"
 

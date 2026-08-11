@@ -1,4 +1,5 @@
 from core.lane_target_attainment import build_lane_target_attainment
+from core.whole_share_feasibility import seal_whole_share_proof
 
 
 def _plan() -> dict:
@@ -61,3 +62,122 @@ def test_dry_run_does_not_claim_target_attainment() -> None:
         dry_run=True,
     )
     assert payload["status"] == "DRY_RUN_NOT_APPLICABLE"
+
+
+def test_exact_nearest_feasible_quantity_is_clean_outside_fixed_weight_band() -> None:
+    package_hash = "approved-package-hash"
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.05,
+        "minimum_cash_weight": 0.025,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    plan = {
+        "cash_target_weight": 0.05,
+        "target_attainment_policy": policy,
+        "target_portfolio": [
+            {"symbol": "AAA", "target_weight": 0.475},
+            {"symbol": "BBB", "target_weight": 0.475},
+        ],
+        "approved_execution_package": {
+            "content_hash": package_hash,
+            "approved_cash_weight": 0.05,
+            "approved_target_rows": [
+                {"symbol": "AAA", "target_weight": 0.475},
+                {"symbol": "BBB", "target_weight": 0.475},
+            ],
+            "constraints": {"target_attainment_policy": policy},
+        },
+    }
+    proof = seal_whole_share_proof(
+        {
+            "schema_version": "caerus.whole_share_feasibility.v1",
+            "status": "PASS",
+            "approved_execution_package_hash": package_hash,
+            "allocation": [
+                {"symbol": "AAA", "target_quantity": 1},
+                {"symbol": "BBB", "target_quantity": 1},
+            ],
+        }
+    )
+    payload = build_lane_target_attainment(
+        plan=plan,
+        post_snapshot={
+            "account": {"equity": "1000", "cash": "26"},
+            "positions": [
+                {"symbol": "AAA", "qty": "1", "market_value": "600"},
+                {"symbol": "BBB", "qty": "1", "market_value": "374"},
+            ],
+        },
+        reconciliation={"status": "CLEAN"},
+        run_id="paper-nearest",
+        trade_date="2026-08-12",
+        mode="paper",
+        dry_run=False,
+        feasibility_evidence=proof,
+    )
+
+    assert payload["status"] == "OK_NEAREST_FEASIBLE"
+    assert payload["nearest_feasible_verified"] is True
+    assert payload["achieved_cash_weight"] == 0.026
+
+
+def test_governed_policy_fails_closed_without_complete_quantity_proof() -> None:
+    package_hash = "approved-package-hash"
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.05,
+        "minimum_cash_weight": 0.025,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    payload = build_lane_target_attainment(
+        plan={
+            "cash_target_weight": 0.05,
+            "target_attainment_policy": policy,
+            "target_portfolio": [
+                {"symbol": "AAA", "target_weight": 0.95},
+            ],
+            "approved_execution_package": {
+                "content_hash": package_hash,
+                "approved_cash_weight": 0.05,
+                "approved_target_rows": [
+                    {"symbol": "AAA", "target_weight": 0.95},
+                ],
+                "constraints": {"target_attainment_policy": policy},
+            },
+        },
+        post_snapshot={
+            "account": {"equity": "1000", "cash": "50"},
+            "positions": [
+                {"symbol": "AAA", "qty": "10", "market_value": "950"},
+            ],
+        },
+        reconciliation={"status": "CLEAN"},
+        run_id="paper-missing-proof",
+        trade_date="2026-08-12",
+        mode="paper",
+        dry_run=False,
+        feasibility_evidence=seal_whole_share_proof(
+            {
+                "schema_version": "caerus.whole_share_feasibility.v1",
+                "status": "PASS",
+                "approved_execution_package_hash": package_hash,
+                "allocation": [],
+            }
+        ),
+    )
+
+    assert payload["status"] == "FAIL_FEASIBILITY_PROOF_INVALID"
+    assert payload["whole_share_feasibility_valid"] is False

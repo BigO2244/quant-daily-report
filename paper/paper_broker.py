@@ -3605,10 +3605,14 @@ def _rebuild_post_sell_buy_trades(
             continue
 
         target_weight = float(row.get("target_weight") or 0.0)
-        target_dollars = target_weight * equity_value * cash_buffer
-        target_shares = target_dollars / price if price > 0 else 0.0
-        if not cfg.allow_fractional:
-            target_shares = float(math.floor(max(0.0, target_shares)))
+        governed_target_quantity = _coerce_float(row.get("target_quantity"), None)
+        if governed_target_quantity is not None:
+            target_shares = max(0.0, float(governed_target_quantity))
+        else:
+            target_dollars = target_weight * equity_value * cash_buffer
+            target_shares = target_dollars / price if price > 0 else 0.0
+            if not cfg.allow_fractional:
+                target_shares = float(math.floor(max(0.0, target_shares)))
         current_shares = float(holdings_map.get(ticker, 0.0))
         desired_shares = max(0.0, float(target_shares) - current_shares)
         if not cfg.allow_fractional:
@@ -6582,6 +6586,15 @@ def run_paper_day(
                                 float(post_sell_equity_no_sells or 0.0)
                                 * float(target_cash_weight or 0.0),
                             )
+                            risk_cash_target_buy_budget_no_sells = max(
+                                0.0,
+                                float(postsell_cash_confirmed or 0.0)
+                                - float(risk_cash_target_no_sells),
+                            )
+                            buy_budget_computed = min(
+                                float(buy_budget_computed or 0.0),
+                                risk_cash_target_buy_budget_no_sells,
+                            )
                             post_sell_budget_meta = {
                                 "post_sell_cash": float(postsell_cash_confirmed or 0.0),
                                 "post_sell_equity": float(post_sell_equity_no_sells or 0.0),
@@ -6590,11 +6603,7 @@ def run_paper_day(
                                 "target_cash_weight": float(target_cash_weight or 0.0),
                                 "buy_budget_before_safeguards": float(postsell_cash_confirmed or 0.0),
                                 "broker_safeguard_buy_budget": float(buy_budget_computed or 0.0),
-                                "risk_cash_target_buy_budget": max(
-                                    0.0,
-                                    float(postsell_cash_confirmed or 0.0)
-                                    - float(risk_cash_target_no_sells),
-                                ),
+                                "risk_cash_target_buy_budget": risk_cash_target_buy_budget_no_sells,
                                 "buy_budget_after_safeguards": float(buy_budget_computed or 0.0),
                                 "buy_budget_basis": buy_budget_basis_no_sells,
                             }
@@ -6609,26 +6618,99 @@ def run_paper_day(
                             - float(pre_sell_cash_value or 0.0),
                         )
                         if not sell_orders:
-                            rebuilt_buy_orders = list(buy_orders)
-                            rebuilt_buy_trades = (
-                                execution_trades[
-                                    execution_trades["side"].astype(str).str.upper().isin(
-                                        {"BUY", "ADD"}
-                                    )
+                            if use_precomputed_trade_plan:
+                                legacy_buys = execution_trades.loc[
+                                    execution_trades["side"].astype(str).str.upper() == "BUY"
                                 ].copy()
-                                if execution_trades is not None
-                                and not execution_trades.empty
-                                and "side" in execution_trades.columns
-                                else pd.DataFrame(columns=executable_trades.columns)
+                                requested_legacy_buy_notional = float(
+                                    legacy_buys.get("notional", pd.Series(dtype=float))
+                                    .fillna(0.0)
+                                    .astype(float)
+                                    .abs()
+                                    .sum()
+                                )
+                                rebuilt_buy_trades, legacy_budget_meta = (
+                                    _apply_capital_budget_to_trades(
+                                        legacy_buys,
+                                        cfg,
+                                        {
+                                            "reserve_cash_policy": {
+                                                "available_for_buys": float(
+                                                    buy_budget_computed or 0.0
+                                                )
+                                            },
+                                            "requested_buy_notional": requested_legacy_buy_notional,
+                                        },
+                                    )
+                                )
+                                rebudget_skipped_orders = []
+                                rebudget_trade_meta = {
+                                    "status": (
+                                        "CLIPPED"
+                                        if bool(
+                                            legacy_budget_meta.get(
+                                                "capital_constraint_triggered"
+                                            )
+                                        )
+                                        else "OK"
+                                    ),
+                                    "reason_codes": [
+                                        "legacy_approved_buys_cash_rebudgeted"
+                                    ],
+                                    "candidate_count": int(len(legacy_buys)),
+                                    "recomputed_requested_buy_notional": (
+                                        requested_legacy_buy_notional
+                                    ),
+                                    "recomputed_buy_notional": float(
+                                        rebuilt_buy_trades.get(
+                                            "notional", pd.Series(dtype=float)
+                                        )
+                                        .fillna(0.0)
+                                        .astype(float)
+                                        .abs()
+                                        .sum()
+                                    ),
+                                }
+                            else:
+                                rebuilt_buy_trades, rebudget_trade_meta, rebudget_skipped_orders = (
+                                    _rebuild_post_sell_buy_trades(
+                                        holdings=holdings,
+                                        targets=targets,
+                                        prices=pricing_series,
+                                        total_equity=float(
+                                            post_sell_budget_meta.get("post_sell_equity")
+                                            or equity_prev
+                                        ),
+                                        buy_budget=float(buy_budget_computed or 0.0),
+                                        cfg=cfg,
+                                        max_buy_orders=int(cfg.max_trades_per_day or 0),
+                                        zero_budget_block_reason=(
+                                            BUY_BLOCKED_RISK_CASH_TARGET
+                                            if float(buy_budget_computed or 0.0) <= 1e-9
+                                            else None
+                                        ),
+                                        cash_at_decision=postsell_cash_confirmed,
+                                        buying_power_at_decision=postsell_buying_power_confirmed,
+                                        risk_cash_target=float(risk_cash_target_no_sells),
+                                        broker_buying_power_constraint=_coerce_float(
+                                            post_sell_budget_meta.get(
+                                                "broker_safeguard_buy_budget"
+                                            ),
+                                            None,
+                                        ),
+                                        buy_budget_basis=buy_budget_basis,
+                                    )
+                                )
+                            rebudget_trade_meta = dict(rebudget_trade_meta)
+                            rebudget_trade_meta["reason_codes"] = [
+                                "no_sell_orders_rebudgeted",
+                                *list(rebudget_trade_meta.get("reason_codes") or []),
+                            ]
+                            rebuilt_buy_orders = _build_shadow_orders(
+                                rebuilt_buy_trades,
+                                run_id,
+                                allow_fractional=bool(cfg.allow_fractional),
                             )
-                            rebudget_trade_meta = {
-                                "status": "SKIPPED",
-                                "reason_codes": ["no_sell_orders"],
-                                "candidate_count": int(len(rebuilt_buy_orders)),
-                                "recomputed_requested_buy_notional": float(original_precomputed_buy_notional),
-                                "recomputed_buy_notional": float(original_precomputed_buy_notional),
-                            }
-                            rebudget_skipped_orders = []
                         else:
                             if sell_phase_result.get("positions") is not None:
                                 post_sell_positions_for_rebudget = list(

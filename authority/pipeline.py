@@ -9,6 +9,8 @@ from .contracts import (
     EvidencePackage,
     ExecutionPackage,
     RiskPackage,
+    EXECUTION_SCHEMA_VERSION,
+    LEGACY_EXECUTION_SCHEMA_VERSION,
     build_decision_package,
     build_evidence_package,
     build_risk_package,
@@ -28,6 +30,11 @@ def execution_package_from_dict(payload: Mapping[str, Any]) -> ExecutionPackage:
         risk_hash=str(payload.get("risk_hash") or ""),
         approved_cash_weight=payload.get("approved_cash_weight"),
         approved_target_rows=tuple(rows),
+        constraints=(
+            dict(payload.get("constraints") or {})
+            if str(payload.get("schema_version") or "") != LEGACY_EXECUTION_SCHEMA_VERSION
+            else {}
+        ),
         source_refs=tuple(payload.get("source_refs") or ()),
     )
     if str(payload.get("content_hash") or "") != package.content_hash:
@@ -38,13 +45,14 @@ def execution_package_from_dict(payload: Mapping[str, Any]) -> ExecutionPackage:
 def execution_package_from_risk(risk: RiskPackage) -> ExecutionPackage:
     """Create the mechanical Trader handoff; no target construction occurs here."""
     return ExecutionPackage(
-        schema_version="caerus.execution.v1",
+        schema_version=EXECUTION_SCHEMA_VERSION,
         package_id=f"execution:{risk.package_id}",
         trade_date=risk.trade_date,
         risk_package_id=risk.package_id,
         risk_hash=risk.content_hash,
         approved_cash_weight=risk.approved_cash_weight,
         approved_target_rows=risk.approved_target_rows,
+        constraints=risk.constraints,
         source_refs=(*risk.source_refs, f"risk:{risk.package_id}"),
     )
 

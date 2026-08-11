@@ -2,8 +2,8 @@
   "artifact_comparison": null,
   "capital_budget": {
     "explicit_components": {
-      "broker_budget": 9900.0,
-      "buy_budget_after_safeguards": 9900.0,
+      "broker_budget": 4500.0,
+      "buy_budget_after_safeguards": 4500.0,
       "expected_sell_proceeds_conservative": 0.0,
       "post_sell_cash": 10000.0,
       "reserve_cash_post_sell": 100.0,
@@ -13,10 +13,11 @@
       "sell_proceeds_haircut": 0.95
     },
     "post_sell_buy_budget": {
-      "broker_safeguard_buy_budget": 9900.0,
-      "buy_budget_after_safeguards": 9900.0,
+      "broker_safeguard_buy_budget": 4500.0,
+      "buy_budget_after_safeguards": 4500.0,
       "buy_budget_basis": "broker_buying_power",
       "buy_budget_before_safeguards": 10000.0,
+      "minimum_cash_weight": 0.55,
       "post_sell_buying_power": "10000.0",
       "post_sell_cash": 10000.0,
       "post_sell_equity": 10000.0,
@@ -262,7 +263,8 @@
     "final_submitted_buy_notional": 4495.0,
     "original_precomputed_buy_notional": 4495.0,
     "reason_codes": [
-      "no_sell_orders"
+      "no_sell_orders_rebudgeted",
+      "legacy_approved_buys_cash_rebudgeted"
     ],
     "rebudget_total_equity": null,
     "rebuilt_buy_intents": [
@@ -324,7 +326,7 @@
     "sell_orders_submitted": [],
     "sell_orders_submitted_count": 0,
     "skipped_buy_orders": [],
-    "status": "SKIPPED",
+    "status": "OK",
     "suppressed_by_post_sell_rebudget": []
   },
   "scenario": {

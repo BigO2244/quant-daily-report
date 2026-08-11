@@ -194,6 +194,87 @@ def test_paper_lane_uses_immediately_previous_trading_session_snapshot(
     assert identity["shadow_baseline_source_trade_date"] == "2026-08-07"
 
 
+def test_paper_lane_skips_current_preclose_reporting_snapshot(
+    tmp_path: Path,
+) -> None:
+    trade_date = "2026-08-11"
+    payload_path = _bundle(tmp_path, signals=[], trade_date=trade_date)
+    prior_path = _orion_shadow(tmp_path, trade_date="2026-08-10")
+    provisional_path = _orion_shadow(tmp_path, trade_date=trade_date)
+    provisional = json.loads(provisional_path.read_text())
+    provisional.update(
+        {
+            "effective_trade_date": "2026-08-10",
+            "decision_eligible": False,
+            "observation_status": "PENDING_SESSION_CLOSE",
+        }
+    )
+    provisional_path.write_text(json.dumps(provisional), encoding="utf-8")
+
+    plan = _build(
+        tmp_path,
+        payload_path,
+        prices={
+            "AAPL": 100.0,
+            "MSFT": 200.0,
+            "JNJ": 150.0,
+            "PNC": 170.0,
+            "SPG": 180.0,
+        },
+        approved_sleeve="caerus_orion",
+        lane="paper",
+        shadow_root=tmp_path / "outputs" / "shadow_candidates",
+    )
+
+    assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
+    assert plan["decision_source_artifact"]["path"] == str(prior_path)
+    assert plan["decision_source_artifact"]["source_trading_session_lag"] == 1
+    policy = plan["target_attainment_policy"]
+    assert policy["target_cash_weight"] == 0.05
+    assert policy["minimum_cash_weight"] == 0.025
+    assert (
+        plan["approved_execution_package"]["constraints"][
+            "target_attainment_policy"
+        ]
+        == policy
+    )
+
+
+def test_paper_lane_rejects_provisional_previous_session_snapshot(
+    tmp_path: Path,
+) -> None:
+    trade_date = "2026-08-11"
+    payload_path = _bundle(tmp_path, signals=[], trade_date=trade_date)
+    prior_path = _orion_shadow(tmp_path, trade_date="2026-08-10")
+    prior = json.loads(prior_path.read_text())
+    prior.update(
+        {
+            "decision_eligible": False,
+            "observation_status": "PENDING_SESSION_CLOSE",
+        }
+    )
+    prior_path.write_text(json.dumps(prior), encoding="utf-8")
+
+    plan = _build(
+        tmp_path,
+        payload_path,
+        prices={
+            "AAPL": 100.0,
+            "MSFT": 200.0,
+            "JNJ": 150.0,
+            "PNC": 170.0,
+            "SPG": 180.0,
+        },
+        approved_sleeve="caerus_orion",
+        lane="paper",
+        shadow_root=tmp_path / "outputs" / "shadow_candidates",
+    )
+
+    assert plan["status"] == "BLOCKED"
+    assert plan["reason_code"] == "paper_governed_decision_source_invalid"
+    assert "not Decision-eligible" in plan["block_diagnostics"]["error"]
+
+
 def test_paper_lane_rejects_snapshot_older_than_previous_trading_session(
     tmp_path: Path,
 ) -> None:
@@ -256,7 +337,8 @@ def test_full_target_all_names_emitted_and_priced(tmp_path: Path) -> None:
     assert {r["symbol"] for r in tp} == {"AAPL", "MSFT", "JNJ"}
     assert all(r["price"] > 0 for r in tp)
     approved = plan["approved_execution_package"]
-    assert approved["schema_version"] == "caerus.execution.v1"
+    assert approved["schema_version"] == "caerus.execution.v2"
+    assert "constraints" in approved
     assert approved["approved_target_rows"] == tp
     assert approved["approved_cash_weight"] == pytest.approx(plan["cash_target_weight"])
     assert all(Path(path).exists() for path in plan["authority_package_paths"].values())

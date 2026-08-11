@@ -32,6 +32,15 @@ def test_default_registry_preserves_current_active_shadow_strategies() -> None:
         == "SAME_OR_PREVIOUS_TRADING_SESSION"
     )
     assert registry.paper_execution_config()["max_source_trading_session_lag"] == 1
+    policy = registry.paper_execution_config()["target_attainment_policy"]
+    assert policy["account_scope"] == "PAPER"
+    assert policy["share_mode"] == "WHOLE_SHARES"
+    assert policy["target_cash_weight"] == 0.05
+    assert policy["minimum_cash_weight"] == 0.025
+    assert policy["fixed_drift_tolerance"] == 0.02
+    assert policy["nearest_feasible_required"] is True
+    assert policy["comparison_epoch_policy"] == "FIRST_CLEAN_POST_FIX_PAPER_RUN"
+    assert policy["strict_green_propagation"] is True
     assert registry.promotion_candidate_ids() == (
         "caerus_polaris_alpha",
         "caerus_orion_alpha",
@@ -195,3 +204,23 @@ def test_registry_loader_rejects_duplicate_ids(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="duplicate strategy_id"):
         load_strategy_registry(path)
+
+
+def test_paper_execution_config_rejects_invalid_target_attainment_policy(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(
+        Path("config/research/strategy_registry.json").read_text(encoding="utf-8")
+    )
+    orion = next(
+        row for row in payload["strategies"] if row["strategy_id"] == "caerus_orion"
+    )
+    orion["paper_execution"]["target_attainment_policy"][
+        "strict_green_propagation"
+    ] = False
+    registry_path = tmp_path / "strategy_registry.json"
+    registry_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    registry = load_strategy_registry(registry_path)
+    with pytest.raises(ValueError, match="strict green propagation"):
+        registry.paper_execution_config()

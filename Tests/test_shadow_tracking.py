@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import io
 import json
 import subprocess
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
@@ -28,8 +30,12 @@ from research.shadow_tracking.run import (
     main,
     resolve_trade_date,
     trade_date_has_data,
+    write_preclose_reporting_snapshot,
 )
-from research.shadow_tracking.strategies import build_strategy_lookup
+from research.shadow_tracking.strategies import (
+    build_shadow_definitions,
+    build_strategy_lookup,
+)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -777,6 +783,104 @@ def test_runner_writes_no_data_folder_for_unavailable_date(tmp_path: Path) -> No
     assert evaluation["strategies"]["caerus_orion"]["data_reason"] == "PRICE_CACHE_STALE"
     assert evaluation["strategies"]["caerus_orion"]["return_convention"] == "weights_as_of_t"
     assert (dated_dir / "promotion_readiness.json").exists()
+
+
+def test_preclose_reporting_is_current_but_never_decision_eligible(
+    tmp_path: Path,
+) -> None:
+    previous_date = "2026-04-27"
+    trade_date = "2026-04-28"
+    output_root = tmp_path / "shadow"
+    prior_dir = output_root / previous_date
+    definitions = build_shadow_definitions(trade_date=trade_date)
+    performance_strategies: dict[str, dict] = {}
+    for definition in definitions:
+        _write_json(
+            prior_dir / f"{definition.strategy_slug}.json",
+            {
+                "strategy_name": definition.strategy_name,
+                "strategy_slug": definition.strategy_slug,
+                "source_variant": definition.source_variant,
+                "trade_date": previous_date,
+                "effective_trade_date": previous_date,
+                "target_weights": {"AAA": 1.0},
+                "holdings": [{"ticker": "AAA", "target_weight": 1.0}],
+                "expected_turnover": 0.0,
+                "estimated_holding_period_days": 5.0,
+                "weight_concentration": {
+                    "holdings_count": 1,
+                    "max_weight": 1.0,
+                    "top3_concentration": 1.0,
+                    "top5_concentration": 1.0,
+                    "gross_exposure": 1.0,
+                    "cash_weight": 0.0,
+                    "hhi": 1.0,
+                    "effective_n": 1.0,
+                },
+                "alpha_per_dollar_deployed_proxy": 0.0,
+            },
+        )
+        performance_strategies[definition.strategy_slug] = {
+            "strategy_name": definition.strategy_name,
+            "daily_return": 0.01,
+            "nav": 1.01,
+            "previous_nav": 1.0,
+            "weights_count": 1,
+            "gross_exposure": 1.0,
+            "cash_weight": 0.0,
+            "daily_attribution": [],
+        }
+    performance_strategies["spy_benchmark"] = {
+        "strategy_name": "SPY",
+        "daily_return": 0.005,
+        "nav": 1.005,
+        "previous_nav": 1.0,
+        "weights_count": 1,
+        "gross_exposure": 1.0,
+        "cash_weight": 0.0,
+        "daily_attribution": [],
+    }
+    _write_json(
+        prior_dir / "shadow_performance.json",
+        {
+            "trade_date": previous_date,
+            "status": "OK",
+            "data_status": "OK",
+            "return_convention": "weights_as_of_t",
+            "strategies": performance_strategies,
+        },
+    )
+
+    written = write_preclose_reporting_snapshot(
+        output_root=output_root,
+        trade_date=trade_date,
+        previous_trade_date=previous_date,
+        panel_meta={"cache": "fixture"},
+        panel=pd.DataFrame(),
+        now_et=dt.datetime(2026, 4, 28, 8, 0, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    assert written is True
+    current_orion = json.loads(
+        (output_root / trade_date / "caerus_orion.json").read_text()
+    )
+    performance = json.loads(
+        (output_root / trade_date / "shadow_performance.json").read_text()
+    )
+    evaluation = json.loads(
+        (output_root / trade_date / "shadow_evaluation.json").read_text()
+    )
+    comparison = json.loads(
+        (output_root / trade_date / "comparison.json").read_text()
+    )
+    assert current_orion["decision_eligible"] is False
+    assert current_orion["effective_trade_date"] == previous_date
+    assert performance["data_status"] == "OK"
+    assert performance["observation_status"] == "PENDING_SESSION_CLOSE"
+    assert performance["strategies"]["caerus_orion"]["daily_return"] is None
+    assert evaluation["strategies"]["caerus_orion"]["rolling_count_of_valid_days"] == 1
+    assert comparison["status"] == "PENDING_SESSION_CLOSE"
+    assert comparison["decision_eligible"] is False
 
 
 def test_delta_generation_when_prior_day_exists(tmp_path: Path) -> None:

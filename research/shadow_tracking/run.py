@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import math
 from itertools import combinations
 from pathlib import Path
 
 import pandas as pd
+from zoneinfo import ZoneInfo
 
 from alpha_stack.research.metrics import summarise_performance
 from core.strategy_registry import load_strategy_registry
@@ -57,6 +59,18 @@ def main(argv: list[str] | None = None) -> int:
     previous_trade_date = find_previous_trading_date(signals, trade_date=trade_date)
 
     if not trade_date_has_data(signals, trade_date=trade_date):
+        if write_preclose_reporting_snapshot(
+            output_root=output_root,
+            trade_date=trade_date,
+            previous_trade_date=previous_trade_date,
+            panel_meta=panel_meta,
+            panel=panel,
+        ):
+            print(
+                f"[SHADOW] pre-close reporting snapshot carried from "
+                f"{previous_trade_date}; Decision eligibility remains false"
+            )
+            return 0
         no_data_reason = classify_no_data_reason(signals, trade_date=trade_date, allow_download=bool(args.allow_download))
         print(f"[SHADOW] no data for trade_date={trade_date}")
         print(f"[SHADOW] no data reason: {no_data_reason}")
@@ -211,6 +225,165 @@ def find_previous_trading_date(signals: pd.DataFrame, *, trade_date: str) -> str
     if len(earlier) == 0:
         return None
     return str(earlier[-1].date())
+
+
+def is_preclose_reporting_window(
+    trade_date: str,
+    *,
+    now_et: dt.datetime | None = None,
+) -> bool:
+    """True only for today's open XNYS session before its official close."""
+
+    from paper.trading_calendar import market_session_status
+
+    current = now_et or dt.datetime.now(ZoneInfo("America/New_York"))
+    if current.tzinfo is None:
+        raise ValueError("now_et must be timezone-aware")
+    status = market_session_status(
+        run_date=trade_date,
+        now_et=current,
+        cutoff_time_et="16:00",
+    )
+    return bool(
+        status.is_trading_day
+        and current.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+        == trade_date
+        and status.session_close_et is not None
+        and current.astimezone(ZoneInfo("America/New_York"))
+        <= status.session_close_et
+    )
+
+
+def write_preclose_reporting_snapshot(
+    *,
+    output_root: Path,
+    trade_date: str,
+    previous_trade_date: str | None,
+    panel_meta: dict,
+    panel: pd.DataFrame,
+    now_et: dt.datetime | None = None,
+) -> bool:
+    """Publish a current-date reporting view without creating Decision authority.
+
+    Before the current session closes there cannot be a legitimate close-to-close
+    return. The reporting surface therefore carries the prior immutable portfolio
+    and NAV, labels the observation pending, and explicitly prevents Decision from
+    selecting the current-date candidate. Post-close hydration replaces these files
+    with the completed session observation.
+    """
+
+    if not previous_trade_date or not is_preclose_reporting_window(
+        trade_date,
+        now_et=now_et,
+    ):
+        return False
+    prior_dir = output_root / previous_trade_date
+    if not prior_dir.exists():
+        return False
+    definitions = build_shadow_definitions(trade_date=trade_date)
+    strategy_payloads: dict[str, dict] = {}
+    for definition in definitions:
+        prior = safe_read_json(prior_dir / f"{definition.strategy_slug}.json")
+        if not prior:
+            return False
+        carried = json.loads(json.dumps(prior))
+        carried.update(
+            {
+                "trade_date": trade_date,
+                "effective_trade_date": previous_trade_date,
+                "observation_status": "PENDING_SESSION_CLOSE",
+                "reporting_carried_from_trade_date": previous_trade_date,
+                "decision_eligible": False,
+                "decision_ineligibility_reason": "CURRENT_SESSION_CLOSE_NOT_AVAILABLE",
+            }
+        )
+        strategy_payloads[definition.strategy_slug] = carried
+
+    dated_dir = output_root / trade_date
+    dated_dir.mkdir(parents=True, exist_ok=True)
+    for slug, payload in strategy_payloads.items():
+        (dated_dir / f"{slug}.json").write_text(json.dumps(payload, indent=2))
+
+    delta_payload = {
+        "trade_date": trade_date,
+        "previous_date": previous_trade_date,
+        "status": "PENDING_SESSION_CLOSE",
+        "reason_code": "CURRENT_SESSION_CLOSE_NOT_AVAILABLE",
+        "strategies": {
+            slug: {"status": "UNCHANGED_PENDING_CLOSE"}
+            for slug in strategy_payloads
+        },
+    }
+    comparison_payload = build_comparison_payload(
+        strategy_payloads,
+        trade_date=trade_date,
+        delta_payload=delta_payload,
+    )
+    comparison_payload.update(
+        {
+            "status": "PENDING_SESSION_CLOSE",
+            "observation_status": "PENDING_SESSION_CLOSE",
+            "data_status": "OK",
+            "reporting_carried_from_trade_date": previous_trade_date,
+            "decision_eligible": False,
+            "data": panel_meta,
+        }
+    )
+    prior_performance = safe_read_json(prior_dir / "shadow_performance.json")
+    if not prior_performance:
+        return False
+    performance = json.loads(json.dumps(prior_performance))
+    performance.update(
+        {
+            "trade_date": trade_date,
+            "previous_trade_date": previous_trade_date,
+            "status": "PENDING_SESSION_CLOSE",
+            "reason_code": "CURRENT_SESSION_CLOSE_NOT_AVAILABLE",
+            "data_status": "OK",
+            "data_reason": None,
+            "observation_status": "PENDING_SESSION_CLOSE",
+            "reporting_carried_from_trade_date": previous_trade_date,
+            "decision_eligible": False,
+        }
+    )
+    for strategy in (performance.get("strategies") or {}).values():
+        if isinstance(strategy, dict):
+            strategy["previous_nav"] = strategy.get("nav")
+            strategy["daily_return"] = None
+            strategy["daily_attribution"] = []
+            strategy["observation_status"] = "PENDING_SESSION_CLOSE"
+
+    (dated_dir / "delta.json").write_text(json.dumps(delta_payload, indent=2))
+    (dated_dir / "summary.json").write_text(json.dumps(comparison_payload, indent=2))
+    (dated_dir / "comparison.json").write_text(json.dumps(comparison_payload, indent=2))
+    (dated_dir / "shadow_performance.json").write_text(json.dumps(performance, indent=2))
+    evaluation = build_shadow_evaluation_payload(
+        output_root=output_root,
+        trade_date=trade_date,
+    )
+    (dated_dir / "shadow_evaluation.json").write_text(json.dumps(evaluation, indent=2))
+    write_phase_c_promotion_artifacts(
+        output_root=output_root,
+        trade_date=trade_date,
+        shadow_evaluation=evaluation,
+    )
+    (dated_dir / "comparison.md").write_text(
+        build_comparison_markdown(comparison_payload, dated_dir=dated_dir)
+    )
+    try:
+        write_feedback_loop_artifacts(
+            output_root=output_root,
+            trade_date=trade_date,
+            panel=panel,
+        )
+    except Exception:
+        pass
+    write_alpha_evidence_chain_artifacts(
+        output_root=output_root,
+        trade_date=trade_date,
+        assess_latest_pointer=False,
+    )
+    return True
 
 
 def build_strategy_payload(*, definition, snapshot: dict, backtest: dict, trade_date: str) -> dict:
@@ -1045,6 +1218,7 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
         chain_state = current_performance.get("status")
         data_status = current_performance.get("data_status")
         data_reason = current_performance.get("data_reason")
+        observation_status = current_performance.get("observation_status")
         return_convention = current_performance.get("return_convention")
         nav = current.get("nav")
         nav_history, nav_history_source = nav_history_by_slug.get(slug, (None, None))
@@ -1073,6 +1247,7 @@ def build_shadow_evaluation_payload(*, output_root: Path, trade_date: str) -> di
             "status": chain_state,
             "data_status": data_status,
             "data_reason": data_reason,
+            "observation_status": observation_status,
             "return_convention": return_convention,
             "daily_return": current.get("daily_return"),
             "nav": nav,
@@ -1374,7 +1549,12 @@ def list_shadow_date_dirs(*, output_root: Path, trade_date: str) -> list[str]:
             normalized = pd.Timestamp(child.name).strftime("%Y-%m-%d")
         except Exception:
             continue
-        if normalized == child.name and child.name <= trade_date:
+        performance = safe_read_json(child / "shadow_performance.json")
+        pending_close = bool(
+            isinstance(performance, dict)
+            and performance.get("observation_status") == "PENDING_SESSION_CLOSE"
+        )
+        if normalized == child.name and child.name <= trade_date and not pending_close:
             candidates.append(child.name)
     return sorted(candidates)
 
@@ -1400,6 +1580,8 @@ def extract_valid_daily_returns(*, performance_history: list[tuple[str, dict | N
             return []
         if payload.get("data_status") != "OK":
             continue
+        if payload.get("observation_status") == "PENDING_SESSION_CLOSE":
+            continue
         strategy = ((payload.get("strategies") or {}).get(strategy_slug) or {})
         if not strategy:
             if seen_strategy:
@@ -1410,7 +1592,9 @@ def extract_valid_daily_returns(*, performance_history: list[tuple[str, dict | N
                 return []
             continue
         seen_strategy = True
-        returns.append(float(strategy.get("daily_return") or 0.0))
+        if strategy.get("daily_return") is None:
+            continue
+        returns.append(float(strategy.get("daily_return")))
     return returns
 
 
@@ -1424,6 +1608,8 @@ def extract_chain_nav_history(*, performance_history: list[tuple[str, dict | Non
             continue
         if payload.get("status") == "BROKEN_CHAIN":
             return None
+        if payload.get("observation_status") == "PENDING_SESSION_CLOSE":
+            continue
         strategy = ((payload.get("strategies") or {}).get(strategy_slug) or {})
         if not strategy:
             if seen_strategy:
@@ -1511,6 +1697,7 @@ def extract_nav_series_history(
             isinstance(current, dict)
             and current.get("data_status") == "OK"
             and current.get("status") != "BROKEN_CHAIN"
+            and current.get("observation_status") != "PENDING_SESSION_CLOSE"
             and current_strategy.get("nav") is not None
         ):
             current_nav = _as_float(current_strategy.get("nav"))

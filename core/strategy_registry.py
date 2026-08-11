@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.target_attainment_policy import validate_target_attainment_policy
+
 
 SCHEMA_VERSION = "caerus_strategy_registry_v1"
 
@@ -213,7 +215,12 @@ class StrategyRegistry:
 
     def paper_execution_config(self) -> dict[str, Any]:
         entry = self.require(self.paper_execution_strategy_id())
-        return dict((entry.raw or {}).get("paper_execution") or {})
+        config = dict((entry.raw or {}).get("paper_execution") or {})
+        config["target_attainment_policy"] = validate_target_attainment_policy(
+            config.get("target_attainment_policy"),
+            expected_target_cash_weight=float(config.get("target_cash_weight") or 0.0),
+        )
+        return config
 
     def baseline_strategy_id(self) -> str:
         baselines = [

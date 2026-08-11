@@ -9,8 +9,10 @@ from typing import Any, Mapping, Sequence
 
 EVIDENCE_SCHEMA_VERSION = "caerus.evidence.v1"
 DECISION_SCHEMA_VERSION = "caerus.decision.v1"
-RISK_SCHEMA_VERSION = "caerus.risk.v1"
-EXECUTION_SCHEMA_VERSION = "caerus.execution.v1"
+LEGACY_RISK_SCHEMA_VERSION = "caerus.risk.v1"
+RISK_SCHEMA_VERSION = "caerus.risk.v2"
+LEGACY_EXECUTION_SCHEMA_VERSION = "caerus.execution.v1"
+EXECUTION_SCHEMA_VERSION = "caerus.execution.v2"
 AUDIT_SCHEMA_VERSION = "caerus.audit.v1"
 
 
@@ -173,7 +175,7 @@ class RiskPackage:
     content_hash: str = field(init=False)
 
     def __post_init__(self) -> None:
-        if self.schema_version != RISK_SCHEMA_VERSION:
+        if self.schema_version not in {LEGACY_RISK_SCHEMA_VERSION, RISK_SCHEMA_VERSION}:
             raise AuthorityContractError("unsupported risk schema version")
         if not self.decision_package_id or not self.decision_hash:
             raise AuthorityContractError("risk package must bind to Decision")
@@ -210,17 +212,22 @@ class ExecutionPackage:
     risk_hash: str
     approved_cash_weight: float
     approved_target_rows: tuple[Mapping[str, Any], ...]
+    constraints: Mapping[str, Any]
     source_refs: tuple[str, ...]
     content_hash: str = field(init=False)
 
     def __post_init__(self) -> None:
-        if self.schema_version != EXECUTION_SCHEMA_VERSION:
+        if self.schema_version not in {
+            LEGACY_EXECUTION_SCHEMA_VERSION,
+            EXECUTION_SCHEMA_VERSION,
+        }:
             raise AuthorityContractError("unsupported execution schema version")
         if not self.risk_package_id or not self.risk_hash:
             raise AuthorityContractError("execution package must bind to Risk")
         _validate_trade_date(self.trade_date)
         object.__setattr__(self, "approved_cash_weight", _cash_weight(self.approved_cash_weight, "approved_cash_weight"))
         object.__setattr__(self, "approved_target_rows", _rows(self.approved_target_rows))
+        object.__setattr__(self, "constraints", _freeze(self.constraints))
         object.__setattr__(self, "source_refs", _refs(self.source_refs))
         object.__setattr__(self, "content_hash", _hash(self.to_dict(include_hash=False)))
 
@@ -235,6 +242,8 @@ class ExecutionPackage:
             "approved_target_rows": [_thaw(row) for row in self.approved_target_rows],
             "source_refs": list(self.source_refs),
         }
+        if self.schema_version != LEGACY_EXECUTION_SCHEMA_VERSION:
+            result["constraints"] = _thaw(self.constraints)
         if include_hash:
             result["content_hash"] = self.content_hash
         return result

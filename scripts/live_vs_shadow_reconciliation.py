@@ -12,6 +12,7 @@ import pandas as pd
 
 from core.strategy_identity import strategy_identity_metadata
 from core.strategy_registry import load_strategy_registry
+from core.target_attainment_policy import target_status_passes
 
 
 BENCHMARK_SYMBOL = "SPY"
@@ -23,6 +24,7 @@ MINOR_DRIFT_RETURN_THRESHOLD = 0.015
 RECONCILED_OVERLAP_THRESHOLD = 0.80
 MINOR_DRIFT_OVERLAP_THRESHOLD = 0.60
 STRATEGY_MISMATCH_STATUS = "NOT_ALIGNED"
+COMPARISON_EPOCH_SCHEMA_VERSION = "caerus.live_shadow_comparison_epoch.v1"
 
 
 @dataclass(frozen=True)
@@ -324,6 +326,27 @@ def _load_live_target_weights(
                 "decision_source_artifact": source,
                 "target_attainment_status": attainment.get("status"),
                 "target_attainment_path": str(attainment_path),
+                "target_attainment_policy": (
+                    (execution_payload or {}).get("target_attainment_policy")
+                    or ((package.get("constraints") or {}).get(
+                        "target_attainment_policy"
+                    ) if isinstance(package.get("constraints"), dict) else None)
+                ),
+                "broker_reconciliation_status": (
+                    (_read_json(run_root / "live_pilot_reconciliation.json") or {}).get(
+                        "status"
+                    )
+                ),
+                "execution_integrity_status": (
+                    (_read_json(run_root / "audit" / "execution_integrity.json") or {}).get(
+                        "status"
+                    )
+                ),
+                "execution_equality_decision": (
+                    (_read_json(run_root / "equality_gate.json") or {}).get(
+                        "decision"
+                    )
+                ),
             }
             return (
                 {symbol: round(weight, 10) for symbol, weight in sorted(weights.items())},
@@ -390,6 +413,126 @@ def _holdings_reconciliation(live_weights: dict[str, float], shadow_weights: dic
     }
 
 
+def _aligned_return_metrics(
+    shadow_returns: pd.DataFrame,
+    live_returns: pd.DataFrame,
+    *,
+    epoch_start_date: str | None,
+) -> dict[str, Any]:
+    if not shadow_returns.empty and not live_returns.empty:
+        aligned = shadow_returns.merge(live_returns, on="date", how="inner")
+        aligned = aligned.dropna(subset=["live_daily_return", "shadow_daily_return"])
+    else:
+        aligned = pd.DataFrame()
+    if epoch_start_date and not aligned.empty:
+        aligned = aligned[aligned["date"] >= epoch_start_date].copy()
+    if not aligned.empty and "spy_daily_return" in aligned.columns:
+        aligned = aligned.dropna(subset=["spy_daily_return"])
+    valid_days = int(len(aligned)) if not aligned.empty else 0
+    live_cum = (
+        _compound(aligned["live_daily_return"].astype(float).tolist())
+        if valid_days
+        else None
+    )
+    shadow_cum = (
+        _compound(aligned["shadow_daily_return"].astype(float).tolist())
+        if valid_days
+        else None
+    )
+    spy_cum = (
+        _compound(aligned["spy_daily_return"].astype(float).tolist())
+        if valid_days and "spy_daily_return" in aligned
+        else None
+    )
+    return {
+        "aligned": aligned,
+        "valid_days": valid_days,
+        "start_date": str(aligned["date"].iloc[0]) if valid_days else None,
+        "end_date": str(aligned["date"].iloc[-1]) if valid_days else None,
+        "live_cumulative_return": live_cum,
+        "shadow_cumulative_return": shadow_cum,
+        "spy_cumulative_return": spy_cum,
+        "live_excess_vs_spy": (
+            round(live_cum - spy_cum, 10)
+            if live_cum is not None and spy_cum is not None
+            else None
+        ),
+        "shadow_excess_vs_spy": (
+            round(shadow_cum - spy_cum, 10)
+            if shadow_cum is not None and spy_cum is not None
+            else None
+        ),
+        "live_minus_shadow": (
+            round(live_cum - shadow_cum, 10)
+            if live_cum is not None and shadow_cum is not None
+            else None
+        ),
+    }
+
+
+def _comparison_epoch_path(precompute_dir: Path) -> Path:
+    return (
+        precompute_dir.parent
+        / "reconciliation"
+        / "live_vs_shadow"
+        / "comparison_epoch.json"
+    )
+
+
+def _load_comparison_epoch(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    if not path.exists():
+        return None, None
+    payload = _read_json(path)
+    if not payload:
+        return None, "COMPARISON_EPOCH_INVALID"
+    if payload.get("schema_version") != COMPARISON_EPOCH_SCHEMA_VERSION:
+        return None, "COMPARISON_EPOCH_INVALID"
+    start_date = str(payload.get("start_trade_date") or "")
+    try:
+        if pd.Timestamp(start_date).strftime("%Y-%m-%d") != start_date:
+            raise ValueError(start_date)
+    except Exception:
+        return None, "COMPARISON_EPOCH_INVALID"
+    return payload, None
+
+
+def _write_comparison_epoch_once(
+    *,
+    path: Path,
+    trade_date: str,
+    execution_context: dict[str, Any],
+    live_nav_path: Path,
+) -> dict[str, Any]:
+    legacy_nav_hash = _sha256(live_nav_path) if live_nav_path.exists() else None
+    payload = {
+        "schema_version": COMPARISON_EPOCH_SCHEMA_VERSION,
+        "created_at": _utc_now_iso(),
+        "start_trade_date": trade_date,
+        "policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "run_root": execution_context.get("run_root"),
+        "approved_execution_package_hash": execution_context.get(
+            "approved_execution_package_hash"
+        ),
+        "legacy_history": {
+            "preserved": True,
+            "comparison_cutoff_before": trade_date,
+            "live_nav_path": str(live_nav_path),
+            "live_nav_sha256_at_epoch_creation": legacy_nav_hash,
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+    except FileExistsError:
+        existing, error = _load_comparison_epoch(path)
+        if error or existing is None:
+            raise ValueError("comparison epoch exists but is invalid")
+        return existing
+    return payload
+
+
 def _classify(
     *,
     reason_codes: list[str],
@@ -400,7 +543,13 @@ def _classify(
 ) -> str:
     if initializing_alignment_verified:
         return "ALIGNED_INITIALIZING"
-    blocking = {"MISSING_LIVE_DATA", "MISSING_SHADOW_DATA", "MISSING_BROKER_POSITIONS", "INSUFFICIENT_HISTORY"}
+    blocking = {
+        "MISSING_LIVE_DATA",
+        "MISSING_SHADOW_DATA",
+        "MISSING_BROKER_POSITIONS",
+        "INSUFFICIENT_HISTORY",
+        "COMPARISON_EPOCH_INVALID",
+    }
     if blocking & set(reason_codes) or valid_days < 2:
         return "NOT_COMPARABLE"
     if "DIFFERENT_STRATEGY_PATH" in set(reason_codes):
@@ -435,33 +584,6 @@ def build_reconciliation(
     )
     live_returns, live_reasons = _load_live_returns(live_nav_path)
     reason_codes = list(shadow_reasons + live_reasons)
-
-    if not shadow_returns.empty and not live_returns.empty:
-        aligned = shadow_returns.merge(live_returns, on="date", how="inner")
-        aligned = aligned.dropna(subset=["live_daily_return", "shadow_daily_return"])
-    else:
-        aligned = pd.DataFrame()
-    if not aligned.empty and "spy_daily_return" in aligned.columns:
-        aligned = aligned.dropna(subset=["spy_daily_return"])
-    if aligned.empty:
-        valid_days = 0
-        start_date = None
-        end_date = None
-    else:
-        valid_days = int(len(aligned))
-        start_date = str(aligned["date"].iloc[0])
-        end_date = str(aligned["date"].iloc[-1])
-    if valid_days < 2:
-        reason_codes.append("INSUFFICIENT_HISTORY")
-
-    live_cum = _compound(aligned["live_daily_return"].astype(float).tolist()) if valid_days else None
-    shadow_cum = _compound(aligned["shadow_daily_return"].astype(float).tolist()) if valid_days else None
-    spy_cum = _compound(aligned["spy_daily_return"].astype(float).tolist()) if valid_days and "spy_daily_return" in aligned else None
-    if spy_cum is None:
-        reason_codes.append("BENCHMARK_MISSING")
-    live_excess = round(live_cum - spy_cum, 10) if live_cum is not None and spy_cum is not None else None
-    shadow_excess = round(shadow_cum - spy_cum, 10) if shadow_cum is not None and spy_cum is not None else None
-    live_minus_shadow = round(live_cum - shadow_cum, 10) if live_cum is not None and shadow_cum is not None else None
 
     (
         live_target_weights,
@@ -523,10 +645,6 @@ def build_reconciliation(
     if strategy_mismatch:
         reason_codes.append("DIFFERENT_STRATEGY_PATH")
 
-    if live_minus_shadow is not None and abs(live_minus_shadow) <= RECONCILED_RETURN_THRESHOLD:
-        reason_codes.append("RETURNS_RECONCILED")
-    elif live_minus_shadow is not None:
-        reason_codes.append("RETURNS_DRIFT")
     if holdings["overlap_weight"] >= RECONCILED_OVERLAP_THRESHOLD:
         reason_codes.append("HOLDINGS_RECONCILED")
     else:
@@ -552,17 +670,83 @@ def build_reconciliation(
     target_attainment_status = str(
         execution_context.get("target_attainment_status") or ""
     ).upper()
+    target_attainment_pass = target_status_passes(target_attainment_status)
+    epoch_path = _comparison_epoch_path(precompute_dir)
+    comparison_epoch, epoch_error = _load_comparison_epoch(epoch_path)
+    if epoch_error:
+        reason_codes.append(epoch_error)
+    policy = execution_context.get("target_attainment_policy")
+    policy_epoch_enabled = bool(
+        isinstance(policy, dict)
+        and str(policy.get("comparison_epoch_policy") or "").upper()
+        == "FIRST_CLEAN_POST_FIX_PAPER_RUN"
+    )
+    clean_execution_for_epoch = bool(
+        policy_epoch_enabled
+        and not strategy_mismatch
+        and lineage_verified
+        and target_attainment_pass
+        and str(execution_context.get("broker_reconciliation_status") or "").upper()
+        == "CLEAN"
+        and str(execution_context.get("execution_integrity_status") or "").upper()
+        == "OK"
+        and str(execution_context.get("execution_equality_decision") or "").upper()
+        == "WOULD_PROCEED"
+        and target_comparison["overlap_weight"] >= RECONCILED_OVERLAP_THRESHOLD
+        and not live_positions.missing
+    )
+    if comparison_epoch is None and epoch_error is None and clean_execution_for_epoch:
+        comparison_epoch = _write_comparison_epoch_once(
+            path=epoch_path,
+            trade_date=trade_date,
+            execution_context=execution_context,
+            live_nav_path=live_nav_path,
+        )
+        reason_codes.append("COMPARISON_EPOCH_STARTED")
+
+    epoch_start_date = (
+        str(comparison_epoch.get("start_trade_date") or "")
+        if comparison_epoch
+        else None
+    )
+    metrics = _aligned_return_metrics(
+        shadow_returns,
+        live_returns,
+        epoch_start_date=epoch_start_date,
+    )
+    aligned = metrics["aligned"]
+    valid_days = int(metrics["valid_days"])
+    start_date = metrics["start_date"]
+    end_date = metrics["end_date"]
+    live_cum = metrics["live_cumulative_return"]
+    shadow_cum = metrics["shadow_cumulative_return"]
+    spy_cum = metrics["spy_cumulative_return"]
+    live_excess = metrics["live_excess_vs_spy"]
+    shadow_excess = metrics["shadow_excess_vs_spy"]
+    live_minus_shadow = metrics["live_minus_shadow"]
+    if valid_days < 2:
+        reason_codes.append("INSUFFICIENT_HISTORY")
+    if spy_cum is None:
+        reason_codes.append("BENCHMARK_MISSING")
+    if (
+        live_minus_shadow is not None
+        and abs(live_minus_shadow) <= RECONCILED_RETURN_THRESHOLD
+    ):
+        reason_codes.append("RETURNS_RECONCILED")
+    elif live_minus_shadow is not None:
+        reason_codes.append("RETURNS_DRIFT")
     initializing_alignment_verified = bool(
         valid_days < 2
         and not strategy_mismatch
         and lineage_verified
-        and target_attainment_status == "OK_TARGET_ATTAINED"
+        and target_attainment_pass
         and target_comparison["overlap_weight"] >= RECONCILED_OVERLAP_THRESHOLD
         and not live_positions.missing
+        and (not policy_epoch_enabled or clean_execution_for_epoch)
     )
     if lineage_verified:
         reason_codes.append("IMMUTABLE_LINEAGE_VERIFIED")
-    if target_attainment_status == "OK_TARGET_ATTAINED":
+    if target_attainment_pass:
         reason_codes.append("TARGET_ATTAINED")
     if initializing_alignment_verified:
         reason_codes.append("PERFORMANCE_HISTORY_INITIALIZING")
@@ -585,6 +769,8 @@ def build_reconciliation(
         "classification": status,
         "comparison_start_date": start_date,
         "comparison_end_date": end_date,
+        "comparison_epoch": comparison_epoch,
+        "comparison_epoch_path": str(epoch_path),
         "number_of_valid_days": valid_days,
         "benchmark_symbol": BENCHMARK_SYMBOL,
         "strategy_identity": identity,

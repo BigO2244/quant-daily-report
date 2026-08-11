@@ -211,17 +211,52 @@ def compute_transition_trades(
             price = _safe_float(row.get("price") or row.get("entry_price"), 0.0)
             if symbol and price > 0.0:
                 approved_prices.loc[symbol] = price
-        from paper import paper_broker as paper_broker_module
+        policy_payload = package.constraints.get("target_attainment_policy")
+        if policy_payload:
+            if str(config.mode or "").strip().lower() != "paper":
+                raise ValueError("whole-share target-attainment policy is PAPER-only")
+            from core.whole_share_feasibility import (
+                build_nearest_feasible_whole_share_trades,
+                seal_whole_share_proof,
+            )
 
-        raw_trades, base_meta = paper_broker_module.build_rebalance_trades(
-            holdings=request.holdings,
-            targets=approved_targets,
-            prices=approved_prices,
-            total_equity=float(request.total_equity),
-            starting_cash=float(request.starting_cash),
-            target_cash_weight=float(package.approved_cash_weight),
-            cfg=cfg,
-        )
+            raw_trades, feasibility = build_nearest_feasible_whole_share_trades(
+                holdings=request.holdings,
+                targets=approved_targets,
+                prices=approved_prices,
+                total_equity=float(request.total_equity),
+                cfg=cfg,
+                policy=policy_payload,
+                max_orders=int(config.constraints.max_trades_per_day or 0),
+            )
+            feasibility = seal_whole_share_proof(
+                {
+                    **dict(feasibility),
+                    "approved_execution_package_hash": package.content_hash,
+                    "approved_risk_package_hash": package.risk_hash,
+                }
+            )
+            base_meta = {
+                "deadband_skipped": [],
+                "deadband_skipped_count": 0,
+                "cash_sweep_added_shares": 0,
+                "cash_sweep_iterations": 0,
+                "cash_sweep_tickers": [],
+                "cash_sweep_remaining_dollars": feasibility.get("projected_cash"),
+                "whole_share_feasibility": feasibility,
+            }
+        else:
+            from paper import paper_broker as paper_broker_module
+
+            raw_trades, base_meta = paper_broker_module.build_rebalance_trades(
+                holdings=request.holdings,
+                targets=approved_targets,
+                prices=approved_prices,
+                total_equity=float(request.total_equity),
+                starting_cash=float(request.starting_cash),
+                target_cash_weight=float(package.approved_cash_weight),
+                cfg=cfg,
+            )
         return raw_trades, {
             **dict(base_meta),
             "source": "approved_execution_package",
@@ -258,6 +293,54 @@ def compute_transition_trades(
         target_cash_weight=float(request.target_cash_weight),
         cfg=cfg,
     )
+
+
+def _approved_target_attainment_policy(
+    request: ExecutionRequest,
+) -> Mapping[str, Any] | None:
+    payload = request.approved_execution_package
+    if not isinstance(payload, Mapping):
+        return None
+    constraints = payload.get("constraints")
+    if not isinstance(constraints, Mapping):
+        return None
+    policy = constraints.get("target_attainment_policy")
+    if not isinstance(policy, Mapping) or not policy:
+        return None
+    from core.target_attainment_policy import validate_target_attainment_policy
+
+    return validate_target_attainment_policy(
+        policy,
+        expected_target_cash_weight=float(request.target_cash_weight),
+    )
+
+
+def _lifecycle_targets(
+    request: ExecutionRequest,
+    trade_meta: Mapping[str, Any],
+) -> pd.DataFrame:
+    """Carry Decision's proven integer quantities through every lifecycle phase."""
+
+    targets = request.targets.copy()
+    proof = trade_meta.get("whole_share_feasibility")
+    if not isinstance(proof, Mapping):
+        return targets
+    allocation = proof.get("allocation")
+    if not isinstance(allocation, list):
+        return targets
+    quantities = {
+        str(row.get("symbol") or "").strip().upper(): int(row.get("target_quantity"))
+        for row in allocation
+        if isinstance(row, Mapping)
+        and str(row.get("symbol") or "").strip()
+        and row.get("target_quantity") is not None
+    }
+    if not quantities:
+        return targets
+    targets["target_quantity"] = targets["ticker"].map(quantities)
+    if targets["target_quantity"].isna().any():
+        raise ValueError("whole-share feasibility proof omits an approved target")
+    return targets
 
 
 def apply_capital_budget_and_execution_filter(
@@ -823,6 +906,13 @@ def execute_lifecycle(
         capital_budget = dict(request.capital_budget_override)
     requested_buy_notional = float(capital_budget.get("requested_buy_notional") or 0.0)
     sell_trades, original_buy_trades = _split_trades(executable_trades, capital_trades)
+    lifecycle_targets = _lifecycle_targets(request, trade_meta)
+    target_policy = _approved_target_attainment_policy(request)
+    governed_cash_floor_weight = (
+        float(target_policy["minimum_cash_weight"])
+        if target_policy is not None
+        else float(request.target_cash_weight)
+    )
 
     submitted_sells = tuple(
         _submit_with_ledger(adapter=adapter, intent=intent, config=config, request=request)
@@ -848,7 +938,7 @@ def execute_lifecycle(
         buy_budget, post_sell_budget_meta = _post_sell_buy_budget(
             account=post_sell_account,
             cfg=cfg,
-            target_cash_weight=float(request.target_cash_weight),
+            target_cash_weight=governed_cash_floor_weight,
             fallback_equity=float(request.total_equity),
             capital_constraint_clear=capital_constraint_clear,
         )
@@ -877,7 +967,7 @@ def execute_lifecycle(
                 zero_budget_block_reason = BUY_BLOCKED_RISK_CASH_TARGET
         rebuilt_buy_trades, rebudget_meta, rebudget_skipped = _rebuild_post_sell_buy_trades(
             holdings=post_sell_holdings,
-            targets=request.targets,
+            targets=lifecycle_targets,
             prices=request.prices,
             total_equity=float(
                 request.total_equity
@@ -898,7 +988,7 @@ def execute_lifecycle(
         buy_budget, post_sell_budget_meta = _post_sell_buy_budget(
             account=post_sell_account,
             cfg=cfg,
-            target_cash_weight=float(request.target_cash_weight),
+            target_cash_weight=governed_cash_floor_weight,
             fallback_equity=float(request.total_equity),
             capital_constraint_clear=capital_constraint_clear,
         )
@@ -937,16 +1027,19 @@ def execute_lifecycle(
             or 0.0
         )
         post_sell_cash = float(post_sell_account.get("cash") or 0.0)
-        risk_cash_target = max(0.0, post_sell_equity * float(request.target_cash_weight or 0.0))
+        risk_cash_target = max(0.0, post_sell_equity * governed_cash_floor_weight)
+        risk_cash_target_buy_budget = max(0.0, post_sell_cash - risk_cash_target)
+        buy_budget = min(float(buy_budget or 0.0), risk_cash_target_buy_budget)
         post_sell_budget_meta = {
             "post_sell_cash": post_sell_cash,
             "post_sell_equity": post_sell_equity,
             "post_sell_buying_power": post_sell_account.get("buying_power"),
             "risk_cash_target": risk_cash_target,
             "target_cash_weight": float(request.target_cash_weight or 0.0),
+            "minimum_cash_weight": governed_cash_floor_weight,
             "buy_budget_before_safeguards": post_sell_cash,
             "broker_safeguard_buy_budget": float(buy_budget or 0.0),
-            "risk_cash_target_buy_budget": max(0.0, post_sell_cash - risk_cash_target),
+            "risk_cash_target_buy_budget": risk_cash_target_buy_budget,
             "buy_budget_after_safeguards": float(buy_budget or 0.0),
             "buy_budget_basis": buy_budget_basis,
         }
@@ -956,23 +1049,91 @@ def execute_lifecycle(
             account=post_sell_account,
             config=config,
         )
-        rebuilt_buy_trades = original_buy_trades.copy()
-        rebuilt_buy_trades, buy_limit_skipped = _apply_buy_order_limit(
-            rebuilt_buy_trades,
-            config=config,
-        )
-        rebudget_meta = {
-            "status": "SKIPPED",
-            "reason_codes": ["no_sell_orders"],
-            "candidate_count": int(len(rebuilt_buy_trades)),
-            "recomputed_requested_buy_notional": requested_buy_notional,
-            "recomputed_buy_notional": float(
-                rebuilt_buy_trades["notional"].astype(float).sum()
+        max_rebudget_buy_orders = max(0, int(cfg.max_trades_per_day or 0))
+        if config.constraints.max_buy_orders is not None:
+            max_rebudget_buy_orders = min(
+                max_rebudget_buy_orders,
+                int(config.constraints.max_buy_orders),
             )
-            if not rebuilt_buy_trades.empty and "notional" in rebuilt_buy_trades.columns
-            else 0.0,
-        }
-        rebudget_skipped = buy_limit_skipped
+        if config.constraints.max_one_order:
+            max_rebudget_buy_orders = min(max_rebudget_buy_orders, 1)
+        if target_policy is None:
+            # Historical precomputed callers do not carry an immutable target
+            # quantity proof. Preserve their already-approved symbols and only
+            # clip quantities to the available cash budget; rebuilding from the
+            # ambient portfolio target would be downstream target substitution.
+            requested_legacy_buy_notional = float(
+                original_buy_trades.get("notional", pd.Series(dtype=float))
+                .fillna(0.0)
+                .astype(float)
+                .abs()
+                .sum()
+            )
+            legacy_budget = {
+                "reserve_cash_policy": {
+                    "available_for_buys": float(buy_budget or 0.0),
+                },
+                "requested_buy_notional": requested_legacy_buy_notional,
+            }
+            rebuilt_buy_trades, legacy_budget_meta = _apply_capital_budget_to_trades(
+                original_buy_trades,
+                cfg,
+                legacy_budget,
+            )
+            rebuilt_buy_trades, rebudget_skipped = _apply_buy_order_limit(
+                rebuilt_buy_trades,
+                config=config,
+            )
+            rebudget_meta = {
+                "status": (
+                    "CLIPPED"
+                    if bool(legacy_budget_meta.get("capital_constraint_triggered"))
+                    else "OK"
+                ),
+                "reason_codes": ["legacy_approved_buys_cash_rebudgeted"],
+                "candidate_count": int(len(original_buy_trades)),
+                "recomputed_requested_buy_notional": requested_legacy_buy_notional,
+                "recomputed_buy_notional": float(
+                    rebuilt_buy_trades.get("notional", pd.Series(dtype=float))
+                    .fillna(0.0)
+                    .astype(float)
+                    .abs()
+                    .sum()
+                ),
+                "clipped_or_deferred_buys_count": int(
+                    legacy_budget_meta.get("clipped_or_deferred_buys_count") or 0
+                ),
+            }
+        else:
+            rebuilt_buy_trades, rebudget_meta, rebudget_skipped = (
+                _rebuild_post_sell_buy_trades(
+                    holdings=post_sell_holdings,
+                    targets=lifecycle_targets,
+                    prices=request.prices,
+                    total_equity=float(request.total_equity),
+                    buy_budget=float(buy_budget or 0.0),
+                    cfg=cfg,
+                    max_buy_orders=max_rebudget_buy_orders,
+                    zero_budget_block_reason=(
+                        BUY_BLOCKED_RISK_CASH_TARGET
+                        if float(buy_budget or 0.0) <= 1e-9
+                        else None
+                    ),
+                    cash_at_decision=post_sell_cash,
+                    buying_power_at_decision=_safe_float(
+                        post_sell_account.get("buying_power"), 0.0
+                    ),
+                    risk_cash_target=risk_cash_target,
+                    buy_budget_basis=str(
+                        post_sell_budget_meta.get("buy_budget_basis") or ""
+                    ),
+                )
+            )
+        rebudget_meta = dict(rebudget_meta)
+        rebudget_meta["reason_codes"] = [
+            "no_sell_orders_rebudgeted",
+            *list(rebudget_meta.get("reason_codes") or []),
+        ]
 
     final_trade_frames = [
         frame

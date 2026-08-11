@@ -73,6 +73,18 @@ def test_canonical_authority_artifacts_preserve_immutable_lineage(
     execution = execution_package_from_risk(risk)
     run_root = tmp_path / "run"
     run_root.mkdir()
+    (run_root / "equality_gate.json").write_text(
+        json.dumps(
+            {
+                "decision": "WOULD_PROCEED",
+                "would_block": False,
+                "hashes_equal": True,
+                "pricing_asof_match": True,
+                "execution_source": "planned_payload_exact",
+            }
+        ),
+        encoding="utf-8",
+    )
     _write_canonical_authority_artifacts(
         run_root=run_root,
         run_id="paper-orion",

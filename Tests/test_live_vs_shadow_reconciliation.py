@@ -312,6 +312,99 @@ def test_prior_session_decision_source_drives_shadow_reconciliation(
     assert payload["target_vs_target"]["overlap_weight"] == 1.0
 
 
+def test_first_clean_policy_run_starts_new_epoch_and_preserves_legacy_history(
+    tmp_path: Path,
+) -> None:
+    old_date = "2026-04-23"
+    trade_date = "2026-04-24"
+    shadow_dir = tmp_path / "outputs" / "shadow_candidates"
+    _write_shadow_day(
+        shadow_dir,
+        old_date,
+        polaris_return=-0.40,
+        spy_return=0.001,
+        weights={"AAA": 1.0},
+    )
+    _write_shadow_day(
+        shadow_dir,
+        trade_date,
+        polaris_return=0.01,
+        spy_return=0.001,
+        weights={"AAA": 1.0},
+    )
+    source_path = shadow_dir / trade_date / "caerus_orion.json"
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    live_nav = tmp_path / "outputs" / "perf" / "live_overlay_nav_series.csv"
+    _write_live_nav(live_nav, [(old_date, 0.50), (trade_date, 0.01)])
+    positions = tmp_path / "positions.json"
+    _write_positions(positions, {"AAA": 1.0})
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.05,
+        "minimum_cash_weight": 0.025,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    run_root = tmp_path / "outputs" / "paper_lane" / "runs" / "clean-epoch"
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "approved_execution_package": {
+                "content_hash": "approved-clean-hash",
+                "approved_target_rows": [
+                    {"symbol": "AAA", "target_weight": 0.95}
+                ],
+                "approved_cash_weight": 0.05,
+                "constraints": {"target_attainment_policy": policy},
+            },
+            "target_attainment_policy": policy,
+            "decision_source_artifact": {
+                "path": str(source_path),
+                "sha256": source_hash,
+                "strategy_id": "caerus_orion",
+            },
+        },
+    )
+    _write_json(
+        run_root / "audit" / f"execution_target_attainment_{trade_date}.json",
+        {"status": "OK_NEAREST_FEASIBLE"},
+    )
+    _write_json(run_root / "live_pilot_reconciliation.json", {"status": "CLEAN"})
+    _write_json(run_root / "audit" / "execution_integrity.json", {"status": "OK"})
+    _write_json(run_root / "equality_gate.json", {"decision": "WOULD_PROCEED"})
+    _write_json(
+        tmp_path / "outputs" / "workflow" / trade_date / "execution.json",
+        {"trade_date": trade_date, "run_root": str(run_root), "status": "success"},
+    )
+
+    payload = build_reconciliation(
+        trade_date=trade_date,
+        shadow_dir=shadow_dir,
+        precompute_dir=tmp_path / "outputs" / "precompute",
+        live_nav_path=live_nav,
+        broker_positions_path=positions,
+    )
+
+    epoch_path = (
+        tmp_path
+        / "outputs"
+        / "reconciliation"
+        / "live_vs_shadow"
+        / "comparison_epoch.json"
+    )
+    assert epoch_path.exists()
+    assert payload["status"] == "ALIGNED_INITIALIZING"
+    assert payload["comparison_start_date"] == trade_date
+    assert payload["number_of_valid_days"] == 1
+    assert payload["returns"]["live_minus_shadow_polaris"] == 0.0
+    assert payload["comparison_epoch"]["legacy_history"]["preserved"] is True
+
+
 def test_not_comparable_due_to_missing_shadow_data(tmp_path: Path) -> None:
     live_nav = tmp_path / "live_nav.csv"
     _write_live_nav(live_nav, [("2026-04-23", 0.01), ("2026-04-24", 0.01)])

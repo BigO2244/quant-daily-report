@@ -487,6 +487,36 @@ def _equality_gate_observe_surface(root: Path) -> dict[str, Any]:
     }
 
 
+def _check_execution_equality(root: Path) -> CheckResult:
+    surface = _equality_gate_observe_surface(root)
+    status = str(surface.get("status") or "unavailable")
+    artifact = str(surface.get("artifact_ref") or "")
+    evidence = [artifact] if artifact else []
+    if status == "ok":
+        return CheckResult(
+            "Execution equality",
+            "GREEN",
+            [],
+            "Final mechanical order identities exactly match broker submissions.",
+            evidence,
+        )
+    if status == "unavailable":
+        return CheckResult(
+            "Execution equality",
+            "YELLOW",
+            ["EXECUTION_EQUALITY_UNAVAILABLE"],
+            "Required execution-equality evidence is unavailable.",
+            evidence,
+        )
+    return CheckResult(
+        "Execution equality",
+        "RED",
+        [f"EXECUTION_EQUALITY_{status.upper()}"],
+        f"Execution equality is not clean: {status}.",
+        evidence,
+    )
+
+
 def _check_execution_timeline_provenance(root: Path, trade_date: str) -> CheckResult:
     latest_path = root / "outputs" / "latest_run.json"
     latest_run, latest_error = _read_json(latest_path)
@@ -547,6 +577,9 @@ def _check_execution_timeline_provenance(root: Path, trade_date: str) -> CheckRe
         execution_payload.get("asset_validation_status")
         or operator_summary.get("asset_validation_status")
     ).upper()
+    integrity_findings = [
+        str(item) for item in integrity.get("findings") or [] if str(item).strip()
+    ]
 
     if not execution_source:
         reason_codes.append("EXECUTION_SOURCE_MISSING")
@@ -554,8 +587,29 @@ def _check_execution_timeline_provenance(root: Path, trade_date: str) -> CheckRe
         reason_codes.append("PRICE_FRESHNESS_SCOPE_MISSING")
     if asset_validation_status == "FAIL":
         reason_codes.append("PRETRADE_ASSET_VALIDATION_FAILED")
+    if integrity_status.upper() != "OK":
+        reason_codes.append("EXECUTION_INTEGRITY_NOT_OK")
+    if integrity_findings:
+        reason_codes.append("EXECUTION_AUDIT_FINDINGS_PRESENT")
+    if terminal_status.upper() not in {
+        "SUCCESS",
+        "SUBMITTED",
+        "DRY_RUN",
+        "NO_ORDERS_NEEDED",
+    }:
+        reason_codes.append("EXECUTION_TERMINAL_STATUS_NOT_CLEAN")
 
-    status = "RED" if asset_validation_status == "FAIL" else ("GREEN" if not reason_codes else "YELLOW")
+    hard_failures = {
+        "PRETRADE_ASSET_VALIDATION_FAILED",
+        "EXECUTION_INTEGRITY_NOT_OK",
+        "EXECUTION_AUDIT_FINDINGS_PRESENT",
+        "EXECUTION_TERMINAL_STATUS_NOT_CLEAN",
+    }
+    status = (
+        "RED"
+        if hard_failures.intersection(reason_codes)
+        else ("GREEN" if not reason_codes else "YELLOW")
+    )
     summary = (
         "timeline_present={timeline_present}; execution_source={execution_source}; "
         "price_freshness_scope={freshness_scope}; integrity_status={integrity_status}; "
@@ -588,6 +642,7 @@ def build_health_check(root: Path = Path("."), trade_date: str | None = None) ->
         _check_strategy_identity(root, resolved_trade_date),
         _check_data_freshness(root, resolved_trade_date),
         _check_execution_timeline_provenance(root, resolved_trade_date),
+        _check_execution_equality(root),
     ]
     overall_status = _status_max(checks)
     return {

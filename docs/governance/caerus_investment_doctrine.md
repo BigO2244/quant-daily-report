@@ -409,6 +409,20 @@ retains 5% cash and a 2% post-trade attainment tolerance. This amendment does no
 authorize live capital, weaken the separate FR-104 gates, or erase outstanding
 research-evidence limitations. Polaris remains the historical research control.
 
+Owner amendment, 2026-08-11: Orion's PAPER execution target remains 5% cash,
+with 2.5% as the hard minimum after deterministic whole-share optimization.
+The Trader must execute the mathematically proven nearest-feasible whole-share
+portfolio and may not reinterpret targets, substitute symbols, or spend below
+the approved cash floor. The fixed target-attainment tolerance remains 2
+percentage points; an out-of-band result is clean only when it exactly matches
+the immutable nearest-feasible proof. The first clean post-fix PAPER run begins
+a new live-vs-shadow comparison epoch while all earlier evidence is preserved as
+legacy history. Universal GREEN is strict: nested audit failure, missing or stale
+required evidence, execution equality divergence, nonterminal or rejected
+orders, broken lineage, or failed reconciliation must propagate to the top-level
+status. These controls remain PAPER-only and do not authorize options or live
+capital.
+
 Lyra and Orion will not be selected based on preference.
 
 Their future status will be determined through:

@@ -1187,12 +1187,23 @@ def _write_canonical_authority_artifacts(
 
     reconciliation_status = str(reconciliation.get("status") or "").upper()
     target_status = str(target_attainment.get("status") or "").upper()
+    equality_path = run_root / "equality_gate.json"
+    equality_payload = _load_plan(equality_path) if equality_path.exists() else {}
+    from core.execution_equality_gate import classify_equality_gate_observe_status
+
+    equality_status = classify_equality_gate_observe_status(equality_payload)
+    if equality_status != "ok":
+        findings.append(f"EXECUTION_EQUALITY_{equality_status.upper()}")
+    from core.target_attainment_policy import target_status_passes
+
     integrity_status = (
         "OK"
         if not findings
         and reconciliation_status in {"CLEAN", "DRY_RUN", "DRY_RUN_NO_SUBMISSION"}
-        and target_status
-        in {"OK_TARGET_ATTAINED", "DRY_RUN_NOT_APPLICABLE"}
+        and (
+            target_status == "DRY_RUN_NOT_APPLICABLE"
+            or target_status_passes(target_status)
+        )
         else "FAIL"
     )
     canonical_payload = {
@@ -1213,6 +1224,10 @@ def _write_canonical_authority_artifacts(
         "cash_target_weight": package_payload.get("approved_cash_weight"),
         "decision_source_artifact": decision_source,
         "target_attainment_tolerance": plan.get("target_attainment_tolerance"),
+        "target_attainment_policy": plan.get("target_attainment_policy"),
+        "whole_share_feasibility": target_attainment.get(
+            "whole_share_feasibility"
+        ),
     }
     canonical_summary = {
         **dict(summary),
@@ -1233,6 +1248,8 @@ def _write_canonical_authority_artifacts(
         "decision_source_artifact": decision_source,
         "reconciliation_status": reconciliation_status,
         "target_attainment_status": target_status,
+        "equality_gate_status": equality_status,
+        "equality_gate_artifact": str(equality_path),
         "read_only_auditor": True,
     }
     audit_dir = run_root / "audit"
@@ -1254,6 +1271,65 @@ def _write_canonical_authority_artifacts(
         integrity["status"] = "FAIL"
         integrity["findings"] = [*findings, f"EXECUTION_TIMELINE_BUILD_FAILED:{exc}"]
         _write_json(audit_dir / "execution_integrity.json", integrity)
+
+
+def _write_unified_equality_gate(
+    *,
+    run_root: Path,
+    run_id: str,
+    trade_date: str,
+    result: Any,
+    intended: list[dict[str, Any]],
+    submitted: list[dict[str, Any]],
+    plan: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Prove that Trader submitted exactly its final mechanical order set."""
+
+    from core.execution_equality_gate import (
+        write_equality_gate_observe_artifacts,
+        write_equality_gate_observe_error_artifacts,
+    )
+
+    final_frame = getattr(result, "final_execution_trades", None)
+    planned_orders = (
+        _trade_frame_orders(final_frame)
+        if isinstance(final_frame, pd.DataFrame)
+        else [dict(row) for row in intended]
+    )
+    try:
+        _, _, artifact = write_equality_gate_observe_artifacts(
+            run_root=run_root,
+            planned_orders=planned_orders,
+            submission_orders=submitted,
+            execution_source="planned_payload_exact",
+            planning_price_basis="BROKER_SNAPSHOT",
+            pricing_asof_planned=trade_date,
+            pricing_asof_context=trade_date,
+            run_id=run_id,
+            trade_date=trade_date,
+            artifact_refs={
+                "approved_execution_package_hash": (
+                    (plan.get("approved_execution_package") or {}).get(
+                        "content_hash"
+                    )
+                    if isinstance(plan.get("approved_execution_package"), Mapping)
+                    else None
+                )
+            },
+        )
+        return artifact
+    except Exception as exc:
+        _, _, artifact = write_equality_gate_observe_error_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            execution_source="planned_payload_exact",
+            planning_price_basis="BROKER_SNAPSHOT",
+            pricing_asof_planned=trade_date,
+            pricing_asof_context=trade_date,
+            observe_error=exc,
+        )
+        return artifact
 
 
 def _order_side(row: Mapping[str, Any]) -> str:
@@ -2468,6 +2544,14 @@ def _transition_artifact_from_core(
             "rebudget": dict(getattr(result, "rebudget_meta", {}) or {}) if result is not None else {},
             "capital_budget": dict(getattr(result, "capital_budget", {}) or {}) if result is not None else {},
             "sell_fill_meta": dict(getattr(result, "sell_fill_meta", {}) or {}) if result is not None else {},
+            "whole_share_feasibility": dict(
+                (getattr(result, "trade_meta", {}) or {}).get(
+                    "whole_share_feasibility"
+                )
+                or {}
+            )
+            if result is not None
+            else {},
         },
     }
 
@@ -3118,6 +3202,7 @@ def _run_live_pilot_core_path(
             for row in intended
         ]
         result = SimpleNamespace(
+            trade_meta=_trade_meta,
             capital_budget=capital_budget,
             post_sell_budget_meta={},
             sell_trades=sell_trades,
@@ -3227,6 +3312,15 @@ def _run_live_pilot_core_path(
 
     reconciliation = _reconcile(dry_run=bool(gate.dry_run), intended=intended, submitted=submitted, errors=submit_errors)
     _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
+    equality_gate = _write_unified_equality_gate(
+        run_root=run_root,
+        run_id=run_id,
+        trade_date=trade_date,
+        result=result,
+        intended=intended,
+        submitted=submitted,
+        plan=plan,
+    )
     try:
         from core.lane_target_attainment import build_lane_target_attainment
 
@@ -3240,6 +3334,11 @@ def _run_live_pilot_core_path(
             dry_run=bool(gate.dry_run),
             drift_tolerance=float(
                 _finite_float(plan.get("target_attainment_tolerance")) or 0.02
+            ),
+            feasibility_evidence=(
+                (getattr(result, "trade_meta", {}) or {}).get(
+                    "whole_share_feasibility"
+                )
             ),
         )
         (run_root / "audit").mkdir(parents=True, exist_ok=True)
@@ -3342,6 +3441,7 @@ def _run_live_pilot_core_path(
         "operator_action": reconciliation.get("operator_action"),
         "execution_target_attainment_status": target_attainment.get("status"),
         "execution_target_attainment_reason": target_attainment.get("reason_code"),
+        "execution_equality_status": equality_gate.get("decision"),
         "run_root": str(run_root),
         # BLOCKER 3 audit trail: every order dropped at validation (plan-level or
         # asset-level), with its own reason_code — never silently absorbed into
@@ -3899,6 +3999,19 @@ def refresh_live_pilot_reconciliation(
         or os.getenv("REPORT_DATE")
         or ""
     )
+    _write_unified_equality_gate(
+        run_root=run_root,
+        run_id=run_root.name,
+        trade_date=trade_date,
+        result=SimpleNamespace(),
+        intended=intended,
+        submitted=refreshed,
+        plan={
+            "approved_execution_package": canonical_execution_payload.get(
+                "approved_execution_package"
+            )
+        },
+    )
 
     # Reconciliation refresh changes the broker-truth lifecycle state, so the
     # dependent target-attainment audit must be refreshed in the same write
@@ -3927,6 +4040,13 @@ def refresh_live_pilot_reconciliation(
                 and _finite_float(row.get("target_weight")) is not None
             ],
             "cash_target_weight": prior_target_attainment.get("target_cash_weight"),
+            "target_attainment_policy": (
+                prior_target_attainment.get("target_attainment_policy")
+                or canonical_execution_payload.get("target_attainment_policy")
+            ),
+            "approved_execution_package": canonical_execution_payload.get(
+                "approved_execution_package"
+            ),
         }
         target_plan_source = f"{target_attainment_path}:captured_targets"
     else:
@@ -3963,13 +4083,17 @@ def refresh_live_pilot_reconciliation(
                     )
                     or 0.02
                 ),
+                feasibility_evidence=(
+                    prior_target_attainment.get("whole_share_feasibility")
+                    or canonical_execution_payload.get("whole_share_feasibility")
+                ),
             )
             target_sources = dict(target_attainment.get("source_artifacts") or {})
             target_sources["plan"] = target_plan_source
             target_attainment["source_artifacts"] = target_sources
         except Exception as exc:
             target_attainment = {
-                "schema_version": "caerus_lane_target_attainment_v1",
+                "schema_version": "caerus_lane_target_attainment_v2",
                 "run_id": run_root.name,
                 "trade_date": trade_date,
                 "account_scope": _derive_execution_mode(run_root),
@@ -4137,6 +4261,9 @@ def refresh_live_pilot_reconciliation(
         ),
         "target_attainment_tolerance": canonical_execution_payload.get(
             "target_attainment_tolerance"
+        ),
+        "target_attainment_policy": canonical_execution_payload.get(
+            "target_attainment_policy"
         ),
     }
     pre_snapshot = (
