@@ -2811,6 +2811,14 @@ def _run_live_pilot_core_path(
         ledger_output_root=output_root,
         ledger_enabled=not bool(gate.dry_run),
     )
+    # The shared executor deliberately reuses the live-pilot constraint surface
+    # for both endpoints, but the governed whole-share attainment policy is
+    # PAPER-only and keys off the execution-core mode.  Preserve the shared
+    # constraints while carrying the lane identity into the core; otherwise a
+    # valid PAPER authority package is misclassified as LIVE_PILOT and fails
+    # before the first order can be submitted.
+    if _derive_execution_mode(run_root) == PAPER_MODE.upper():
+        config = dataclasses.replace(config, mode=PAPER_MODE)
     if malformed and str(config.constraints.malformed_holding_policy) == "fail_closed":
         _write_blocked_transition_artifact(
             run_root=run_root,

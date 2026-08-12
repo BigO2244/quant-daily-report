@@ -28,6 +28,12 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pytest
 
+from authority.contracts import (
+    build_decision_package,
+    build_evidence_package,
+    build_risk_package,
+)
+from authority.pipeline import execution_package_from_risk
 from core.live_pilot_guardrails import build_live_pilot_gate_result
 from core.live_pilot_preflight import validate_alpaca_submission_guardrails
 from core.run_pointer import read_trade_stage_pointer
@@ -207,6 +213,43 @@ class ConfirmedProceedsPaperBroker(FakePaperBroker):
         return order
 
 
+class PositionTrackingPaperBroker(FakePaperBroker):
+    """Paper broker double whose post-submit snapshot reflects filled buys."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cash = 10_000.0
+        self.positions: list[dict[str, object]] = []
+
+    def get_account(self):
+        return {
+            "id": "paper-acct-1",
+            "status": "ACTIVE",
+            "cash": str(self.cash),
+            "equity": "10000",
+            "buying_power": str(self.cash),
+            "portfolio_value": "10000",
+        }
+
+    def get_positions(self):
+        return list(self.positions)
+
+    def submit_market_order(self, **kwargs):
+        order = super().submit_market_order(**kwargs)
+        qty = float(kwargs.get("qty") or 0.0)
+        notional = float(kwargs.get("estimated_notional") or 0.0)
+        self.cash -= notional
+        self.positions.append(
+            {
+                "symbol": kwargs.get("symbol"),
+                "qty": str(qty),
+                "market_value": str(notional),
+                "current_price": str(notional / qty if qty else 0.0),
+            }
+        )
+        return order
+
+
 class FailingSnapshotPaperBroker(FakePaperBroker):
     def __init__(self, error: Exception, *, stage: str = "account") -> None:
         super().__init__()
@@ -243,6 +286,50 @@ def _plan() -> dict[str, object]:
                 "sleeve": "orion",
             }
         ]
+    }
+
+
+def _whole_share_authority_plan() -> dict[str, object]:
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.05,
+        "minimum_cash_weight": 0.025,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    rows = [{"symbol": "AAPL", "target_weight": 0.95, "price": 150.0}]
+    evidence = build_evidence_package(
+        package_id="evidence:paper-regression",
+        trade_date="2026-03-17",
+        source_refs=["caerus_orion.json"],
+        observations=rows,
+    )
+    decision = build_decision_package(
+        package_id="decision:paper-regression",
+        trade_date="2026-03-17",
+        evidence=evidence,
+        target_rows=rows,
+        target_cash_weight=0.05,
+        source_refs=["caerus_orion.json"],
+    )
+    risk = build_risk_package(
+        package_id="risk:paper-regression",
+        decision=decision,
+        approved_target_rows=rows,
+        approved_cash_weight=0.05,
+        constraints={"target_attainment_policy": policy},
+        source_refs=["decision:paper-regression"],
+    )
+    return {
+        "cash_target_weight": 0.05,
+        "target_attainment_policy": policy,
+        "target_portfolio": rows,
+        "approved_execution_package": execution_package_from_risk(risk).to_dict(),
     }
 
 
@@ -309,6 +396,57 @@ def test_paper_lane_submits_real_paper_orders_through_shared_engine(tmp_path: Pa
     submitted = json.loads((run_root / "live_pilot_orders_submitted.json").read_text())
     assert submitted["orders"][0]["symbol"] == "AAPL"
     assert submitted["orders"][0]["status"] == "filled"
+
+
+def test_paper_lane_executes_governed_whole_share_authority_package_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """Regression: a PAPER-only authority policy must reach submit and recon."""
+    broker = PositionTrackingPaperBroker()
+    result = run_live_pilot(
+        plan=_whole_share_authority_plan(),
+        broker=broker,
+        env=_paper_env(dry_run="0"),
+        run_id="paper-whole-share-authority-submit",
+        output_root=tmp_path / "outputs" / "paper_lane",
+        now_et=_market_open_now(),
+    )
+
+    assert result["terminal_status"] == "SUBMITTED"
+    assert result["mode"] == "PAPER"
+    assert result["submitted_count"] == 1
+    assert result["filled_count"] == 1
+    assert broker.submit_calls == 1
+
+    run_root = (
+        tmp_path
+        / "outputs"
+        / "paper_lane"
+        / "runs"
+        / "paper-whole-share-authority-submit"
+    )
+    required = {
+        "live_pilot_broker_snapshot_pre.json",
+        "live_pilot_broker_snapshot_post.json",
+        "live_pilot_orders_submitted.json",
+        "live_pilot_reconciliation.json",
+        "execution_results.json",
+        "operator_summary.json",
+        "execution_payload.json",
+        "authority_audit_package.json",
+    }
+    assert required <= {path.name for path in run_root.iterdir()}
+    reconciliation = json.loads(
+        (run_root / "live_pilot_reconciliation.json").read_text(encoding="utf-8")
+    )
+    assert reconciliation["status"] == "CLEAN"
+    results = json.loads((run_root / "execution_results.json").read_text(encoding="utf-8"))
+    assert results["submitted_count"] == 1
+    assert results["filled_count"] == 1
+    assert results["execution_target_attainment_status"] in {
+        "OK_TARGET_ATTAINED",
+        "OK_NEAREST_FEASIBLE",
+    }
 
 
 def test_paper_rotation_reuses_only_confirmed_current_run_sell_proceeds(
