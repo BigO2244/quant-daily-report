@@ -16,6 +16,32 @@ def _write_json(path: Path, payload: dict) -> None:
 
 
 def _write_base_artifacts(root: Path, *, reconciliation: dict | None = None, vix: dict | None = None) -> None:
+    _write_json(
+        root
+        / "outputs"
+        / "health"
+        / "caerus_dashboard_refresh"
+        / "latest"
+        / "refresh_status.json",
+        {
+            "schema_version": "caerus.dashboard_refresh_health.v1",
+            "trade_date": TRADE_DATE,
+            "status": "SUCCESS",
+            "exit_code": 0,
+            "reason_codes": [],
+            "dashboard_published": True,
+        },
+    )
+    _write_json(
+        root / "outputs" / "operational_drag" / TRADE_DATE / "operational_drag.json",
+        {
+            "trade_date": TRADE_DATE,
+            "available": True,
+            "decision_grade": True,
+            "current_date_status": "CLEAN",
+            "reason_codes": [],
+        },
+    )
     shadow_latest = root / "outputs" / "shadow_candidates" / "latest"
     shadow_latest.mkdir(parents=True, exist_ok=True)
     (shadow_latest / "comparison.md").write_text(
@@ -201,10 +227,87 @@ def test_green_case(tmp_path: Path) -> None:
     assert payload["overall_status"] == "GREEN"
     assert payload["recommended_action"] == "HOLD_NO_ACTION"
     assert _status(payload, "VIX/regime") == "GREEN"
+    assert _status(payload, "Broker/NAV refresh service") == "GREEN"
+    assert _status(payload, "NAV/operational-drag reconciliation") == "GREEN"
     assert _status(payload, "Shadow performance report") == "GREEN"
     assert _status(payload, "Execution timeline provenance") == "GREEN"
     assert payload["equality_gate_observe"]["status"] == "ok"
     assert "Caerus Daily Health Check" in render_console(payload)
+
+
+def test_broker_nav_refresh_failure_blocks_false_green(tmp_path: Path) -> None:
+    _write_base_artifacts(tmp_path)
+    _write_json(
+        tmp_path
+        / "outputs"
+        / "health"
+        / "caerus_dashboard_refresh"
+        / "latest"
+        / "refresh_status.json",
+        {
+            "schema_version": "caerus.dashboard_refresh_health.v1",
+            "trade_date": TRADE_DATE,
+            "status": "FAILED",
+            "exit_code": 1,
+            "reason_codes": ["alpaca_auth_failed", "nav_artifact_stale"],
+        },
+    )
+
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+
+    assert payload["overall_status"] == "RED"
+    check = next(
+        item
+        for item in payload["checks"]
+        if item["name"] == "Broker/NAV refresh service"
+    )
+    assert check["status"] == "RED"
+    assert "alpaca_auth_failed" in check["reason_codes"]
+
+
+def test_missing_broker_nav_refresh_health_blocks_false_green(tmp_path: Path) -> None:
+    _write_base_artifacts(tmp_path)
+    (
+        tmp_path
+        / "outputs"
+        / "health"
+        / "caerus_dashboard_refresh"
+        / "latest"
+        / "refresh_status.json"
+    ).unlink()
+
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+
+    assert payload["overall_status"] == "RED"
+    assert _status(payload, "Broker/NAV refresh service") == "RED"
+
+
+def test_material_operational_drag_gap_blocks_false_green(tmp_path: Path) -> None:
+    _write_base_artifacts(tmp_path)
+    _write_json(
+        tmp_path
+        / "outputs"
+        / "operational_drag"
+        / TRADE_DATE
+        / "operational_drag.json",
+        {
+            "trade_date": TRADE_DATE,
+            "available": True,
+            "decision_grade": False,
+            "current_date_status": "MATERIAL_GAP",
+            "reason_codes": ["planned_buys_without_submissions"],
+        },
+    )
+
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+
+    assert payload["overall_status"] == "RED"
+    check = next(
+        item
+        for item in payload["checks"]
+        if item["name"] == "NAV/operational-drag reconciliation"
+    )
+    assert "planned_buys_without_submissions" in check["reason_codes"]
 
 
 def test_equality_gate_divergence_blocks_universal_green(tmp_path: Path) -> None:

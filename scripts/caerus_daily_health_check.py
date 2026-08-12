@@ -217,6 +217,97 @@ def _check_shadow_artifacts(root: Path) -> CheckResult:
     return CheckResult("Shadow artifacts", status, sorted(set(reason_codes)), summary, [str(path), str(json_path)])
 
 
+def _check_dashboard_refresh_health(root: Path, trade_date: str) -> CheckResult:
+    path = (
+        root
+        / "outputs"
+        / "health"
+        / "caerus_dashboard_refresh"
+        / "latest"
+        / "refresh_status.json"
+    )
+    payload, error = _read_json(path)
+    if error:
+        return CheckResult(
+            "Broker/NAV refresh service",
+            "RED",
+            [f"DASHBOARD_REFRESH_{error}"],
+            "Broker/NAV refresh service health is missing or unreadable.",
+            [str(path)],
+        )
+    assert payload is not None
+    status = _norm_text(payload.get("status")).upper()
+    artifact_date = _artifact_date(payload)
+    reason_codes = [str(item) for item in payload.get("reason_codes") or []]
+    if artifact_date != trade_date:
+        reason_codes.append("DASHBOARD_REFRESH_DATE_MISMATCH")
+    if status != "SUCCESS":
+        reason_codes.append(f"DASHBOARD_REFRESH_{status or 'STATUS_MISSING'}")
+    if reason_codes:
+        return CheckResult(
+            "Broker/NAV refresh service",
+            "RED",
+            sorted(set(reason_codes)),
+            f"Broker/NAV refresh is {status or 'UNKNOWN'} for {artifact_date or 'unknown date'}.",
+            [str(path)],
+        )
+    return CheckResult(
+        "Broker/NAV refresh service",
+        "GREEN",
+        [],
+        "Broker snapshot, canonical reconciliation, and NAV refresh are current.",
+        [str(path)],
+    )
+
+
+def _check_operational_drag(root: Path, trade_date: str) -> CheckResult:
+    path = root / "outputs" / "operational_drag" / trade_date / "operational_drag.json"
+    payload, error = _read_json(path)
+    if error:
+        return CheckResult(
+            "NAV/operational-drag reconciliation",
+            "RED",
+            [f"OPERATIONAL_DRAG_{error}"],
+            "Current-date NAV/operational-drag evidence is missing or unreadable.",
+            [str(path)],
+        )
+    assert payload is not None
+    decision_grade = payload.get("decision_grade") is True
+    available = payload.get("available") is True
+    evidence_reason_codes = [
+        str(item)
+        for item in (
+            payload.get("current_date_reason_codes")
+            or payload.get("reason_codes")
+            or []
+        )
+    ]
+    reason_codes: list[str] = []
+    current_status = _norm_text(payload.get("current_date_status")).upper()
+    if not available:
+        reason_codes.append("OPERATIONAL_DRAG_UNAVAILABLE")
+    if not decision_grade:
+        reason_codes.append("OPERATIONAL_DRAG_NOT_DECISION_GRADE")
+    if current_status and current_status not in {"CLEAN", "OK", "PASS"}:
+        reason_codes.append(f"OPERATIONAL_DRAG_{current_status}")
+    if reason_codes:
+        reason_codes.extend(evidence_reason_codes)
+        return CheckResult(
+            "NAV/operational-drag reconciliation",
+            "RED",
+            sorted(set(reason_codes)),
+            "Economic-state/intent attribution contains a current material gap.",
+            [str(path)],
+        )
+    return CheckResult(
+        "NAV/operational-drag reconciliation",
+        "GREEN",
+        [],
+        "Current broker NAV and authorized-intent attribution are decision-grade.",
+        [str(path)],
+    )
+
+
 def _check_shadow_performance(root: Path) -> CheckResult:
     path = root / "outputs" / "shadow_candidates" / "latest" / "shadow_evaluation.json"
     payload, error = _read_json(path)
@@ -636,6 +727,8 @@ def build_health_check(root: Path = Path("."), trade_date: str | None = None) ->
     resolved_trade_date = resolve_trade_date(root, trade_date)
     checks = [
         _check_vix_regime(root, resolved_trade_date),
+        _check_dashboard_refresh_health(root, resolved_trade_date),
+        _check_operational_drag(root, resolved_trade_date),
         _check_shadow_artifacts(root),
         _check_shadow_performance(root),
         _check_reconciliation(root),

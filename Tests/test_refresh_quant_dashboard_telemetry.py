@@ -92,6 +92,30 @@ def test_staleness_tolerates_weekend_gap(tmp_path: Path):
     assert out["reason_codes"] == []
 
 
+def test_staleness_accepts_canonical_run_reconciliation(tmp_path: Path):
+    root = tmp_path / "repo"
+    _fresh_artifacts(root, REPORT_DATE)
+    for legacy in (root / "outputs" / "broker").glob("recon_posttrade_*.json"):
+        legacy.unlink()
+    run_root = root / "outputs" / "paper_lane" / "runs" / "run-current"
+    _write_json(
+        root / "outputs" / "workflow" / REPORT_DATE / "execution.json",
+        {
+            "trade_date": REPORT_DATE,
+            "status": "success",
+            "run_root": str(run_root),
+        },
+    )
+    _write_json(run_root / "live_pilot_reconciliation.json", {"status": "CLEAN"})
+
+    out = rqd.evaluate_live_telemetry_staleness(
+        repo_root=root, report_date=REPORT_DATE
+    )
+
+    assert "recon_artifact_stale" not in out["reason_codes"]
+    assert out["recon_latest_date"] == REPORT_DATE
+
+
 # --- main() exit behavior ---------------------------------------------------
 
 def _patch_common(monkeypatch, tmp_path: Path):
@@ -117,6 +141,18 @@ def test_main_require_live_broker_exits_nonzero_on_auth_failure(tmp_path, monkey
     assert "alpaca_auth_failed" in payload["live_status"]["reason_codes"]
     assert "live_broker_required_failed" in payload["live_status"]["reason_codes"]
     assert rebuilt["called"] is False  # fail-fast: dashboard not rebuilt on hard failure
+    health = json.loads(
+        (
+            tmp_path
+            / "outputs"
+            / "health"
+            / "caerus_dashboard_refresh"
+            / "latest"
+            / "refresh_status.json"
+        ).read_text()
+    )
+    assert health["status"] == "FAILED"
+    assert health["exit_code"] == 1
 
 
 def test_main_default_swallows_failure_but_surfaces_status(tmp_path, monkeypatch, capsys):
@@ -137,3 +173,42 @@ def test_main_default_swallows_failure_but_surfaces_status(tmp_path, monkeypatch
     assert payload["live_status"]["status"] == "failed"
     assert "alpaca_auth_failed" in payload["live_status"]["reason_codes"]
     assert rebuilt["called"] is True
+
+
+def test_dashboard_publish_exception_writes_failed_service_health(
+    tmp_path, monkeypatch, capsys
+):
+    _patch_common(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        rqd,
+        "refresh_live_broker_artifacts",
+        lambda **_k: {"report_date": REPORT_DATE},
+    )
+    monkeypatch.setattr(
+        rqd,
+        "rebuild_dashboard",
+        lambda **_k: (_ for _ in ()).throw(RuntimeError("disk full")),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["refresh_quant_dashboard.py", "--repo-root", str(tmp_path)],
+    )
+
+    rc = rqd.main()
+    payload = json.loads(capsys.readouterr().out)
+    health = json.loads(
+        (
+            tmp_path
+            / "outputs"
+            / "health"
+            / "caerus_dashboard_refresh"
+            / "latest"
+            / "refresh_status.json"
+        ).read_text()
+    )
+
+    assert rc == 1
+    assert payload["dashboard"] is None
+    assert health["status"] == "FAILED"
+    assert "dashboard_publish_missing" in health["reason_codes"]

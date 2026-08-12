@@ -451,7 +451,17 @@ def render_equality_gate_markdown(artifact: Mapping[str, Any]) -> str:
             lines.append(f"- observe_error: `{observe_error.get('type')}: {observe_error.get('message')}`")
         else:
             lines.append(f"- observe_error: `{observe_error}`")
-    lines.extend(["", "Observe only; broker submission was not changed by this artifact.", ""])
+    lines.extend(
+        [
+            "",
+            (
+                "Enforced before broker submission; divergence blocks the complete batch."
+                if artifact.get("enforced")
+                else "Observe only; broker submission was not changed by this artifact."
+            ),
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 

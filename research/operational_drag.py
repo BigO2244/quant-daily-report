@@ -1403,10 +1403,15 @@ def _actual_row_from_snapshot(repo: Path, trade_date: str) -> tuple[dict[str, An
 
 
 def _run_scoped_paths(repo: Path, suffix: str) -> list[Path]:
-    runs_root = repo / "outputs" / "runs"
-    if not runs_root.exists():
-        return []
-    return sorted(runs_root.glob(f"*/{suffix}"), reverse=True)
+    paths: list[Path] = []
+    for runs_root in (
+        repo / "outputs" / "runs",
+        repo / "outputs" / "paper_lane" / "runs",
+        repo / "outputs" / "live_pilot" / "runs",
+    ):
+        if runs_root.exists():
+            paths.extend(runs_root.glob(f"*/{suffix}"))
+    return sorted(paths, reverse=True)
 
 
 def _actual_json_candidates(repo: Path, trade_date: str) -> list[Path]:
@@ -1417,6 +1422,7 @@ def _actual_json_candidates(repo: Path, trade_date: str) -> list[Path]:
     candidates.extend(_run_scoped_paths(repo, "broker/posttrade_positions.json"))
     candidates.extend(_run_scoped_paths(repo, "trading_day_summary.json"))
     candidates.extend(_run_scoped_paths(repo, "execution_payload.json"))
+    candidates.extend(_run_scoped_paths(repo, "live_pilot_broker_snapshot_post.json"))
     candidates.append(repo / "outputs" / "broker" / "posttrade_account_snapshot.json")
     candidates.append(repo / "outputs" / "broker" / "posttrade_positions.json")
     candidates.append(repo / "outputs" / "broker_snapshot" / f"broker_snapshot_{trade_date}.json")
@@ -2057,6 +2063,7 @@ def _run_id_from_path(path: Path | str | None) -> str | None:
 
 def _current_reconciliation_candidates(repo: Path, trade_date: str) -> list[Path]:
     candidates: list[Path] = []
+    candidates.extend(_run_scoped_paths(repo, "live_pilot_reconciliation.json"))
     candidates.extend(_run_scoped_paths(repo, f"broker/recon_posttrade_{trade_date}.json"))
     candidates.append(repo / "outputs" / "broker" / f"recon_posttrade_{trade_date}.json")
     return _dedupe_paths(candidates)
@@ -2073,7 +2080,11 @@ def _select_current_reconciliation(
         if payload is None:
             _diag_add_failure(diagnostics, path, "missing_or_unreadable")
             continue
-        payload_date = _payload_date(payload) or _date_text(path.stem.replace("recon_posttrade_", ""))
+        payload_date = (
+            _payload_date(payload)
+            or _date_text(path.stem.replace("recon_posttrade_", ""))
+            or _date_text(_run_id_from_path(path))
+        )
         if payload_date != trade_date:
             _diag_add_failure(diagnostics, path, f"stale_trade_date:{payload_date or 'unknown'}")
             continue

@@ -1427,6 +1427,40 @@ def _nine_order_rotation_plan() -> dict[str, object]:
     }
 
 
+def _governed_rotation_plan() -> dict[str, object]:
+    rows = [
+        {"symbol": symbol, "target_weight": 0.10, "price": 25.0}
+        for symbol in ("XOM", "MNST", "FTNT", "GM")
+    ]
+    evidence = build_evidence_package(
+        package_id="evidence:pre-submit-equality",
+        trade_date="2026-03-17",
+        source_refs=["orion-shadow.json"],
+        observations=rows,
+    )
+    decision = build_decision_package(
+        package_id="decision:pre-submit-equality",
+        trade_date="2026-03-17",
+        evidence=evidence,
+        target_rows=rows,
+        target_cash_weight=0.60,
+        source_refs=["orion-shadow.json"],
+    )
+    risk = build_risk_package(
+        package_id="risk:pre-submit-equality",
+        decision=decision,
+        approved_target_rows=rows,
+        approved_cash_weight=0.60,
+        constraints={},
+        source_refs=["decision:pre-submit-equality"],
+    )
+    return {
+        "cash_target_weight": 0.60,
+        "target_portfolio": rows,
+        "approved_execution_package": execution_package_from_risk(risk).to_dict(),
+    }
+
+
 class AssetAwareBroker(FakeBroker):
     """FakeBroker whose get_asset() flags a single configured symbol as bad."""
 
@@ -1505,6 +1539,45 @@ def test_bad_buy_symbol_dropped_sells_and_good_buys_still_proceed(tmp_path: Path
     # The dropped order never counts toward `intended` — reconcile sees 5, not 6.
     assert reconciliation["intended_count"] == 5
     assert reconciliation["submitted_count"] == 5
+
+
+def test_governed_package_asset_drop_blocks_entire_batch_before_submission(
+    tmp_path: Path,
+) -> None:
+    """An authorized batch may never silently degrade after broker validation."""
+    broker = AssetAwareBroker(
+        bad_asset_symbol="FTNT",
+        buying_power="1000",
+        cash="1000",
+        equity="1000",
+    )
+    env = _env(dry_run="0", max_orders="10")
+    env["CAERUS_LIVE_PILOT_CAPITAL_CAP"] = "500"
+    env["CAERUS_REQUIRE_APPROVED_EXECUTION_PACKAGE"] = "1"
+
+    result = run_live_pilot(
+        plan=_governed_rotation_plan(),
+        broker=broker,
+        env=env,
+        run_id="run-governed-bad-asset",
+        output_root=tmp_path / "outputs" / "live_pilot",
+        now_et=_market_open_now(),
+    )
+
+    run_root = tmp_path / "outputs" / "live_pilot" / "runs" / "run-governed-bad-asset"
+    equality = json.loads((run_root / "equality_gate.json").read_text())
+    submitted = json.loads(
+        (run_root / "live_pilot_orders_submitted.json").read_text()
+    )
+
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"] == "authorized_plan_order_suppressed"
+    assert broker.submit_calls == 0
+    assert submitted["orders"] == []
+    assert equality["mode"] == "enforce"
+    assert equality["enforced"] is True
+    assert equality["decision"] == "WOULD_HALT_HASH_MISMATCH"
+    assert equality["submission_proceeded"] is False
 
 
 def test_stale_sell_whitelist_cannot_drop_held_position_exit(tmp_path: Path) -> None:

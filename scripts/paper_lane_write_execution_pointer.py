@@ -22,6 +22,7 @@ Terminal-status mapping (executor terminal_status -> pointer status):
 - ``BLOCKED`` (other)       -> ``failed_blocked``
 - ``SUBMITTED_UNFILLED``    -> ``failed_incomplete`` (orders exist; never retry)
 - ``FAILED_RECONCILIATION`` -> ``failed_reconciliation``
+- ``FAILED_PLAN_INTEGRITY`` -> ``failed_integrity``
 - anything else / missing   -> ``failed_unknown``
 
 ``lane_exit_ok`` in the printed JSON tells the cron wrapper whether the day should
@@ -70,6 +71,8 @@ def map_terminal_status(terminal_status: str, reason_code: str = "") -> tuple[st
         return "failed_incomplete", "SUBMITTED_UNFILLED"
     if upper == "FAILED_RECONCILIATION":
         return "failed_reconciliation", reason or None
+    if upper == "FAILED_PLAN_INTEGRITY":
+        return "failed_integrity", reason or "plan_or_submission_divergence"
     return "failed_unknown", (terminal or "missing_terminal_status")
 
 

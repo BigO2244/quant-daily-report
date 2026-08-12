@@ -3,7 +3,7 @@
 #
 # READ-ONLY against Alpaca (GET only; no order placement or cancellation).
 # Never sources lane env files into the shell: credentials are read directly by
-# the python script from ~/.caerus/alpaca.env (paper) and
+# the python script from the canonical repository .env (paper) and
 # ~/.caerus/live_pilot.env (live). Touches no trading gate or lane parameter.
 #
 # Scheduled after the 19:15 ET canonical NAV build so the day's EOD equity bar

@@ -1128,6 +1128,7 @@ def test_paper_lane_writes_compatible_execution_pointer(tmp_path: Path) -> None:
         ("BLOCKED", "live_pilot_transition_no_actionable_order", "no_action", True),
         ("BLOCKED", "live_pilot_kill_switch_enabled", "failed_blocked", False),
         ("FAILED_RECONCILIATION", "PARTIAL", "failed_reconciliation", False),
+        ("FAILED_PLAN_INTEGRITY", "HASH_MISMATCH", "failed_integrity", False),
         ("SUBMITTED_UNFILLED", "", "failed_incomplete", False),
         ("", "", "failed_unknown", False),
         ("running", "", "running", True),

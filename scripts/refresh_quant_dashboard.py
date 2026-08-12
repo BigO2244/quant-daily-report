@@ -374,6 +374,50 @@ def _latest_dated_artifact(directory: Path, prefix: str, suffix: str) -> str | N
     return latest
 
 
+def _latest_canonical_reconciliation_date(repo_root: Path) -> str | None:
+    """Return the latest dated reconciliation reachable from a workflow pointer.
+
+    The unified PAPER lane stores broker-truth reconciliation in its immutable
+    run root.  The older dashboard freshness check only looked for the dormant
+    ``outputs/broker/recon_posttrade_<date>.json`` shape, so a clean current run
+    was incorrectly reported stale.
+    """
+    workflow_root = repo_root / "outputs" / "workflow"
+    if not workflow_root.exists():
+        return None
+    reconciled_dates: list[str] = []
+    for pointer_path in workflow_root.glob("*/execution.json"):
+        pointer_date = _parse_date(pointer_path.parent.name)
+        if pointer_date is None:
+            continue
+        try:
+            pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(pointer, dict):
+            continue
+        run_root_raw = str(pointer.get("run_root") or "").strip()
+        if not run_root_raw:
+            continue
+        run_root = Path(run_root_raw).expanduser()
+        if not run_root.is_absolute():
+            run_root = repo_root / run_root
+        recon_path = run_root / "live_pilot_reconciliation.json"
+        try:
+            recon = json.loads(recon_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(recon, dict):
+            continue
+        if str(recon.get("status") or recon.get("state") or "").upper() not in {
+            "CLEAN",
+            "DRY_RUN_NO_SUBMISSION",
+        }:
+            continue
+        reconciled_dates.append(pointer_date.isoformat())
+    return max(reconciled_dates) if reconciled_dates else None
+
+
 def _is_stale(latest_date: str | None, report_date: str, max_age_days: int) -> bool:
     if latest_date is None:
         return True
@@ -395,7 +439,14 @@ def evaluate_live_telemetry_staleness(
     """
     nav_date = _latest_date_in_csv(repo_root / "outputs" / "perf" / "live_overlay_nav_series.csv")
     snapshot_date = _latest_dated_artifact(repo_root / "outputs" / "broker_snapshot", "broker_snapshot_", ".json")
-    recon_date = _latest_dated_artifact(repo_root / "outputs" / "broker", "recon_posttrade_", ".json")
+    legacy_recon_date = _latest_dated_artifact(
+        repo_root / "outputs" / "broker", "recon_posttrade_", ".json"
+    )
+    canonical_recon_date = _latest_canonical_reconciliation_date(repo_root)
+    recon_date = max(
+        (value for value in (legacy_recon_date, canonical_recon_date) if value),
+        default=None,
+    )
     reason_codes: list[str] = []
     if _is_stale(nav_date, report_date, max_age_days):
         reason_codes.append("nav_artifact_stale")
@@ -411,6 +462,71 @@ def evaluate_live_telemetry_staleness(
         "recon_latest_date": recon_date,
         "reason_codes": reason_codes,
     }
+
+
+def _write_refresh_health(
+    *,
+    repo_root: Path,
+    report_date: str,
+    result: dict[str, object],
+    exit_code: int,
+) -> Path:
+    """Publish the service result so universal health cannot stay false-GREEN."""
+    live_status = (
+        dict(result.get("live_status") or {})
+        if isinstance(result.get("live_status"), dict)
+        else {}
+    )
+    staleness = (
+        dict(result.get("live_telemetry_staleness") or {})
+        if isinstance(result.get("live_telemetry_staleness"), dict)
+        else {}
+    )
+    reason_codes = list(live_status.get("reason_codes") or [])
+    for reason in staleness.get("reason_codes") or []:
+        if reason not in reason_codes:
+            reason_codes.append(reason)
+    operational_drag = result.get("operational_drag")
+    if (
+        isinstance(operational_drag, dict)
+        and str(operational_drag.get("status") or "").lower() == "failed"
+    ):
+        reason_codes.append("operational_drag_refresh_failed")
+    if not result.get("dashboard"):
+        reason_codes.append("dashboard_publish_missing")
+    reason_codes = list(dict.fromkeys(str(reason) for reason in reason_codes))
+    status = "SUCCESS"
+    if exit_code != 0 or str(live_status.get("status") or "").lower() == "failed":
+        status = "FAILED"
+    elif reason_codes or str(live_status.get("status") or "").lower() not in {
+        "ok",
+        "skipped",
+    }:
+        status = "DEGRADED"
+    payload = {
+        "schema_version": "caerus.dashboard_refresh_health.v1",
+        "generated_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "trade_date": report_date,
+        "status": status,
+        "exit_code": int(exit_code),
+        "reason_codes": reason_codes,
+        "live_status": live_status,
+        "live_telemetry_staleness": staleness,
+        "dashboard_published": bool(result.get("dashboard")),
+    }
+    output_path = (
+        repo_root
+        / "outputs"
+        / "health"
+        / "caerus_dashboard_refresh"
+        / "latest"
+        / "refresh_status.json"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(output_path)
+    return output_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -533,6 +649,12 @@ def main() -> int:
                 result["live_status"] = live_status
                 result["live_telemetry_staleness"] = staleness
                 logger.error("[DASHBOARD_REFRESH] live_broker_required_failed; exiting non-zero")
+                _write_refresh_health(
+                    repo_root=repo_root,
+                    report_date=report_date,
+                    result=result,
+                    exit_code=1,
+                )
                 print(json.dumps(result, indent=2, sort_keys=True))
                 return 1
             logger.warning("[DASHBOARD_REFRESH] live broker refresh skipped: %s", exc)
@@ -566,12 +688,31 @@ def main() -> int:
             "error": str(exc),
         }
 
-    result["dashboard"] = rebuild_dashboard(
+    try:
+        result["dashboard"] = rebuild_dashboard(
+            repo_root=repo_root,
+            run_root=args.run_root,
+            trade_date=args.trade_date,
+            output_dir=args.output_dir,
+            mirror_output_dir=args.mirror_output_dir,
+        )
+    except Exception as exc:
+        result["dashboard"] = None
+        result["dashboard_error"] = str(exc)
+        _write_refresh_health(
+            repo_root=repo_root,
+            report_date=report_date,
+            result=result,
+            exit_code=1,
+        )
+        logger.error("[DASHBOARD_REFRESH] dashboard publish failed: %s", exc)
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 1
+    _write_refresh_health(
         repo_root=repo_root,
-        run_root=args.run_root,
-        trade_date=args.trade_date,
-        output_dir=args.output_dir,
-        mirror_output_dir=args.mirror_output_dir,
+        report_date=report_date,
+        result=result,
+        exit_code=0,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

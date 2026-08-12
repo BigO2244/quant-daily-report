@@ -281,6 +281,46 @@ def test_actual_positions_are_read_from_run_scoped_reconciliation(tmp_path: Path
     assert str(recon_path) in actual["source_diagnostics"]["positions"]["selected_paths"]
 
 
+def test_unified_paper_lane_run_root_is_a_canonical_reconciliation_source(
+    tmp_path: Path,
+) -> None:
+    root = _fixture_repo(tmp_path)
+    run_root = (
+        root
+        / "outputs"
+        / "paper_lane"
+        / "runs"
+        / "2026-06-02T093504-0400_paper_submit"
+    )
+    _write_json(
+        run_root / "live_pilot_reconciliation.json",
+        {"status": "CLEAN", "state": "CLEAN"},
+    )
+    _write_json(
+        run_root / "live_pilot_broker_snapshot_post.json",
+        {
+            "captured_at": "2026-06-02T14:00:00Z",
+            "account": {"equity": "10050", "cash": "5000"},
+            "positions": [
+                {"symbol": "AAA", "qty": "20", "market_value": "2200"},
+                {"symbol": "BBB", "qty": "30", "market_value": "1350"},
+            ],
+        },
+    )
+    (root / "outputs" / "broker_snapshot" / "broker_snapshot_2026-06-02.json").unlink()
+
+    analysis = build_operational_drag_analysis(
+        trade_date=TRADE_DATE, repo_root=root, write=False
+    )
+
+    selected = analysis["source_diagnostics"]["actual"]["positions"]["selected_paths"]
+    assert str(run_root / "live_pilot_broker_snapshot_post.json") in selected
+    recon_selected = analysis["reconciliation_drift_diagnostic"][
+        "source_diagnostics"
+    ]["reconciliation"]["selected_paths"]
+    assert str(run_root / "live_pilot_reconciliation.json") in recon_selected
+
+
 def test_operational_drag_equals_intended_minus_actual(tmp_path: Path) -> None:
     root = _fixture_repo(tmp_path)
     analysis = build_operational_drag_analysis(trade_date=TRADE_DATE, repo_root=root, write=False)

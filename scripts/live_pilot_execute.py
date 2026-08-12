@@ -1282,6 +1282,7 @@ def _write_unified_equality_gate(
     intended: list[dict[str, Any]],
     submitted: list[dict[str, Any]],
     plan: Mapping[str, Any],
+    enforce: bool = False,
 ) -> dict[str, Any]:
     """Prove that Trader submitted exactly its final mechanical order set."""
 
@@ -1317,6 +1318,19 @@ def _write_unified_equality_gate(
                 )
             },
         )
+        if enforce:
+            from core.execution_equality_gate import write_equality_gate_artifacts
+
+            artifact.update(
+                {
+                    "gate_version": "pre_trade_equality_gate.enforce.v1",
+                    "mode": "enforce",
+                    "enforced": True,
+                    "submission_proceeded": artifact.get("decision")
+                    == "WOULD_PROCEED",
+                }
+            )
+            write_equality_gate_artifacts(run_root=run_root, artifact=artifact)
         return artifact
     except Exception as exc:
         _, _, artifact = write_equality_gate_observe_error_artifacts(
@@ -1329,6 +1343,20 @@ def _write_unified_equality_gate(
             pricing_asof_context=trade_date,
             observe_error=exc,
         )
+        if enforce:
+            from core.execution_equality_gate import write_equality_gate_artifacts
+
+            artifact.update(
+                {
+                    "gate_version": "pre_trade_equality_gate.enforce.v1",
+                    "mode": "enforce",
+                    "enforced": True,
+                    "submission_proceeded": False,
+                    "would_block": True,
+                    "halt_reason": "equality_gate_error",
+                }
+            )
+            write_equality_gate_artifacts(run_root=run_root, artifact=artifact)
         return artifact
 
 
@@ -3055,6 +3083,40 @@ def _run_live_pilot_core_path(
             intended=intended,
             capital_gate=capital_gate,
         )
+    governed_package_required = bool(
+        isinstance(plan.get("approved_execution_package"), Mapping)
+        and str(env.get("CAERUS_REQUIRE_APPROVED_EXECUTION_PACKAGE") or "")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "y", "on"}
+    )
+    if governed_package_required and dropped_orders:
+        equality_gate = _write_unified_equality_gate(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            result=SimpleNamespace(final_execution_trades=executable_trades),
+            intended=intended,
+            submitted=intended,
+            plan=plan,
+            enforce=True,
+        )
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code="authorized_plan_order_suppressed",
+            operator_action=(
+                "An order in the immutable authorized plan failed validation; "
+                "the complete batch was blocked before broker submission."
+            ),
+            preflight=preflight,
+            intended=intended,
+            capital_gate=capital_gate,
+            dropped_orders=dropped_orders,
+            execution_equality=equality_gate,
+        )
     _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
 
     # Belt-and-suspenders (defense #3): block any planned SELL of a position whose
@@ -3147,6 +3209,40 @@ def _run_live_pilot_core_path(
             capital_gate=capital_gate,
         )
 
+    if governed_package_required and dropped_orders:
+        surviving_intended = _intended_from_validation(
+            orders=valid_orders,
+            source_trades=source_trades,
+            output_root=output_root,
+            run_id=run_id,
+        )
+        equality_gate = _write_unified_equality_gate(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            result=SimpleNamespace(final_execution_trades=executable_trades),
+            intended=intended,
+            submitted=surviving_intended,
+            plan=plan,
+            enforce=True,
+        )
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code="authorized_plan_order_suppressed",
+            operator_action=(
+                "An order in the immutable authorized plan failed broker-asset "
+                "validation; the complete batch was blocked before submission."
+            ),
+            preflight=preflight,
+            intended=intended,
+            capital_gate=capital_gate,
+            dropped_orders=dropped_orders,
+            execution_equality=equality_gate,
+        )
+
     # Recompute the intended/artifact set against the FINAL (post-asset-check)
     # surviving orders, and re-write orders_intended so the artifact reflects
     # exactly what will be submitted plus a full audit trail of every drop.
@@ -3165,6 +3261,33 @@ def _run_live_pilot_core_path(
     )
     intended_payload.update(_entry_policy_summary(intended=intended, submitted=[], dry_run=bool(gate.dry_run)))
     _write_json(run_root / "live_pilot_orders_intended.json", intended_payload)
+
+    pre_submit_equality = _write_unified_equality_gate(
+        run_root=run_root,
+        run_id=run_id,
+        trade_date=trade_date,
+        result=SimpleNamespace(final_execution_trades=executable_trades),
+        intended=intended,
+        submitted=intended,
+        plan=plan,
+        enforce=governed_package_required,
+    )
+    if governed_package_required and pre_submit_equality.get("decision") != "WOULD_PROCEED":
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code="authorized_plan_equality_failed",
+            operator_action=(
+                "The exact broker order set did not match the immutable authorized "
+                "plan; no order was submitted."
+            ),
+            preflight=preflight,
+            intended=intended,
+            capital_gate=capital_gate,
+            execution_equality=pre_submit_equality,
+        )
 
     open_order_check = _open_pilot_order_check(
         broker,
@@ -3328,6 +3451,7 @@ def _run_live_pilot_core_path(
         intended=intended,
         submitted=submitted,
         plan=plan,
+        enforce=governed_package_required,
     )
     try:
         from core.lane_target_attainment import build_lane_target_attainment
@@ -3421,7 +3545,9 @@ def _run_live_pilot_core_path(
     # status (SUBMITTED_UNFILLED) rather than CLEAN-with-zero-fills or a false
     # FAILED_RECONCILIATION. See _reconcile() for the full state machine.
     _recon_status = str(reconciliation.get("status") or "")
-    if gate.dry_run:
+    if governed_package_required and equality_gate.get("decision") != "WOULD_PROCEED":
+        terminal_status = "FAILED_PLAN_INTEGRITY"
+    elif gate.dry_run:
         terminal_status = "DRY_RUN"
     elif _recon_status == "CLEAN":
         terminal_status = "SUBMITTED"
@@ -3517,8 +3643,11 @@ def _write_blocked_artifacts(
     intended: list[dict[str, Any]] | None = None,
     open_order_check: Mapping[str, Any] | None = None,
     capital_gate: Mapping[str, Any] | None = None,
+    dropped_orders: list[dict[str, Any]] | None = None,
+    execution_equality: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     intended = intended or []
+    dropped_orders = list(dropped_orders or [])
     submitted: list[dict[str, Any]] = []
     dry_run = bool(preflight.get("dry_run"))
     capital_gate_fields = _capital_gate_report_fields(capital_gate)
@@ -3555,6 +3684,14 @@ def _write_blocked_artifacts(
         "submitted_count": 0,
         "operator_action": operator_action,
         "run_root": str(run_root),
+        "dropped_orders_count": len(dropped_orders),
+        "dropped_sell_orders_count": sum(
+            1
+            for row in dropped_orders
+            if str(row.get("side") or "").upper() == "SELL"
+        ),
+        "dropped_orders": dropped_orders,
+        "execution_equality_status": (execution_equality or {}).get("decision"),
         **_next_run_expectation(
             terminal_status="BLOCKED",
             reason_code=reason_code,
@@ -3574,7 +3711,19 @@ def _write_blocked_artifacts(
         broker_orders_submitted=0,
         base_url=str(preflight.get("base_url") or ""),
     )
-    _write_json(run_root / "live_pilot_orders_intended.json", {"orders": intended})
+    _write_json(
+        run_root / "live_pilot_orders_intended.json",
+        {
+            "orders": intended,
+            "dropped_orders": dropped_orders,
+            "dropped_orders_count": len(dropped_orders),
+            "dropped_sell_orders_count": sum(
+                1
+                for row in dropped_orders
+                if str(row.get("side") or "").upper() == "SELL"
+            ),
+        },
+    )
     _write_json(run_root / "live_pilot_orders_submitted.json", {"orders": submitted})
     if capital_gate:
         _write_json(run_root / "live_pilot_capital_gate.json", capital_gate)
@@ -4007,7 +4156,7 @@ def refresh_live_pilot_reconciliation(
         or os.getenv("REPORT_DATE")
         or ""
     )
-    _write_unified_equality_gate(
+    equality_gate = _write_unified_equality_gate(
         run_root=run_root,
         run_id=run_root.name,
         trade_date=trade_date,
@@ -4019,6 +4168,9 @@ def refresh_live_pilot_reconciliation(
                 "approved_execution_package"
             )
         },
+        enforce=isinstance(
+            canonical_execution_payload.get("approved_execution_package"), Mapping
+        ),
     )
 
     # Reconciliation refresh changes the broker-truth lifecycle state, so the
@@ -4215,6 +4367,7 @@ def refresh_live_pilot_reconciliation(
         "cash_deployment_rate": evidence_metrics.get("cash_deployment_rate"),
         "idle_cash_reason": evidence_metrics.get("idle_cash_reason"),
         "operator_action": reconciliation.get("operator_action"),
+        "execution_equality_status": equality_gate.get("decision"),
         "run_root": str(run_root),
         "refreshed_existing_run": True,
         **_next_run_expectation(

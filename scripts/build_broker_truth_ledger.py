@@ -51,7 +51,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 ACCOUNT_ENV_FILES = {
-    "paper": Path.home() / ".caerus" / "alpaca.env",
+    # PAPER execution and PAPER accounting must use one credential authority.
+    # A separately copied ~/.caerus/alpaca.env can silently age out while the
+    # execution lane continues successfully from the repository .env.
+    "paper": REPO_ROOT / ".env",
     "live": Path.home() / ".caerus" / "live_pilot.env",
 }
 
