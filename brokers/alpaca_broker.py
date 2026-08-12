@@ -12,6 +12,10 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from core.live_pilot_preflight import validate_alpaca_submission_guardrails
+from core.execution_authority_policy import (
+    require_live_capital_disabled,
+    require_options_capital_disabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +28,20 @@ BROKER_REJECT_UNKNOWN = "BROKER_REJECT_UNKNOWN"
 EXECUTION_OUTCOME_PARTIAL_BROKER_ABORT = "partial_execution_broker_abort"
 EXECUTION_OUTCOME_POST_SUBMIT_ARTIFACT_FAILURE = "post_submit_artifact_failure"
 CASH_REBALANCE_INCOMPLETE = "cash_rebalance_incomplete"
+
+
+class _ExactExecutionCapability:
+    __slots__ = ()
+
+
+# Process-local capability held only by the exact-v3 executor. Ambient
+# environment variables and legacy callers cannot authorize broker mutation.
+_EXACT_EXECUTION_CAPABILITY = _ExactExecutionCapability()
+
+
+def _require_exact_execution_capability(value: object) -> None:
+    if value is not _EXACT_EXECUTION_CAPABILITY:
+        raise PermissionError("exact_execution_capability_required")
 
 
 def _is_truthy(value: object, default: bool = False) -> bool:
@@ -481,6 +499,56 @@ class AlpacaBroker:
         positions = self.trading_client.get_all_positions()
         return [_normalize_position_obj(p) for p in positions]
 
+    def get_latest_trades(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Return timestamped IEX trades for final PAPER authorization sizing."""
+
+        normalized = sorted(
+            {str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()}
+        )
+        if not normalized:
+            return {}
+        cfg = load_alpaca_env()
+        try:
+            from alpaca.data.enums import DataFeed
+            from alpaca.data.historical import StockHistoricalDataClient
+            from alpaca.data.requests import StockLatestTradeRequest
+
+            client = StockHistoricalDataClient(
+                api_key=cfg.key_id,
+                secret_key=cfg.secret_key,
+            )
+            response = client.get_stock_latest_trade(
+                StockLatestTradeRequest(
+                    symbol_or_symbols=normalized,
+                    feed=DataFeed.IEX,
+                )
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Alpaca latest-trade read failed: {_safe_str(exc)}") from exc
+        payload = getattr(response, "data", response)
+        if not isinstance(payload, dict):
+            try:
+                payload = dict(payload)
+            except Exception as exc:
+                raise RuntimeError("Alpaca latest-trade response is malformed") from exc
+        result: Dict[str, Dict[str, Any]] = {}
+        for symbol in normalized:
+            trade = payload.get(symbol)
+            raw = _as_dict(trade) if trade is not None else {}
+            price = raw.get("price") or raw.get("p") or getattr(trade, "price", None)
+            timestamp = (
+                raw.get("timestamp")
+                or raw.get("t")
+                or getattr(trade, "timestamp", None)
+            )
+            result[symbol] = {
+                "symbol": symbol,
+                "price": _safe_str(price),
+                "timestamp": _safe_str(timestamp),
+                "feed": "IEX",
+            }
+        return result
+
     def get_asset(self, symbol: str) -> Optional[Dict[str, Any]]:
         symbol_norm = str(symbol or "").upper().strip()
         if not symbol_norm:
@@ -596,6 +664,7 @@ class AlpacaBroker:
         client_order_id: str,
         tif: str = "day",
         estimated_notional: float | None = None,
+        _execution_capability: object | None = None,
     ) -> Dict[str, Any]:
         qty_float = float(qty)
         if not math.isfinite(qty_float) or qty_float <= 0.0:
@@ -604,6 +673,11 @@ class AlpacaBroker:
             estimated_notional_float = float(estimated_notional)
             if not math.isfinite(estimated_notional_float) or estimated_notional_float <= 0.0:
                 raise RuntimeError("Refusing market order with non-finite or non-positive estimated notional.")
+        if not bool(self.paper):
+            require_live_capital_disabled(
+                mutation_path="brokers.alpaca_broker.submit_market_order"
+            )
+        _require_exact_execution_capability(_execution_capability)
         validate_alpaca_submission_guardrails(
             broker_paper=bool(self.paper),
             base_url=self.base_url,
@@ -666,6 +740,8 @@ class AlpacaBroker:
         limit_price: float,
         client_order_id: str,
         tif: str = "day",
+        extended_hours: bool = False,
+        _execution_capability: object | None = None,
     ) -> Dict[str, Any]:
         qty_float = float(qty)
         limit_price_float = float(limit_price)
@@ -673,6 +749,11 @@ class AlpacaBroker:
             raise RuntimeError("Refusing limit order with non-finite or non-positive quantity.")
         if not math.isfinite(limit_price_float) or limit_price_float <= 0.0:
             raise RuntimeError("Refusing limit order with non-finite or non-positive limit price.")
+        if not bool(self.paper):
+            require_live_capital_disabled(
+                mutation_path="brokers.alpaca_broker.submit_limit_order"
+            )
+        _require_exact_execution_capability(_execution_capability)
         validate_alpaca_submission_guardrails(
             broker_paper=bool(self.paper),
             base_url=self.base_url,
@@ -706,6 +787,7 @@ class AlpacaBroker:
             time_in_force=TimeInForce(str(tif).lower()),
             client_order_id=client_id,
             limit_price=limit_price_float,
+            extended_hours=bool(extended_hours),
         )
         try:
             out = _normalize_order_obj(self.trading_client.submit_order(order_data=req))
@@ -740,23 +822,8 @@ class AlpacaBroker:
         client_order_id: str,
         tif: str = "day",
     ) -> Dict[str, Any]:
-        base_url_norm = str(self.base_url or "").strip().lower().rstrip("/")
-        if not bool(self.paper) or "paper-api.alpaca.markets" not in base_url_norm:
-            raise RuntimeError(
-                "Refusing option market order outside Alpaca paper environment"
-            )
-        logger.info(
-            "[ALPACA_SUBMIT][OPTION] submitting market order symbol=%s qty=%.6f side=%s",
-            str(symbol).upper(),
-            float(qty),
-            str(side).upper(),
-        )
-        return self.submit_market_order(
-            symbol=symbol,
-            qty=qty,
-            side=side,
-            client_order_id=client_order_id,
-            tif=tif,
+        require_options_capital_disabled(
+            mutation_path="brokers.alpaca_broker.submit_option_market_order"
         )
 
     def submit_option_limit_order(
@@ -768,25 +835,8 @@ class AlpacaBroker:
         client_order_id: str,
         tif: str = "day",
     ) -> Dict[str, Any]:
-        base_url_norm = str(self.base_url or "").strip().lower().rstrip("/")
-        if not bool(self.paper) or "paper-api.alpaca.markets" not in base_url_norm:
-            raise RuntimeError(
-                "Refusing option limit order outside Alpaca paper environment"
-            )
-        logger.info(
-            "[ALPACA_SUBMIT][OPTION] submitting limit order symbol=%s qty=%.6f side=%s limit_price=%.6f",
-            str(symbol).upper(),
-            float(qty),
-            str(side).upper(),
-            float(limit_price),
-        )
-        return self.submit_limit_order(
-            symbol=symbol,
-            qty=qty,
-            side=side,
-            limit_price=limit_price,
-            client_order_id=client_order_id,
-            tif=tif,
+        require_options_capital_disabled(
+            mutation_path="brokers.alpaca_broker.submit_option_limit_order"
         )
 
     def list_orders(

@@ -33,6 +33,7 @@ PAPER_FILL_REFRESH_DELAY_SECONDS = 5
 TRANSIENT_PAPER_FAILURE_REASONS = {
     "paper_lane_capital_cap_transient_read_failed",
     "paper_broker_snapshot_transient_failed",
+    "paper_exact_plan_authorization_transient_failed",
 }
 
 
@@ -135,14 +136,24 @@ def inspect_attempt(
         except (OSError, json.JSONDecodeError):
             results = {}
 
-    reason = str(
-        pointer.get("substatus")
-        or pointer.get("status_message")
-        or results.get("halt_reason")
-        or results.get("reason")
-        or "paper_lane_unknown_failure"
-    ).strip()
-    submitted_count = int(results.get("submitted_count") or 0)
+    raw_execution_status = str(
+        results.get("raw_execution_status") or results.get("status") or ""
+    ).strip().upper()
+    reason = (
+        "SUBMITTED_UNFILLED"
+        if raw_execution_status == "SUBMITTED_UNFILLED"
+        else str(
+            results.get("reason_code")
+            or pointer.get("substatus")
+            or pointer.get("status_message")
+            or results.get("halt_reason")
+            or results.get("reason")
+            or "paper_lane_unknown_failure"
+        ).strip()
+    )
+    submitted_count = int(
+        results.get("submitted_count") or results.get("orders_submitted_count") or 0
+    )
     retryable = bool(
         exit_code != 0
         and pointer_fresh
@@ -272,6 +283,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the PAPER execution lane with bounded retries")
     parser.add_argument("--trade-date", required=True)
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[1]))
+    parser.add_argument("--inherited-lock-fd", type=int)
     return parser.parse_args(argv)
 
 
@@ -292,12 +304,20 @@ def main(argv: list[str] | None = None) -> int:
     confirmation_path = workflow_dir / "paper_execution_retry_late_confirmation.json"
     lock_path = repo_root / "outputs" / "workflow" / "paper_execution_retry.lock"
 
-    lock_file = lock_path.open("a+", encoding="utf-8")
-    try:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        print("FATAL: paper execution retry harness is already running", file=sys.stderr)
-        return 75
+    if args.inherited_lock_fd is not None:
+        try:
+            os.fstat(args.inherited_lock_fd)
+            lock_file = os.fdopen(os.dup(args.inherited_lock_fd), "a+", encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            print(f"FATAL: inherited paper execution lock is invalid: {exc}", file=sys.stderr)
+            return 75
+    else:
+        lock_file = lock_path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("FATAL: paper execution retry harness is already running", file=sys.stderr)
+            return 75
 
     def publish(payload: Mapping[str, object]) -> None:
         _write_payload(artifact_path, payload)
@@ -340,24 +360,46 @@ def main(argv: list[str] | None = None) -> int:
                 cwd=repo_root,
                 env=dict(os.environ),
                 check=False,
+                capture_output=True,
+                text=True,
             )
-            results_path = run_root / "execution_results.json"
+            try:
+                summary = json.loads(refreshed.stdout)
+            except (TypeError, json.JSONDecodeError):
+                summary = {}
+            refreshed_root_text = str(summary.get("run_root") or run_root)
+            refreshed_root = Path(refreshed_root_text)
+            if not refreshed_root.is_absolute():
+                refreshed_root = repo_root / refreshed_root
+            results_path = refreshed_root / "execution_results.json"
             try:
                 results = json.loads(results_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 results = {}
-            reason = str(
-                results.get("reason")
-                or results.get("status")
-                or "paper_fill_refresh_artifact_unresolved"
-            ).strip()
+            raw_status = str(
+                results.get("raw_execution_status") or results.get("status") or ""
+            ).strip().upper()
+            reason = (
+                "SUBMITTED_UNFILLED"
+                if raw_status == "SUBMITTED_UNFILLED"
+                else str(
+                    results.get("reason_code")
+                    or results.get("reconciliation_status")
+                    or results.get("status")
+                    or "paper_fill_refresh_artifact_unresolved"
+                ).strip()
+            )
             return AttemptOutcome(
                 exit_code=int(refreshed.returncode),
                 retryable=False,
                 reason_code=reason,
-                submitted_count=int(results.get("submitted_count") or outcome.submitted_count),
-                run_id=outcome.run_id,
-                run_root=outcome.run_root,
+                submitted_count=int(
+                    results.get("submitted_count")
+                    or results.get("orders_submitted_count")
+                    or outcome.submitted_count
+                ),
+                run_id=str(summary.get("run_id") or outcome.run_id),
+                run_root=refreshed_root_text,
                 error=_sanitized_error(results.get("halt_reason") or reason),
             )
 

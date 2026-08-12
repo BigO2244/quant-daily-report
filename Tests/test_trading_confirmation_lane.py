@@ -10,6 +10,7 @@ Pins fixes for BLOCKER 5 reporting:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from scripts.live_pilot_execute import _derive_execution_mode
@@ -17,9 +18,72 @@ from scripts.send_trading_confirmation_email import (
     _build_confirmation_email,
     _build_results_from_broker_snapshot,
     _classify_reason,
+    _record_confirmation_delivery,
 )
 
 RESULTS_PATH = Path("/tmp/execution_results.json")
+
+
+def test_choice2_confirmation_delivery_never_rewrites_canonical_operator_truth(
+    tmp_path: Path,
+) -> None:
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    operator = {
+        "run_id": "choice2-run",
+        "trade_date": "2026-08-12",
+        "execution_source": "exact_execution_plan_v3",
+        "terminal_status": "SUBMITTED",
+        "terminal_outcome": "RECONCILED_SUCCESS",
+        "submitted_count": 12,
+        "filled_count": 12,
+    }
+    operator_path = run_root / "operator_summary.json"
+    operator_path.write_text(
+        json.dumps(operator, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    before = operator_path.read_bytes()
+
+    _record_confirmation_delivery(
+        run_root,
+        operator_summary_fields={"submitted_count": 0, "terminal_status": "UNKNOWN"},
+        confirmation_email_sent=True,
+    )
+
+    assert operator_path.read_bytes() == before
+    delivery = json.loads(
+        (run_root / "trading_confirmation_delivery.json").read_text(encoding="utf-8")
+    )
+    assert delivery["confirmation_email_sent"] is True
+    assert delivery["run_id"] == "choice2-run"
+
+
+def test_exact_filled_and_authorized_no_trade_have_unambiguous_email_status() -> None:
+    filled = {
+        "trade_date": "2026-08-12",
+        "run_id": "exact-filled",
+        "mode": "PAPER",
+        "terminal_status": "SUBMITTED",
+        "terminal_outcome": "RECONCILED_SUCCESS",
+        "orders_submitted_count": 12,
+        "orders_filled_count": 12,
+    }
+    no_trade = {
+        "trade_date": "2026-08-12",
+        "run_id": "exact-no-trade",
+        "mode": "PAPER",
+        "terminal_status": "AUTHORIZED_NO_TRADE",
+        "terminal_outcome": "AUTHORIZED_NO_TRADE",
+        "orders_submitted_count": 0,
+    }
+
+    filled_subject, filled_text, _ = _build_confirmation_email(filled, RESULTS_PATH)
+    no_trade_subject, no_trade_text, _ = _build_confirmation_email(no_trade, RESULTS_PATH)
+
+    assert "[RECONCILED_SUCCESS]" in filled_subject
+    assert "Submitted: 12" in filled_text
+    assert "[NO_ACTION]" in no_trade_subject
+    assert "STATUS: NO_ACTION" in no_trade_text
 
 
 # --- mode derivation from the invoking lane -------------------------------- #

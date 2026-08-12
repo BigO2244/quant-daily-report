@@ -33,6 +33,11 @@ def test_default_manifest_contains_required_sleeves_and_phase_b_guardrails() -> 
     assert manifest["research_only"] is True
     assert manifest["behavior_change_allowed"] is False
     assert all(item["behavior_change_allowed"] is False for item in sleeves.values())
+    assert sleeves["polaris"]["status"] == "current_shadow_baseline"
+    assert sleeves["polaris"]["strategy_registry_status"] == "shadow"
+    assert sleeves["orion"]["status"] == "current_paper_authority"
+    assert sleeves["orion"]["strategy_registry_status"] == "paper"
+    assert all(item["control_plane_frozen"] is False for item in sleeves.values())
 
 
 def test_future_placeholders_are_not_marked_active_paper_or_promoted() -> None:
@@ -90,8 +95,9 @@ def test_inventory_payload_returns_expected_counts_without_mutation() -> None:
 
     assert payload["status"] == "OK"
     assert payload["sleeve_count"] == 9
-    assert payload["counts_by_status"]["current_paper_baseline"] == 1
-    assert payload["counts_by_status"]["current_shadow_challenger"] == 4
+    assert payload["counts_by_status"]["current_paper_authority"] == 1
+    assert payload["counts_by_status"]["current_shadow_baseline"] == 1
+    assert payload["counts_by_status"]["current_shadow_challenger"] == 3
     assert payload["counts_by_status"]["research_placeholder"] == 4
     assert {item["sleeve_id"] for item in payload["current_sleeves"]} == {"polaris", "polaris_alpha", "orion", "orion_alpha", "lyra"}
     assert {item["sleeve_id"] for item in payload["future_placeholders"]} == FUTURE_PLACEHOLDERS

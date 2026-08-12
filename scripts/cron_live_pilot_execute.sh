@@ -94,6 +94,30 @@ echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 echo "schedule_enabled=${CAERUS_LIVE_PILOT_SCHEDULE_ENABLED}"
 echo "cron_approved=${CAERUS_LIVE_PILOT_CRON_APPROVED}"
 echo "submit_approved=${CAERUS_LIVE_PILOT_SUBMIT_APPROVED}"
+
+# Owner policy, Choice 2 (2026-08-12): live capital is structurally disabled.
+# Environment arming flags cannot override this code-level boundary.
+echo "FATAL: live_capital_disabled_by_owner_policy" >&2
+LIVE_DISABLED_RUN_ID="${GATE_RUN_ID}" LIVE_DISABLED_RUN_ROOT="${GATE_RUN_ROOT}" \
+    "${PYTHON_BIN}" - <<'PY'
+import json, os
+from datetime import datetime, timezone
+from pathlib import Path
+path = Path("outputs/workflow") / os.environ["REPORT_DATE"] / "live_pilot_execution.json"
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps({
+    "stage": "live_pilot_execution",
+    "trade_date": os.environ["REPORT_DATE"],
+    "mode": "LIVE_PILOT",
+    "run_id": os.environ["LIVE_DISABLED_RUN_ID"],
+    "run_root": os.environ["LIVE_DISABLED_RUN_ROOT"],
+    "status": "blocked",
+    "substatus": "live_capital_disabled_by_owner_policy",
+    "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+exit 1
+
 # BLOCKER 4 (§f): the ONE running-truth SHA is `git rev-parse HEAD` — the code
 # this process actually runs — NOT the deploy marker. The deploy-drift guard
 # (scripts/live_pilot_sha_guard.py) compares HEAD against deploy_state.json's

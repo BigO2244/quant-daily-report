@@ -3874,6 +3874,14 @@ def _submit_alpaca_orders(
     idempotent_drop_reasons: Counter[str],
     alpaca_submission_summary: Dict[str, object],
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]], int, int, int]:
+    # Choice 2: this legacy execution engine may be exercised with inert test
+    # doubles, but it must never reach a real broker mutation boundary.
+    from core.execution_authority_policy import require_legacy_equity_test_double
+
+    require_legacy_equity_test_double(
+        broker=alpaca,
+        mutation_path="paper.paper_broker._submit_alpaca_orders",
+    )
     submitted_orders: List[Dict[str, object]] = []
     remote_existing_orders: List[Dict[str, object]] = []
     submit_attempts = 0

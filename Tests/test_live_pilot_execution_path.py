@@ -255,6 +255,7 @@ def _env(*, dry_run: str = "1", max_orders: str = "1") -> dict[str, str]:
         "ALPACA_PAPER": "0",
         "ALPACA_BASE_URL": "https://api.alpaca.markets",
         "CAERUS_LIVE_PILOT_APPROVED": "1",
+        "CAERUS_TEST_ONLY_ALLOW_LEGACY_FAKE_EXECUTION": "1",
         "CAERUS_LIVE_PILOT_CAPITAL_CAP": "500",
         "CAERUS_LIVE_PILOT_SLEEVE_ID": "polaris",
         "CAERUS_LIVE_PILOT_ACCOUNT_ID": "acct-123",

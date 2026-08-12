@@ -16,6 +16,7 @@ Terminal-status mapping (executor terminal_status -> pointer status):
 
 - ``running``               -> ``running`` (pre-execution placeholder)
 - ``SUBMITTED``             -> ``success``
+- ``AUTHORIZED_NO_TRADE``   -> ``no_action`` (intentional authorized outcome)
 - ``DRY_RUN``               -> ``no_action`` (dry pass only; nothing submitted)
 - ``BLOCKED`` with reason ``live_pilot_transition_no_actionable_order``
                             -> ``no_action`` (book already at target; benign no-op)
@@ -61,6 +62,8 @@ def map_terminal_status(terminal_status: str, reason_code: str = "") -> tuple[st
         return "running", None
     if upper == "SUBMITTED":
         return TERMINAL_STATUS_SUCCESS, None
+    if upper == "AUTHORIZED_NO_TRADE":
+        return TERMINAL_STATUS_NO_ACTION, "authorized_no_trade"
     if upper == "DRY_RUN":
         return TERMINAL_STATUS_NO_ACTION, "dry_run_only"
     if upper == "BLOCKED" and NO_ACTIONABLE_ORDER_REASON in reason:
@@ -73,6 +76,8 @@ def map_terminal_status(terminal_status: str, reason_code: str = "") -> tuple[st
         return "failed_reconciliation", reason or None
     if upper == "FAILED_PLAN_INTEGRITY":
         return "failed_integrity", reason or "plan_or_submission_divergence"
+    if upper == "SUBMISSION_UNKNOWN":
+        return "failed_incomplete", "SUBMISSION_UNKNOWN_NO_RESUBMIT"
     return "failed_unknown", (terminal or "missing_terminal_status")
 
 

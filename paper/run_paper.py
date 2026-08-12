@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 
+from core.execution_authority_policy import require_legacy_cli_planning_only
 from paper.paper_broker import run_paper_day
 from paper.state_paths import ensure_paper_state_files
 from paper.trading_calendar import next_trading_day
@@ -33,6 +34,10 @@ def main() -> None:
         help="Generate a plan only; do not generate/send orders even during open market hours.",
     )
     args = parser.parse_args()
+    require_legacy_cli_planning_only(
+        plan_only=bool(args.plan_only),
+        mutation_path="paper.run_paper",
+    )
 
     signal_date = args.signal_date
     trade_date = next_trading_day(signal_date)

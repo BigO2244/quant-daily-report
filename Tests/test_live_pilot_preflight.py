@@ -113,7 +113,7 @@ def test_broker_submit_blocks_live_preflight_before_sdk_import(
         base_url="https://api.alpaca.markets",
     )
 
-    with pytest.raises(RuntimeError, match="live_preflight_never_submits_orders"):
+    with pytest.raises(RuntimeError, match="live_capital_disabled_by_owner_policy"):
         broker.submit_market_order(
             symbol="AAPL",
             qty=1,

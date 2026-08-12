@@ -1,0 +1,30 @@
+{
+  "fixture_schema": "caerus.historical_incident_replay.v1",
+  "trade_date": "2026-08-07",
+  "provenance": "sanitized excerpts from scheduler VM artifacts inspected 2026-08-12",
+  "precompute_artifact": "outputs/precompute/2026-08-07/planned_execution_payload.json",
+  "precompute_orders": [
+    ["AMGN", "BUY", 2],
+    ["BKNG", "BUY", 11],
+    ["BMY", "SELL", 16],
+    ["FTNT", "SELL", 2],
+    ["GM", "SELL", 20],
+    ["GS", "SELL", 1],
+    ["KLAC", "SELL", 6],
+    ["ROST", "BUY", 1],
+    ["RTX", "BUY", 4],
+    ["SPG", "BUY", 6]
+  ],
+  "historical_alternative_target_artifact": "outputs/paper_lane/controlled_midday_2026-08-07/plans/live_pilot_plan_2026-08-07.json",
+  "historical_alternative_target_symbols": ["FTNT", "GM", "KLAC", "ROST", "GS", "QCOM", "BMY"],
+  "governed_target_artifact": "outputs/paper_lane/plans/authority/2026-08-07/execution_package.json",
+  "governed_target_symbols": ["BKNG", "ROST", "SPG", "FTNT", "QCOM", "RTX", "AMGN"],
+  "observed_submission_artifact": "outputs/paper_lane/runs/2026-08-07T20260807T093502-0400_paper_cron_submit/live_pilot_orders_submitted.json",
+  "observed_submissions": [
+    ["QCOM", "SELL", 1],
+    ["BMY", "SELL", 2]
+  ],
+  "observed_reconciliation": "CLEAN",
+  "incident_class": "PLAN_INTEGRITY_FAILURE",
+  "replay_assertion": "historical candidate, alternative-target, governed-target, and submitted sets remain distinct and cannot be silently treated as equal"
+}

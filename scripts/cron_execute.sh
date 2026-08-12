@@ -23,6 +23,75 @@ cd "${REPO_ROOT}"
 # --- Timezone ---
 export TZ="America/New_York"
 
+# The outer retry harness owns the same-day process lock. Acquire it before this
+# script publishes or replaces any workflow pointer so a concurrent/manual
+# invocation cannot clobber the active run. The descriptor is inherited by the
+# harness after the governed PAPER environment has been loaded below; retry
+# children close it and run under their parent's still-held lock.
+if [[ "${CAERUS_PAPER_RETRY_CHILD:-0}" != "1" ]]; then
+    mkdir -p "${REPO_ROOT}/outputs/workflow"
+    exec 9>"${REPO_ROOT}/outputs/workflow/paper_execution_retry.lock"
+    if ! flock -n 9; then
+        echo "FATAL: paper execution retry harness is already running" >&2
+        exit 75
+    fi
+fi
+
+# Replace any same-date stale terminal pointer before the first fallible source,
+# venv, or retry-wrapper step. This writer uses only the system Python standard
+# library and an atomic rename; it cannot depend on project packages or .env.
+BOOTSTRAP_REPORT_DATE="${REPORT_DATE:-$(date +%F)}"
+BOOTSTRAP_RUN_ID="${BOOTSTRAP_REPORT_DATE}T$(date +%Y%m%dT%H%M%S%z)_paper_bootstrap"
+BOOTSTRAP_POINTER_CLAIMED=0
+bootstrap_pointer() {
+    local pointer_status="$1"
+    local pointer_substatus="$2"
+    local pointer_message="$3"
+    BOOTSTRAP_REPORT_DATE="${BOOTSTRAP_REPORT_DATE}" \
+    BOOTSTRAP_RUN_ID="${BOOTSTRAP_RUN_ID}" \
+    BOOTSTRAP_STATUS="${pointer_status}" \
+    BOOTSTRAP_SUBSTATUS="${pointer_substatus}" \
+    BOOTSTRAP_MESSAGE="${pointer_message}" \
+        python3 - <<'PY'
+import json
+import os
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+trade_date = os.environ["BOOTSTRAP_REPORT_DATE"]
+root = Path("outputs/workflow") / trade_date
+root.mkdir(parents=True, exist_ok=True)
+payload = {
+    "stage": "execution",
+    "trade_date": trade_date,
+    "mode": "PAPER",
+    "run_id": os.environ["BOOTSTRAP_RUN_ID"],
+    "run_root": f"outputs/paper_lane/runs/{os.environ['BOOTSTRAP_RUN_ID']}",
+    "status": os.environ["BOOTSTRAP_STATUS"],
+    "substatus": os.environ["BOOTSTRAP_SUBSTATUS"],
+    "status_message": os.environ["BOOTSTRAP_MESSAGE"],
+    "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+}
+with tempfile.NamedTemporaryFile("w", dir=root, delete=False) as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+    temporary = Path(handle.name)
+temporary.replace(root / "execution.json")
+PY
+}
+bootstrap_pointer "running" "paper_execution_bootstrap" "paper execution invocation started"
+BOOTSTRAP_POINTER_CLAIMED=1
+bootstrap_failure_pointer() {
+    local exit_code=$?
+    if [[ ${exit_code} -ne 0 && ${BOOTSTRAP_POINTER_CLAIMED} -eq 1 ]]; then
+        bootstrap_pointer "failed_unknown" "paper_execution_bootstrap_failed" \
+            "paper execution failed before governed run initialization" || true
+    fi
+    return ${exit_code}
+}
+trap bootstrap_failure_pointer EXIT
+
 # --- Load credentials and config (.env ONLY — never ~/.caerus/live_pilot.env) ---
 if [[ -f "${REPO_ROOT}/.env" ]]; then
     set -a
@@ -52,18 +121,6 @@ PYTHON_BIN="${PYTHON_BIN:-$(command -v python3)}"
 if [[ ! -x "${PYTHON_BIN}" ]]; then
     echo "FATAL: python interpreter not found or not executable: ${PYTHON_BIN}" >&2
     exit 1
-fi
-
-# --- Lane-wide transient retry harness (PAPER only) ---
-# The outer invocation owns one retry budget across cap resolution, dry run, and
-# submission pre-snapshot checks. Child attempts re-run this script with every
-# validation/gate refreshed. Live execution uses a different cron and never
-# enters this wrapper.
-if [[ "${CAERUS_PAPER_RETRY_CHILD:-0}" != "1" ]]; then
-    export REPORT_DATE="${REPORT_DATE:-$(date +%F)}"
-    exec "${PYTHON_BIN}" -m scripts.paper_execution_retry \
-        --trade-date "${REPORT_DATE}" \
-        --repo-root "${REPO_ROOT}"
 fi
 
 # --- Mode / endpoint: PAPER, always ---
@@ -118,6 +175,8 @@ export CAERUS_LIVE_PILOT_SETTLEMENT_TIMEOUT_SECONDS="120"
 export CAERUS_LIVE_PILOT_SETTLEMENT_MAX_ATTEMPTS="61"
 export CAERUS_LIVE_PILOT_SETTLEMENT_BASE_DELAY_SECONDS="2"
 export CAERUS_LIVE_PILOT_SETTLEMENT_MAX_DELAY_SECONDS="2"
+export CAERUS_EXACT_FILL_REFRESH_ATTEMPTS="61"
+export CAERUS_EXACT_FILL_REFRESH_DELAY_SECONDS="2"
 export CAERUS_PAPER_REUSE_CONFIRMED_SELL_PROCEEDS="1"
 # Approval-style gates: set inline =1 for paper. WHY: these flags exist to force
 # a HUMAN arming step before real-money submission on the live lane. The paper
@@ -131,6 +190,8 @@ export CAERUS_LIVE_PILOT_CRON_APPROVED="1"
 export CAERUS_LIVE_PILOT_SCHEDULE_ENABLED="1"
 export CAERUS_LIVE_PILOT_SUBMIT_APPROVED="1"
 export CAERUS_REQUIRE_APPROVED_EXECUTION_PACKAGE="1"
+export CAERUS_REQUIRE_EXACT_EXECUTION_PLAN="1"
+export CAERUS_EXACT_MAX_PLAN_AGE_SECONDS="900"
 # Deliberately NOT exported here: CAERUS_LIVE_PILOT_KILL_SWITCH. The kill switch
 # is a LIVE-lane safety gate; the paper gate stack short-circuits on the paper
 # broker before ever consulting it, so exporting =0 here would be inert for
@@ -143,9 +204,11 @@ PAPER_LANE_ROOT="outputs/paper_lane"
 PAPER_PLANS_DIR="${PAPER_LANE_ROOT}/plans"
 PAPER_STATE_DIR="${PAPER_LANE_ROOT}/state"
 
-# --- Options overlay execution (default enabled for paper trading; unchanged) ---
-export ALLOW_OPTIONS_EXECUTION="${ALLOW_OPTIONS_EXECUTION:-1}"
-export ALLOW_OPTIONS_SUBMISSION="${ALLOW_OPTIONS_SUBMISSION:-1}"
+# A second options submitter would bypass the sealed v3 plan and invalidate its
+# reconciled poststate. Options remain research-only until represented inside
+# this same authority/WAL/economic contract.
+export ALLOW_OPTIONS_EXECUTION="0"
+export ALLOW_OPTIONS_SUBMISSION="0"
 
 # --- Suppress emails during execution (Phase 3 handles email; unchanged) ---
 export EMAIL_INLINE_REPORTS=0
@@ -153,6 +216,18 @@ export EMAIL_MARKET_CONDITIONS=0
 export EMAIL_PRETRADE=0
 export EMAIL_TRADING_CONFIRMATION=0
 export EMAIL_INTERNAL_DEBUG=0
+
+# --- Lane-wide transient retry harness (PAPER only) ---
+# Start after every PAPER override/pin so same-run fill recovery and late
+# confirmation inherit exactly the same governed credentials, endpoint, caps,
+# approval state, exact-plan policy, and email behavior as the child lane.
+if [[ "${CAERUS_PAPER_RETRY_CHILD:-0}" != "1" ]]; then
+    BOOTSTRAP_POINTER_CLAIMED=0
+    exec "${PYTHON_BIN}" -m scripts.paper_execution_retry \
+        --trade-date "${REPORT_DATE}" \
+        --repo-root "${REPO_ROOT}" \
+        --inherited-lock-fd 9
+fi
 
 export WORKFLOW_STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -187,37 +262,133 @@ SUBMIT_RUN_ID="${REPORT_DATE}T${RUN_TS}_paper_cron_submit"
 
 write_paper_pointer() {
     # write_paper_pointer <run_id> <run_root> <terminal_status> <reason_code>
-    "${PYTHON_BIN}" scripts/paper_lane_write_execution_pointer.py \
+    if "${PYTHON_BIN}" scripts/paper_lane_write_execution_pointer.py \
         --trade-date "${REPORT_DATE}" \
         --run-id "$1" \
         --run-root "$2" \
         --terminal-status "$3" \
-        --reason-code "$4" || true
+        --reason-code "$4"; then
+        return 0
+    fi
+    echo "ERROR: canonical pointer writer failed; emitting atomic emergency pointer" >&2
+    POINTER_RUN_ID="$1" POINTER_RUN_ROOT="$2" POINTER_TERMINAL="$3" POINTER_REASON="$4" \
+        "${PYTHON_BIN}" - <<'PY'
+import json
+import os
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+root = Path("outputs/workflow") / os.environ["REPORT_DATE"]
+root.mkdir(parents=True, exist_ok=True)
+terminal = os.environ["POINTER_TERMINAL"]
+status = "running" if terminal.lower() == "running" else "failed_unknown"
+payload = {
+    "stage": "execution",
+    "trade_date": os.environ["REPORT_DATE"],
+    "mode": "PAPER",
+    "run_id": os.environ["POINTER_RUN_ID"],
+    "run_root": os.environ["POINTER_RUN_ROOT"],
+    "status": status,
+    "substatus": "canonical_pointer_writer_failed",
+    "status_message": os.environ["POINTER_REASON"] or "canonical_pointer_writer_failed",
+    "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
 }
+target = root / "execution.json"
+with tempfile.NamedTemporaryFile("w", dir=root, delete=False) as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+    temporary = Path(handle.name)
+temporary.replace(target)
+PY
+    # The emergency pointer is intentionally a failure artifact. Never let the
+    # scheduler report a successful execution when canonical publication failed.
+    return 1
+}
+
+# Claim the same-day execution pointer before any fallible bundle/cap/authority
+# work so a rerun can never leave a stale success visible to confirmation.
+write_paper_pointer \
+    "${SUBMIT_RUN_ID}" \
+    "${PAPER_LANE_ROOT}/runs/${SUBMIT_RUN_ID}" \
+    "running" \
+    "paper_execution_initializing"
+BOOTSTRAP_POINTER_CLAIMED=0
 
 fail_lane() {
     # fail_lane <reason_code>: write a failed pointer, log, exit 1.
     FAIL_RUN_ROOT="${PAPER_LANE_ROOT}/runs/${SUBMIT_RUN_ID}"
     mkdir -p "${FAIL_RUN_ROOT}"
-    FAIL_REASON="$1" FAIL_RUN_ROOT="${FAIL_RUN_ROOT}" "${PYTHON_BIN}" - <<'PY'
+    set +e
+    FAIL_REASON="$1" FAIL_RUN_ROOT="${FAIL_RUN_ROOT}" PAPER_LANE_ROOT="${PAPER_LANE_ROOT}" REPORT_DATE="${REPORT_DATE}" "${PYTHON_BIN}" - <<'PY'
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
+from core.execution_attempt_registry import AttemptRecord, append_attempt, read_attempts, select_from_registry, write_selection_pointer
+from core.failure_semantics import FailureClass, TerminalOutcome, build_system_failure, get_failure_policy
 
 run_root = Path(os.environ["FAIL_RUN_ROOT"])
-payload = {
+trade_date = os.environ["REPORT_DATE"]
+reason = os.environ["FAIL_REASON"]
+failure_class = FailureClass.PRECOMPUTE_FAILURE if "precompute" in reason else FailureClass.AUTHORIZATION_FAILURE
+failure = build_system_failure(
+    failure_class=failure_class,
+    reason_code=reason,
+    before_financial_mutation=True,
+).to_dict()
+policy = get_failure_policy(failure_class).to_dict()
+terminal = {
     "run_id": run_root.name,
+    "trade_date": trade_date,
+    "mode": "PAPER",
     "terminal_status": "BLOCKED",
-    "reason": os.environ["FAIL_REASON"],
-    "halt_reason": os.environ["FAIL_REASON"],
+    "terminal_outcome": TerminalOutcome.SYSTEM_FAILURE.value,
+    "reason_code": reason,
+    "reason": reason,
+    "halt_reason": reason,
+    "failure_class": failure_class.value,
+    "failure_semantics": failure,
+    "failure_policy": policy,
     "submitted_count": 0,
     "run_root": str(run_root),
 }
-(run_root / "execution_results.json").write_text(
-    json.dumps(payload, indent=2, sort_keys=True) + "\n",
-    encoding="utf-8",
+def write(name, payload):
+    path = run_root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+write("execution_results.json", {**terminal, "status": "BLOCKED"})
+write("operator_summary.json", terminal)
+write("live_pilot_operator_summary.json", terminal)
+write("execution_payload.json", {**terminal, "schema_version": "caerus.execution_payload.v3", "orders": []})
+write("execution_timeline.json", {**terminal, "schema_version": "caerus.execution_lifecycle_timeline.v2", "stages": [{"stage": "AUTHORIZE", "status": "FAILED"}]})
+write("live_pilot_reconciliation.json", {**terminal, "status": "FAILED_PRE_SUBMIT", "state": "BLOCKED"})
+write("live_pilot_broker_snapshot_pre.json", {"trade_date": trade_date, "status": "NOT_CAPTURED_BLOCKED_BEFORE_BROKER_SNAPSHOT", "account": {}, "positions": []})
+write("live_pilot_broker_snapshot_post.json", {"trade_date": trade_date, "status": "NOT_CAPTURED_BLOCKED_BEFORE_BROKER_SNAPSHOT", "account": {}, "positions": []})
+write("audit/execution_integrity.json", {**terminal, "schema_version": "caerus.execution_integrity.v2", "status": "FAIL", "findings": [reason]})
+registry = Path(os.environ["PAPER_LANE_ROOT"]) / "execution_attempts"
+prior = read_attempts(registry, trade_date=trade_date)
+record = AttemptRecord(
+    attempt_id=run_root.name,
+    trade_date=trade_date,
+    run_id=run_root.name,
+    lane="paper",
+    sequence=len(prior) + 1,
+    terminal_outcome=TerminalOutcome.SYSTEM_FAILURE,
+    recorded_at=datetime.now(timezone.utc).isoformat(),
+    run_root=str(run_root),
+    failure_class=failure_class,
+    reason_code=reason,
+    source_artifacts=(str(run_root / "execution_results.json"),),
 )
+append_attempt(registry, record)
+write_selection_pointer(registry, select_from_registry(registry, trade_date=trade_date))
 PY
+    FAILURE_ARTIFACT_STATUS=$?
+    set -e
+    if [[ ${FAILURE_ARTIFACT_STATUS} -ne 0 ]]; then
+        echo "ERROR: auxiliary failure-artifact persistence failed; canonical pointer still forced failed" >&2
+    fi
     write_paper_pointer \
         "${SUBMIT_RUN_ID}" \
         "${FAIL_RUN_ROOT}" \
@@ -322,19 +493,10 @@ fi
 echo "OK: precompute bundle validated at ${BUNDLE_DIR}"
 echo "bundle_validation=${BUNDLE_VALIDATION_PATH}"
 
-# --- Certify execution readiness without submitting orders (unchanged) ---
-if [[ ! "${EXECUTION_READINESS_CERTIFICATION_ENABLED}" =~ ^(0|false|FALSE|no|NO|n|N|off|OFF)$ ]]; then
-    CERTIFICATION_PATH="${BUNDLE_DIR}/execution_readiness_certification.json"
-    if ! python3 -m scripts.certify_execution_readiness \
-        --trade-date "${REPORT_DATE}" \
-        --mode paper \
-        --no-submit \
-        --output-path "${CERTIFICATION_PATH}"; then
-        echo "FATAL: execution readiness certification failed; details=${CERTIFICATION_PATH}"
-        fail_lane "execution_readiness_certification_failed"
-    fi
-    echo "OK: execution readiness certification written to ${CERTIFICATION_PATH}"
-fi
+# The 07:00 bundle is opportunity evidence, not executable authority.  It is
+# intentionally not labeled/certified as execution-ready.  Fresh broker state
+# below is required before Decision may publish exact orders.
+echo "precompute_authority=OPPORTUNITY_EVIDENCE_ONLY"
 
 # --- Resolve the capital cap (same resolver as the live lane) ---
 # For paper the PAPER account's portfolio value is tightened by the $10k staging
@@ -427,6 +589,25 @@ if [[ "${PLAN_STATUS}" -ne 0 || -z "${PLAN_PATH}" ]]; then
 fi
 echo "plan_path=${PLAN_PATH}"
 
+# --- One final Decision: bind current broker state and seal exact orders ---
+AUTHORITY_RUN_ID="${REPORT_DATE}T${RUN_TS}_paper_authority"
+EXACT_PLAN_PATH="${PAPER_PLANS_DIR}/exact_execution_plan_${REPORT_DATE}.json"
+set +e
+AUTHORITY_OUTPUT="$("${PYTHON_BIN}" scripts/authorize_exact_execution_plan.py \
+    --plan "${PLAN_PATH}" \
+    --run-id "${AUTHORITY_RUN_ID}" \
+    --output "${EXACT_PLAN_PATH}" 2>&1)"
+AUTHORITY_STATUS=$?
+set -e
+echo "${AUTHORITY_OUTPUT}"
+AUTHORITY_PLAN_PATH="$(summary_field "${AUTHORITY_OUTPUT}" json_path || true)"
+if [[ "${AUTHORITY_STATUS}" -ne 0 || -z "${AUTHORITY_PLAN_PATH}" || ! -f "${AUTHORITY_PLAN_PATH}" ]]; then
+    AUTHORITY_REASON="$(summary_field "${AUTHORITY_OUTPUT}" reason_code || true)"
+    fail_lane "${AUTHORITY_REASON:-paper_exact_plan_authorization_nonretryable_failed}"
+fi
+PLAN_PATH="${AUTHORITY_PLAN_PATH}"
+echo "exact_plan_path=${PLAN_PATH}"
+
 # --- Pass 1: DRY RUN (no submission; isolated artifacts) ---
 echo "=== PAPER LANE DRY RUN ==="
 set +e
@@ -437,7 +618,7 @@ set -e
 echo "${DRY_OUTPUT}"
 if [[ "${DRY_STATUS}" -ne 0 ]]; then
     DRY_REASON="$(summary_field "${DRY_OUTPUT}" reason_code || true)"
-    DRY_RUN_ROOT="$(summary_field "${DRY_OUTPUT}" run_root || true)"
+    DRY_RUN_ROOT="${PAPER_LANE_ROOT}/runs/${DRY_RUN_ID}"
     write_paper_pointer "${DRY_RUN_ID}" "${DRY_RUN_ROOT}" "BLOCKED" "${DRY_REASON:-paper_lane_dry_run_failed}"
     echo "FATAL: paper lane dry run failed (exit=${DRY_STATUS})"
     echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) exit_code=1"
@@ -457,35 +638,44 @@ SUBMIT_OUTPUT="$(CAERUS_LIVE_PILOT_DRY_RUN=0 "${PYTHON_BIN}" scripts/live_pilot_
 SUBMIT_STATUS=$?
 set -e
 echo "${SUBMIT_OUTPUT}"
-SUBMIT_RUN_ROOT="$(summary_field "${SUBMIT_OUTPUT}" run_root || true)"
+EXPECTED_SUBMIT_RUN_ROOT="${PAPER_LANE_ROOT}/runs/${SUBMIT_RUN_ID}"
+REPORTED_SUBMIT_RUN_ROOT="$(summary_field "${SUBMIT_OUTPUT}" run_root || true)"
+SUBMIT_RUN_ROOT="${EXPECTED_SUBMIT_RUN_ROOT}"
 SUBMIT_TERMINAL="$(summary_field "${SUBMIT_OUTPUT}" terminal_status || true)"
 SUBMIT_REASON="$(summary_field "${SUBMIT_OUTPUT}" reason_code || true)"
+if [[ -z "${REPORTED_SUBMIT_RUN_ROOT}" || "${REPORTED_SUBMIT_RUN_ROOT}" != "${EXPECTED_SUBMIT_RUN_ROOT}" ]]; then
+    echo "ERROR: executor did not return the expected nonempty run root" >&2
+    SUBMIT_STATUS=1
+    SUBMIT_TERMINAL="FAILED_RECONCILIATION"
+    SUBMIT_REASON="exact_execution_run_root_identity_mismatch"
+fi
 
-# --- Confirm-flow pointer: execution.json + paper_lane_execution.json ---
-POINTER_OUTPUT="$(
-    "${PYTHON_BIN}" scripts/paper_lane_write_execution_pointer.py \
-        --trade-date "${REPORT_DATE}" \
-        --run-id "${SUBMIT_RUN_ID}" \
-        --run-root "${SUBMIT_RUN_ROOT}" \
-        --terminal-status "${SUBMIT_TERMINAL:-failed_unknown}" \
-        --reason-code "${SUBMIT_REASON}"
-)"
-echo "${POINTER_OUTPUT}"
-LANE_OK="$(summary_field "${POINTER_OUTPUT}" lane_exit_ok || true)"
+# The canonical pointer remains nonterminal while mandatory reconciliation and
+# health verification run. Confirmation must never observe success early.
+write_paper_pointer \
+    "${SUBMIT_RUN_ID}" \
+    "${SUBMIT_RUN_ROOT}" \
+    "running" \
+    "paper_posttrade_verification_started"
 
-EXIT_CODE=1
-if [[ "${LANE_OK}" == "True" || "${LANE_OK}" == "true" ]]; then
-    EXIT_CODE=0
+EXIT_CODE=0
+if [[ "${SUBMIT_STATUS}" -ne 0 ]] || [[ "${SUBMIT_TERMINAL}" != "SUBMITTED" && "${SUBMIT_TERMINAL}" != "AUTHORIZED_NO_TRADE" ]]; then
+    EXIT_CODE=1
 fi
 
 # Reconcile the exact approved package against broker truth, then require the
-# complete daily health surface to be green. This runs after the terminal
-# pointer is published so reconciliation resolves this PAPER run rather than a
-# stale legacy latest-run artifact.
+# complete daily health surface to be green before terminal publication.
 if [[ ${EXIT_CODE} -eq 0 ]]; then
     "${PYTHON_BIN}" -m scripts.live_vs_shadow_reconciliation \
         --trade-date "${REPORT_DATE}" \
         --broker-positions-path "${SUBMIT_RUN_ROOT}/live_pilot_broker_snapshot_post.json" || EXIT_CODE=$?
+fi
+# Rebuild the current-date economic/intent surface from this exact attempt.
+# Health must never certify a stale pre-attempt operational-drag artifact.
+if [[ ${EXIT_CODE} -eq 0 ]]; then
+    "${PYTHON_BIN}" scripts/run_operational_drag_analysis.py \
+        --date "${REPORT_DATE}" \
+        --repo-root "${REPO_ROOT}" || EXIT_CODE=$?
 fi
 if [[ ${EXIT_CODE} -eq 0 ]]; then
     "${PYTHON_BIN}" -m scripts.caerus_daily_health_check \
@@ -511,30 +701,79 @@ PY
     fi
 fi
 
-# --- Options overlay execution (unchanged from the legacy paper lane) ---
-if [[ ${EXIT_CODE} -eq 0 ]]; then
-    OPTIONS_SUBMISSION_ENABLED="$(printf '%s' "${ALLOW_OPTIONS_EXECUTION:-${ALLOW_OPTIONS_SUBMISSION:-0}}" | tr '[:upper:]' '[:lower:]')"
-    if [[ "${OPTIONS_SUBMISSION_ENABLED}" == "1" || "${OPTIONS_SUBMISSION_ENABLED}" == "true" || "${OPTIONS_SUBMISSION_ENABLED}" == "yes" || "${OPTIONS_SUBMISSION_ENABLED}" == "y" || "${OPTIONS_SUBMISSION_ENABLED}" == "on" ]]; then
-        PAPER_REVIEW_PATH="${REPO_ROOT}/outputs/options_overlay_paper/options_overlay_paper_review_${REPORT_DATE}.json"
-        if [[ ! -f "${PAPER_REVIEW_PATH}" ]]; then
-            echo "ERROR: options submission requested but paper review is missing at ${PAPER_REVIEW_PATH}"
-            EXIT_CODE=1
-        else
-            echo "=== PHASE 2: OPTIONS OVERLAY EXECUTION ==="
-            "${PYTHON_BIN}" scripts/execute_options_overlay.py \
-                --run-root "${REPO_ROOT}/outputs/options_execution/${REPORT_DATE}" \
-                --output-dir "${REPO_ROOT}/outputs/options_execution" \
-                --paper-review "${PAPER_REVIEW_PATH}" \
-                --trade-date "${REPORT_DATE}" \
-                --submit || EXIT_CODE=$?
-            if [[ ${EXIT_CODE} -eq 0 ]]; then
-                echo "OK: options overlay execution review completed"
-            else
-                echo "ERROR: options overlay execution failed with exit code ${EXIT_CODE}"
-            fi
-        fi
+FINAL_TERMINAL="${SUBMIT_TERMINAL:-failed_unknown}"
+FINAL_REASON="${SUBMIT_REASON}"
+if [[ ${EXIT_CODE} -ne 0 ]]; then
+    FINAL_TERMINAL="FAILED_RECONCILIATION"
+    FINAL_REASON="paper_posttrade_verification_failed:${SUBMIT_REASON:-unknown}"
+    set +e
+    POSTTRADE_RUN_ROOT="${SUBMIT_RUN_ROOT}" POSTTRADE_REASON="${FINAL_REASON}" REPORT_DATE="${REPORT_DATE}" PAPER_LANE_ROOT="${PAPER_LANE_ROOT}" "${PYTHON_BIN}" - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from core.execution_attempt_registry import AttemptRecord, append_attempt, read_attempts, select_from_registry, write_selection_pointer
+from core.failure_semantics import FailureClass, TerminalOutcome
+
+run_root = Path(os.environ["POSTTRADE_RUN_ROOT"])
+reason = os.environ["POSTTRADE_REASON"]
+trade_date = os.environ["REPORT_DATE"]
+def update(relative, changes):
+    path = run_root / relative
+    payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    payload.update(changes)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+terminal = {
+    "terminal_status": "FAILED_RECONCILIATION",
+    "terminal_outcome": "SYSTEM_FAILURE",
+    "reason_code": reason,
+    "failure_class": "RECONCILIATION_FAILURE",
+    "reconciliation_status": "FAILED_RECONCILIATION",
+}
+for relative in ("operator_summary.json", "live_pilot_operator_summary.json"):
+    update(relative, terminal)
+update("execution_results.json", {**terminal, "status": "FAILED_RECONCILIATION"})
+update("live_pilot_reconciliation.json", {**terminal, "status": "FAILED_RECONCILIATION", "state": "FAILED_RECONCILIATION"})
+update("execution_timeline.json", terminal)
+update("audit/execution_integrity.json", {**terminal, "status": "FAIL", "findings": [reason]})
+registry = Path(os.environ["PAPER_LANE_ROOT"]) / "execution_attempts"
+prior = read_attempts(registry, trade_date=trade_date)
+record = AttemptRecord(
+    attempt_id=f"{run_root.name}.posttrade_failure",
+    trade_date=trade_date,
+    run_id=run_root.name,
+    lane="paper",
+    sequence=len(prior) + 1,
+    terminal_outcome=TerminalOutcome.SYSTEM_FAILURE,
+    recorded_at=datetime.now(timezone.utc).isoformat(),
+    run_root=str(run_root),
+    submitted_count=int((json.loads((run_root / "execution_results.json").read_text())).get("orders_submitted_count") or 0),
+    filled_count=int((json.loads((run_root / "execution_results.json").read_text())).get("orders_filled_count") or 0),
+    failure_class=FailureClass.RECONCILIATION_FAILURE,
+    reason_code=reason,
+    source_artifacts=(str(run_root / "execution_results.json"),),
+)
+append_attempt(registry, record)
+write_selection_pointer(registry, select_from_registry(registry, trade_date=trade_date))
+PY
+    POSTTRADE_ARTIFACT_STATUS=$?
+    set -e
+    if [[ ${POSTTRADE_ARTIFACT_STATUS} -ne 0 ]]; then
+        echo "ERROR: run-local posttrade failure rewrite failed; canonical pointer remains failed" >&2
     fi
-else
+fi
+if ! write_paper_pointer \
+    "${SUBMIT_RUN_ID}" \
+    "${SUBMIT_RUN_ROOT}" \
+    "${FINAL_TERMINAL}" \
+    "${FINAL_REASON}"; then
+    EXIT_CODE=1
+    echo "ERROR: canonical terminal execution pointer publication failed" >&2
+fi
+
+echo "options_execution_authority=DISABLED_PENDING_EXACT_PLAN_INTEGRATION"
+if [[ ${EXIT_CODE} -ne 0 ]]; then
     echo "ERROR: paper lane submission terminal_status=${SUBMIT_TERMINAL:-unknown} reason=${SUBMIT_REASON:-unknown} (exit=${SUBMIT_STATUS})"
 fi
 

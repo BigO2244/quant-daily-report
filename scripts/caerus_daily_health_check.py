@@ -7,7 +7,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.economic_reconciliation import verify_canonical_economic_artifact_hash
+from core.execution_attempt_registry import (
+    AttemptRecord,
+    SELECTION_SCHEMA_VERSION,
+    attempt_path,
+)
 from core.execution_equality_gate import classify_equality_gate_observe_status
+from core.orchestrator_state import STAGES, OrchestratorStateError, load_orchestrator_state
 from core.strategy_registry import active_shadow_security_selection_ids
 
 
@@ -536,6 +543,60 @@ def _resolve_run_root(root: Path, latest_run: dict[str, Any] | None) -> Path | N
     return path
 
 
+def _resolve_artifact_path(root: Path, raw: Any) -> Path | None:
+    text = _norm_text(raw)
+    if not text:
+        return None
+    path = Path(text).expanduser()
+    return path if path.is_absolute() else root / path
+
+
+def _paths_agree(left: Path | None, right: Path | None) -> bool:
+    if left is None or right is None:
+        return False
+    return left.resolve() == right.resolve()
+
+
+def _is_choice2_execution(*payloads: dict[str, Any] | None) -> bool:
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        provenance = payload.get("provenance")
+        execution_source = _norm_text(
+            payload.get("execution_source")
+            or (provenance.get("execution_source") if isinstance(provenance, dict) else "")
+        )
+        if execution_source == "exact_execution_plan_v3":
+            return True
+        if (
+            payload.get("schema_version") == "live_pilot_operator_summary.v1"
+            or "terminal_outcome" in payload
+            or "canonical_economic_verification_status" in payload
+            or "attempt_registry_status" in payload
+        ):
+            return True
+    return False
+
+
+def _expected_pointer_status(terminal_status: str, reason_code: str = "") -> str:
+    terminal = _norm_text(terminal_status).upper()
+    if terminal == "SUBMITTED":
+        return "success"
+    if terminal in {"AUTHORIZED_NO_TRADE", "DRY_RUN"}:
+        return "no_action"
+    if terminal == "BLOCKED" and "live_pilot_transition_no_actionable_order" in _norm_text(reason_code):
+        return "no_action"
+    if terminal == "BLOCKED":
+        return "failed_blocked"
+    if terminal in {"SUBMITTED_UNFILLED", "SUBMISSION_UNKNOWN"}:
+        return "failed_incomplete"
+    if terminal == "FAILED_RECONCILIATION":
+        return "failed_reconciliation"
+    if terminal == "FAILED_PLAN_INTEGRITY":
+        return "failed_integrity"
+    return "failed_unknown"
+
+
 def _equality_gate_observe_surface(root: Path) -> dict[str, Any]:
     latest_path = root / "outputs" / "latest_run.json"
     latest_run, latest_error = _read_json(latest_path)
@@ -687,6 +748,7 @@ def _check_execution_timeline_provenance(root: Path, trade_date: str) -> CheckRe
         "SUBMITTED",
         "DRY_RUN",
         "NO_ORDERS_NEEDED",
+        "AUTHORIZED_NO_TRADE",
     }:
         reason_codes.append("EXECUTION_TERMINAL_STATUS_NOT_CLEAN")
 
@@ -722,6 +784,293 @@ def _check_execution_timeline_provenance(root: Path, trade_date: str) -> CheckRe
     )
 
 
+def _check_choice2_terminal_evidence(root: Path, trade_date: str) -> CheckResult:
+    """Verify that every mutable Choice 2 terminal view names immutable truth.
+
+    Older, explicitly identified execution sources remain observable through the
+    legacy health checks above.  A Choice 2 execution cannot use that
+    compatibility path: its canonical workflow pointer, run-local terminal
+    views, economic verification, and selected append-only attempt must all
+    agree.
+    """
+
+    latest_path = root / "outputs" / "latest_run.json"
+    pointer_path = root / "outputs" / "workflow" / trade_date / "execution.json"
+    latest_run, latest_error = _read_json(latest_path)
+    pointer, pointer_error = _read_json(pointer_path)
+
+    latest_root = _resolve_run_root(root, latest_run)
+    pointer_root = _resolve_artifact_path(root, (pointer or {}).get("run_root"))
+
+    # A missing/corrupt pointer must not make an otherwise identifiable Choice 2
+    # run disappear.  Use latest_run only for detection and evidence recovery.
+    run_root = pointer_root or latest_root
+    operator_path = (run_root / "operator_summary.json") if run_root else None
+    results_path = (run_root / "execution_results.json") if run_root else None
+    payload_path = (run_root / "execution_payload.json") if run_root else None
+    timeline_path = (run_root / "execution_timeline.json") if run_root else None
+    economic_path = (run_root / "canonical_economic_verification.json") if run_root else None
+
+    operator, operator_error = _read_json(operator_path) if operator_path else (None, "MISSING_FILE")
+    results, results_error = _read_json(results_path) if results_path else (None, "MISSING_FILE")
+    execution_payload, payload_error = _read_json(payload_path) if payload_path else (None, "MISSING_FILE")
+    timeline, timeline_error = _read_json(timeline_path) if timeline_path else (None, "MISSING_FILE")
+
+    # If the pointer names a legacy run while latest_run identifies Choice 2,
+    # keep inspecting the Choice 2 run so the pointer mismatch is visible.
+    latest_operator: dict[str, Any] | None = None
+    latest_results: dict[str, Any] | None = None
+    latest_payload: dict[str, Any] | None = None
+    latest_timeline: dict[str, Any] | None = None
+    if latest_root is not None and not _paths_agree(latest_root, run_root):
+        latest_operator, _ = _read_json(latest_root / "operator_summary.json")
+        latest_results, _ = _read_json(latest_root / "execution_results.json")
+        latest_payload, _ = _read_json(latest_root / "execution_payload.json")
+        latest_timeline, _ = _read_json(latest_root / "execution_timeline.json")
+
+    choice2 = _is_choice2_execution(
+        operator,
+        results,
+        execution_payload,
+        timeline,
+        latest_operator,
+        latest_results,
+        latest_payload,
+        latest_timeline,
+    )
+    evidence_paths = [str(latest_path), str(pointer_path)]
+    evidence_paths.extend(
+        str(path)
+        for path in (operator_path, results_path, payload_path, timeline_path, economic_path)
+        if path is not None
+    )
+
+    if not choice2:
+        explicit_source = _norm_text(
+            (execution_payload or {}).get("execution_source")
+            or ((timeline or {}).get("provenance") or {}).get("execution_source")
+        )
+        if explicit_source and explicit_source != "exact_execution_plan_v3":
+            return CheckResult(
+                "Choice 2 terminal evidence",
+                "GREEN",
+                ["EXPLICIT_NON_CHOICE2_COMPATIBILITY"],
+                f"Explicit non-Choice2 execution_source={explicit_source}; legacy health checks apply.",
+                evidence_paths,
+            )
+        return CheckResult(
+            "Choice 2 terminal evidence",
+            "YELLOW",
+            ["EXECUTION_GENERATION_UNIDENTIFIED"],
+            "Execution generation is not explicit; Choice 2 evidence applicability is unknown.",
+            evidence_paths,
+        )
+
+    reason_codes: list[str] = []
+    if pointer_error:
+        reason_codes.append("CHOICE2_EXECUTION_POINTER_MISSING_OR_UNREADABLE")
+    if latest_error:
+        reason_codes.append("CHOICE2_LATEST_RUN_MISSING_OR_UNREADABLE")
+    if pointer_root is None:
+        reason_codes.append("CHOICE2_EXECUTION_POINTER_RUN_ROOT_MISSING")
+    if latest_root is None:
+        reason_codes.append("CHOICE2_LATEST_RUN_ROOT_MISSING")
+    if pointer_root is not None and latest_root is not None and not _paths_agree(pointer_root, latest_root):
+        reason_codes.append("CHOICE2_POINTER_LATEST_RUN_ROOT_MISMATCH")
+
+    pointer = pointer or {}
+    operator = operator or {}
+    results = results or {}
+    timeline = timeline or {}
+    execution_payload = execution_payload or {}
+    canonical_run_id = _norm_text(pointer.get("run_id"))
+    canonical_terminal_status = _norm_text(operator.get("terminal_status")).upper()
+    canonical_terminal_outcome = _norm_text(operator.get("terminal_outcome")).upper()
+
+    if _norm_text(pointer.get("stage")).lower() != "execution":
+        reason_codes.append("CHOICE2_EXECUTION_POINTER_STAGE_MISMATCH")
+    if _artifact_date(pointer) != trade_date:
+        reason_codes.append("CHOICE2_EXECUTION_POINTER_DATE_MISMATCH")
+    if _norm_text(pointer.get("mode")).upper() != "PAPER":
+        reason_codes.append("CHOICE2_EXECUTION_POINTER_MODE_MISMATCH")
+    if not canonical_run_id:
+        reason_codes.append("CHOICE2_EXECUTION_POINTER_RUN_ID_MISSING")
+
+    run_local_payloads = {
+        "OPERATOR": (operator, operator_error),
+        "RESULTS": (results, results_error),
+        "TIMELINE": (timeline, timeline_error),
+    }
+    for label, (surface, error) in run_local_payloads.items():
+        if error:
+            reason_codes.append(f"CHOICE2_{label}_MISSING_OR_UNREADABLE")
+            continue
+        if _artifact_date(surface) != trade_date:
+            reason_codes.append(f"CHOICE2_{label}_DATE_MISMATCH")
+        if _norm_text(surface.get("run_id")) != canonical_run_id:
+            reason_codes.append(f"CHOICE2_{label}_RUN_ID_MISMATCH")
+        if _norm_text(surface.get("terminal_status")).upper() != canonical_terminal_status:
+            reason_codes.append(f"CHOICE2_{label}_TERMINAL_STATUS_MISMATCH")
+        if _norm_text(surface.get("terminal_outcome")).upper() != canonical_terminal_outcome:
+            reason_codes.append(f"CHOICE2_{label}_TERMINAL_OUTCOME_MISMATCH")
+
+    payload_run_id = _norm_text(execution_payload.get("run_id"))
+    if payload_error:
+        reason_codes.append("CHOICE2_EXECUTION_PAYLOAD_MISSING_OR_UNREADABLE")
+    elif payload_run_id != canonical_run_id:
+        reason_codes.append("CHOICE2_EXECUTION_PAYLOAD_RUN_ID_MISMATCH")
+
+    expected_pointer_status = _expected_pointer_status(
+        canonical_terminal_status,
+        _norm_text(operator.get("reason_code")),
+    )
+    pointer_status = _norm_text(pointer.get("status")).lower()
+    pointer_substatus = _norm_text(pointer.get("substatus")).lower()
+    # cron_execute deliberately holds the canonical pointer in this single
+    # nonterminal state while the mandatory posttrade health gate validates the
+    # already-final run-local evidence.  Accepting only this exact two-phase
+    # publication state avoids the circular requirement that health be GREEN
+    # before success can be published while still rejecting every other stale or
+    # ambiguous running pointer.
+    posttrade_verification_in_progress = (
+        pointer_status == "running"
+        and pointer_substatus == "paper_posttrade_verification_started"
+        and expected_pointer_status in {"success", "no_action"}
+    )
+    if pointer_status != expected_pointer_status and not posttrade_verification_in_progress:
+        reason_codes.append("CHOICE2_POINTER_TERMINAL_STATUS_MISMATCH")
+    if canonical_terminal_status not in {"SUBMITTED", "AUTHORIZED_NO_TRADE"}:
+        reason_codes.append("CHOICE2_TERMINAL_STATUS_NOT_CLEAN")
+    if canonical_terminal_outcome not in {"RECONCILED_SUCCESS", "AUTHORIZED_NO_TRADE"}:
+        reason_codes.append("CHOICE2_TERMINAL_OUTCOME_NOT_CLEAN")
+
+    economic, economic_error = _read_json(economic_path) if economic_path else (None, "MISSING_FILE")
+    economic = economic or {}
+    if economic_error:
+        reason_codes.append("CHOICE2_ECONOMIC_VERIFICATION_MISSING_OR_UNREADABLE")
+    else:
+        if _artifact_date(economic) != trade_date:
+            reason_codes.append("CHOICE2_ECONOMIC_VERIFICATION_DATE_MISMATCH")
+        if _norm_text(economic.get("status")).upper() != "RECONCILED" or economic.get("reconciled") is not True:
+            reason_codes.append("CHOICE2_ECONOMIC_VERIFICATION_NOT_RECONCILED")
+        try:
+            economic_hash_valid = verify_canonical_economic_artifact_hash(economic)
+        except (TypeError, ValueError):
+            economic_hash_valid = False
+        if not economic_hash_valid:
+            reason_codes.append("CHOICE2_ECONOMIC_VERIFICATION_HASH_MISMATCH")
+        if _norm_text(operator.get("canonical_economic_verification_status")).upper() != _norm_text(
+            economic.get("status")
+        ).upper():
+            reason_codes.append("CHOICE2_OPERATOR_ECONOMIC_STATUS_MISMATCH")
+
+    selection_path = _resolve_artifact_path(root, operator.get("attempt_registry_selection"))
+    if selection_path is not None:
+        evidence_paths.append(str(selection_path))
+    selection, selection_error = _read_json(selection_path) if selection_path else (None, "MISSING_FILE")
+    selection = selection or {}
+    selected_attempt_path: Path | None = None
+    selected_attempt: AttemptRecord | None = None
+    if selection_error:
+        reason_codes.append("CHOICE2_ATTEMPT_SELECTION_MISSING_OR_UNREADABLE")
+    else:
+        if selection.get("schema_version") != SELECTION_SCHEMA_VERSION:
+            reason_codes.append("CHOICE2_ATTEMPT_SELECTION_SCHEMA_MISMATCH")
+        if _artifact_date(selection) != trade_date:
+            reason_codes.append("CHOICE2_ATTEMPT_SELECTION_DATE_MISMATCH")
+        if _norm_text(selection.get("status")).upper() != "RESOLVED":
+            reason_codes.append("CHOICE2_ATTEMPT_SELECTION_NOT_RESOLVED")
+        if _norm_text(operator.get("attempt_registry_status")).upper() != _norm_text(selection.get("status")).upper():
+            reason_codes.append("CHOICE2_OPERATOR_ATTEMPT_STATUS_MISMATCH")
+
+        selected_id = _norm_text(selection.get("selected_attempt_id"))
+        selected_hash = _norm_text(selection.get("selected_attempt_hash"))
+        if not selected_id or not selected_hash:
+            reason_codes.append("CHOICE2_SELECTED_ATTEMPT_ID_OR_HASH_MISSING")
+        elif selection_path is not None:
+            try:
+                selected_attempt_path = attempt_path(
+                    selection_path.parent.parent,
+                    trade_date=trade_date,
+                    attempt_id=selected_id,
+                )
+            except ValueError:
+                reason_codes.append("CHOICE2_SELECTED_ATTEMPT_ID_INVALID")
+                selected_attempt_path = None
+        if selected_attempt_path is not None:
+            evidence_paths.append(str(selected_attempt_path))
+            selected_payload, selected_error = _read_json(selected_attempt_path)
+            if selected_error:
+                reason_codes.append("CHOICE2_SELECTED_ATTEMPT_MISSING_OR_UNREADABLE")
+            else:
+                try:
+                    selected_attempt = AttemptRecord.from_dict(selected_payload or {}, verify_hash=True)
+                except (TypeError, ValueError, OverflowError):
+                    reason_codes.append("CHOICE2_SELECTED_ATTEMPT_HASH_OR_SCHEMA_INVALID")
+                if selected_attempt is not None:
+                    if selected_attempt.attempt_id != selected_id:
+                        reason_codes.append("CHOICE2_SELECTED_ATTEMPT_ID_MISMATCH")
+                    if selected_attempt.content_hash != selected_hash:
+                        reason_codes.append("CHOICE2_SELECTED_ATTEMPT_HASH_MISMATCH")
+                    if selected_hash not in {
+                        _norm_text(value) for value in (selection.get("attempt_hashes") or [])
+                    }:
+                        reason_codes.append("CHOICE2_SELECTED_ATTEMPT_HASH_NOT_IN_SELECTION")
+                    if selected_attempt.trade_date != trade_date:
+                        reason_codes.append("CHOICE2_SELECTED_ATTEMPT_DATE_MISMATCH")
+                    if selected_attempt.run_id != canonical_run_id:
+                        reason_codes.append("CHOICE2_SELECTED_ATTEMPT_RUN_ID_MISMATCH")
+                    if not _paths_agree(
+                        _resolve_artifact_path(root, selected_attempt.run_root),
+                        pointer_root,
+                    ):
+                        reason_codes.append("CHOICE2_SELECTED_ATTEMPT_RUN_ROOT_MISMATCH")
+                    if selected_attempt.terminal_outcome.value != canonical_terminal_outcome:
+                        reason_codes.append("CHOICE2_SELECTED_ATTEMPT_TERMINAL_OUTCOME_MISMATCH")
+
+    state_root = _resolve_artifact_path(root, operator.get("orchestrator_state_root"))
+    workflow_plan_id = _norm_text(operator.get("orchestrator_workflow_plan_id"))
+    if state_root is not None:
+        evidence_paths.append(str(state_root))
+    if state_root is None or not workflow_plan_id:
+        reason_codes.append("CHOICE2_ORCHESTRATOR_STATE_IDENTITY_MISSING")
+    else:
+        try:
+            orchestrator_state = load_orchestrator_state(
+                state_root,
+                trade_date=trade_date,
+                plan_id=workflow_plan_id,
+            )
+        except (OSError, ValueError, json.JSONDecodeError, OrchestratorStateError):
+            orchestrator_state = []
+            reason_codes.append("CHOICE2_ORCHESTRATOR_STATE_INVALID")
+        if [item.stage for item in orchestrator_state] != list(STAGES):
+            reason_codes.append("CHOICE2_ORCHESTRATOR_STATE_INCOMPLETE")
+        elif (
+            orchestrator_state[-1].status != "PASS"
+            or orchestrator_state[-1].content_hash
+            != _norm_text(operator.get("orchestrator_state_hash"))
+            or _norm_text(operator.get("orchestrator_state_status")).upper() != "PASS"
+        ):
+            reason_codes.append("CHOICE2_ORCHESTRATOR_STATE_TERMINAL_MISMATCH")
+
+    summary = (
+        f"run_id={canonical_run_id or 'unknown'}; terminal_status={canonical_terminal_status or 'unknown'}; "
+        f"terminal_outcome={canonical_terminal_outcome or 'unknown'}; "
+        f"economic_status={_norm_text(economic.get('status')) or 'unknown'}; "
+        f"attempt_selection_status={_norm_text(selection.get('status')) or 'unknown'}; "
+        f"selected_attempt={_norm_text(selection.get('selected_attempt_id')) or 'unknown'}; "
+        f"orchestrator_state={_norm_text(operator.get('orchestrator_state_status')) or 'unknown'}"
+    )
+    return CheckResult(
+        "Choice 2 terminal evidence",
+        "RED" if reason_codes else "GREEN",
+        sorted(set(reason_codes)),
+        summary,
+        evidence_paths,
+    )
+
+
 def build_health_check(root: Path = Path("."), trade_date: str | None = None) -> dict[str, Any]:
     root = root.resolve()
     resolved_trade_date = resolve_trade_date(root, trade_date)
@@ -735,6 +1084,7 @@ def build_health_check(root: Path = Path("."), trade_date: str | None = None) ->
         _check_strategy_identity(root, resolved_trade_date),
         _check_data_freshness(root, resolved_trade_date),
         _check_execution_timeline_provenance(root, resolved_trade_date),
+        _check_choice2_terminal_evidence(root, resolved_trade_date),
         _check_execution_equality(root),
     ]
     overall_status = _status_max(checks)

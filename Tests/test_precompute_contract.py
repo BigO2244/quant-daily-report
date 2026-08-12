@@ -53,6 +53,7 @@ def test_write_and_load_precompute_bundle(tmp_path: Path, monkeypatch) -> None:
     snapshot, payload, contract, reason = load_precompute_inputs(trade_date=trade_date)
     assert reason is None
     assert contract is not None
+    assert contract["files"]["sleeve_evaluations"] == "sleeve_evaluations.json"
     assert snapshot is not None
     assert payload is not None
     assert snapshot["signals_snapshot_path"].endswith("outputs/precompute/2026-03-17/signals.json")
@@ -72,6 +73,15 @@ def test_write_and_load_precompute_bundle(tmp_path: Path, monkeypatch) -> None:
         "desired_target_book_not_executed_fills"
     )
     assert payload["desired_one_way_turnover_pct"] is None
+    sleeve_evaluations = json.loads(
+        (contract_path.parent / "sleeve_evaluations.json").read_text(encoding="utf-8")
+    )
+    assert sleeve_evaluations["all_non_frozen_evaluated"] is True
+    assert sleeve_evaluations["summary"]["expected_count"] == 15
+    assert sleeve_evaluations["summary"]["envelope_count"] == 15
+    assert sleeve_evaluations["summary"]["capital_eligible_sleeve_ids"] == [
+        "caerus_orion"
+    ]
 
 
 def test_validate_precompute_contract_missing() -> None:
@@ -159,7 +169,12 @@ def test_validate_precompute_contract_accepts_legacy_alpaca_mode_alias(tmp_path:
     monkeypatch.chdir(tmp_path)
     bundle_dir = Path("outputs/precompute/2026-03-17")
     bundle_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("daily_snapshot.json", "signals.json", "planned_execution_payload.json"):
+    for name in (
+        "daily_snapshot.json",
+        "signals.json",
+        "planned_execution_payload.json",
+        "sleeve_evaluations.json",
+    ):
         (bundle_dir / name).write_text("{}\n", encoding="utf-8")
     contract = {
         "artifact_type": "alpaca_precompute_bundle",
@@ -171,6 +186,7 @@ def test_validate_precompute_contract_accepts_legacy_alpaca_mode_alias(tmp_path:
             "daily_snapshot": "daily_snapshot.json",
             "signals": "signals.json",
             "planned_execution_payload": "planned_execution_payload.json",
+            "sleeve_evaluations": "sleeve_evaluations.json",
         },
     }
 

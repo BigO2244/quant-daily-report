@@ -30,6 +30,7 @@ from core.execution_payload import (
     STATUS_IDEMPOTENT_REPLAY,
 )
 from core.execution_audit import write_early_halt_audit, write_executor_audit
+from core.execution_authority_policy import require_legacy_equity_test_double
 from core.operator_summary import (
     write_operator_summary,
     format_operator_summary_log,
@@ -361,6 +362,10 @@ def _submit_orders(payload: Dict[str, Any], broker: AlpacaBroker, run_root: Path
     - broker_responses: detailed per-order results
     - rejected_reasons: reasons for each rejection
     """
+    require_legacy_equity_test_double(
+        broker=broker,
+        mutation_path="scripts.execute_alpaca_orders._submit_orders",
+    )
     responses: List[Dict[str, Any]] = []
     rejected_reasons: List[str] = []
     order_ids: List[str] = []

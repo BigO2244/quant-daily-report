@@ -125,6 +125,7 @@ def build_precompute_contract(
     signals_filename: str = "signals.json",
     snapshot_filename: str = "daily_snapshot.json",
     payload_filename: str = "planned_execution_payload.json",
+    sleeve_evaluations_filename: str = "sleeve_evaluations.json",
 ) -> dict[str, Any]:
     validation_failures = _execution_payload_validation_failures(
         execution_payload or {}
@@ -168,6 +169,7 @@ def build_precompute_contract(
             "daily_snapshot": snapshot_filename,
             "signals": signals_filename,
             "planned_execution_payload": payload_filename,
+            "sleeve_evaluations": sleeve_evaluations_filename,
         },
         "summary": {
             "execution_status": str((execution_payload or {}).get("execution_status") or ""),
@@ -195,6 +197,17 @@ def write_precompute_bundle(
     daily_snapshot = dict(daily_snapshot or {})
     signals_payload = dict(signals_payload or {})
     execution_payload = dict(execution_payload or {})
+    # Validate the canonical sleeve inventory before writing any bundle member.
+    # Registry/manifest corruption and unregistered non-zero allocations are
+    # authority failures. Missing research implementations are not: the
+    # dispatcher records those as explicit BLOCKED envelopes below.
+    from core.sleeve_control_plane import (
+        load_sleeve_control_registry,
+        write_all_sleeve_evaluation,
+    )
+
+    sleeve_registry = load_sleeve_control_registry()
+    sleeve_registry.validate_allocations_registered(daily_snapshot)
     prior_signals, prior_source = latest_prior_signals(
         root=PRECOMPUTE_ROOT,
         trade_date=trade_date,
@@ -223,6 +236,7 @@ def write_precompute_bundle(
     snapshot_path = bundle_dir / "daily_snapshot.json"
     signals_path = bundle_dir / "signals.json"
     payload_path = bundle_dir / "planned_execution_payload.json"
+    sleeve_evaluations_path = bundle_dir / "sleeve_evaluations.json"
     contract_path = bundle_dir / "contract.json"
 
     safe_write_text(
@@ -241,6 +255,18 @@ def write_precompute_bundle(
         allow_overwrite=allow_overwrite,
     )
 
+    # The contract is the completion marker, so publish the all-sleeve
+    # evaluation before it.  A partial write can then never advertise a
+    # complete five-member bundle.
+    write_all_sleeve_evaluation(
+        output_path=sleeve_evaluations_path,
+        trade_date=trade_date,
+        run_id=run_id,
+        daily_snapshot=daily_snapshot,
+        runtime_root=Path.cwd(),
+        registry=sleeve_registry,
+        allow_overwrite=allow_overwrite,
+    )
     contract = build_precompute_contract(
         trade_date=trade_date,
         run_id=run_id,
@@ -286,7 +312,15 @@ def validate_precompute_contract(
         reason = str(contract.get("validation_reason") or "").strip()
         return False, reason or REASON_PRECOMPUTE_VALIDATION_FAILED
     files = contract.get("files") or {}
-    if not all(files.get(key) for key in ("daily_snapshot", "signals", "planned_execution_payload")):
+    if not all(
+        files.get(key)
+        for key in (
+            "daily_snapshot",
+            "signals",
+            "planned_execution_payload",
+            "sleeve_evaluations",
+        )
+    ):
         return False, REASON_PRECOMPUTE_INCOMPLETE
     bundle_dir = precompute_bundle_dir(expected_trade_date)
     for rel_name in files.values():
@@ -300,7 +334,13 @@ def validate_precompute_contract(
 # ---------------------------------------------------------------------------
 
 # The required bundle files (relative to the bundle dir for a given trade_date).
-BUNDLE_REQUIRED_FILES = ("contract.json", "daily_snapshot.json", "signals.json", "planned_execution_payload.json")
+BUNDLE_REQUIRED_FILES = (
+    "contract.json",
+    "daily_snapshot.json",
+    "signals.json",
+    "planned_execution_payload.json",
+    "sleeve_evaluations.json",
+)
 
 
 def discover_bundle_root(search_root: Path, report_date: str) -> Path | None:

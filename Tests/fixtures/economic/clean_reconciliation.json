@@ -1,0 +1,57 @@
+{
+  "trade_date": "2026-08-12",
+  "starting_cash": 1000.0,
+  "starting_positions": {
+    "AAPL": 10.0,
+    "MSFT": 5.0
+  },
+  "fills": [
+    {
+      "symbol": "AAPL",
+      "side": "SELL",
+      "quantity": 2.0,
+      "price": 110.0,
+      "fees": 1.0,
+      "sleeve": "caerus_orion",
+      "order_id": "order-1"
+    },
+    {
+      "symbol": "NVDA",
+      "side": "BUY",
+      "quantity": 1.0,
+      "price": 150.0,
+      "fees": 1.0,
+      "sleeve": "caerus_lyra",
+      "order_id": "order-2"
+    }
+  ],
+  "ending_cash": 1068.0,
+  "ending_positions": [
+    {"symbol": "AAPL", "quantity": 8.0, "mark": 112.0, "broker_market_value": 896.0},
+    {"symbol": "MSFT", "quantity": 5.0, "mark": 200.0, "broker_market_value": 1000.0},
+    {"symbol": "NVDA", "quantity": 1.0, "mark": 155.0, "broker_market_value": 155.0}
+  ],
+  "broker_position_value": 2051.0,
+  "broker_equity": 3119.0,
+  "portfolio_result": 19.0,
+  "sleeve_attribution": [
+    {
+      "trade_date": "2026-08-12",
+      "sleeve": "caerus_orion",
+      "result_dollars": 12.0,
+      "source_artifact": "fixture/orion_attribution.json"
+    },
+    {
+      "trade_date": "2026-08-12",
+      "sleeve": "caerus_lyra",
+      "result_dollars": 5.0,
+      "source_artifact": "fixture/lyra_attribution.json"
+    },
+    {
+      "trade_date": "2026-08-12",
+      "sleeve": "portfolio_cash_and_fees",
+      "result_dollars": 2.0,
+      "source_artifact": "fixture/cash_attribution.json"
+    }
+  ]
+}

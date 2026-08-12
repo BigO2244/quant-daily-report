@@ -389,7 +389,12 @@ def build_live_pilot_account_payload(
         max(int(approved_buy_count or 0) - int(submitted_buy_count or 0), 0),
     )
     gate_decision = str(gate_state.get("decision") or "").strip().upper()
-    payload_status = str(execution_results.get("status") or "").strip().upper()
+    payload_status = str(
+        execution_results.get("terminal_status")
+        or execution_results.get("terminal_outcome")
+        or execution_results.get("status")
+        or ""
+    ).strip().upper()
     operator_execution_status = str(
         execution_results.get("operator_execution_status") or ""
     ).strip().lower()

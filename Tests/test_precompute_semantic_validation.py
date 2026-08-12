@@ -5,11 +5,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+from core.precompute_contract import BUNDLE_REQUIRED_FILES
+from core.sleeve_control_plane import (
+    dispatch_all_sleeves,
+    load_sleeve_control_registry,
+)
 from scripts.research.check_precompute_semantic_validation import inspect_precompute_semantics, render_markdown
 
 
 TRADE_DATE = "2026-05-26"
-REQUIRED = ("contract.json", "daily_snapshot.json", "signals.json", "planned_execution_payload.json")
+REQUIRED = BUNDLE_REQUIRED_FILES
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -42,6 +47,38 @@ def _write_bundle(bundle: Path, *, strategy: str = "caerus_polaris", malformed_o
                     "notional": 400.0,
                 },
             ]
+        elif name == "sleeve_evaluations.json":
+            registry = load_sleeve_control_registry()
+            # A complete Choice-2 bundle must prove that the sole PAPER
+            # capital authority had a decision-eligible opportunity.  Keep
+            # this semantic-validation fixture production-faithful instead
+            # of allowing an all-BLOCKED sidecar to masquerade as complete.
+            _write_json(
+                bundle.parents[2]
+                / "outputs"
+                / "shadow_candidates"
+                / TRADE_DATE
+                / "caerus_orion.json",
+                {
+                    "trade_date": TRADE_DATE,
+                    "effective_trade_date": TRADE_DATE,
+                    "decision_eligible": True,
+                    "observation_status": "OK",
+                    "target_weights": {"AAPL": 1.0},
+                },
+            )
+            payload = dispatch_all_sleeves(
+                trade_date=TRADE_DATE,
+                run_id="run-1",
+                daily_snapshot={
+                    "asof": TRADE_DATE,
+                    "sleeve_allocations": {
+                        key: 0.0 for key in registry.functional_allocation_keys()
+                    },
+                },
+                runtime_root=bundle.parents[2],
+                registry=registry,
+            )
         _write_json(bundle / name, payload)
 
 

@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import datetime as dt
+import hashlib
 import json
 import math
 from pathlib import Path
 from typing import Any
 
 from core.precompute_contract import BUNDLE_REQUIRED_FILES
+from core.sleeve_control_plane import (
+    BATCH_SCHEMA_VERSION,
+    ENVELOPE_SCHEMA_VERSION,
+    TERMINAL_STATUSES,
+    load_sleeve_control_registry,
+)
 
 
 DEFAULT_SUPPRESSED_SIDE_EFFECTS = (
@@ -79,6 +87,215 @@ def _planned_trade_failures(payload: Any) -> list[str]:
     return failures
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _sleeve_evaluation_failures(
+    payload: Any,
+    *,
+    trade_date: str | None,
+) -> list[str]:
+    """Validate complete control-plane coverage without grading research alpha.
+
+    A terminal ``BLOCKED`` or ``FAILED`` envelope is valid evidence: the
+    dispatcher made the sleeve and its reason visible.  Bundle integrity is
+    concerned with registry coverage, authority, provenance, and terminal
+    shape—not whether an evaluation-only research sleeve found an opportunity.
+    """
+    prefix = "sleeve_evaluations"
+    if not isinstance(payload, dict):
+        return [f"{prefix}:not_object"]
+
+    failures: list[str] = []
+    if payload.get("schema_version") != BATCH_SCHEMA_VERSION:
+        failures.append(f"{prefix}:invalid_schema_version")
+    if payload.get("all_non_frozen_evaluated") is not True:
+        failures.append(f"{prefix}:coverage_not_complete")
+    if trade_date is not None and str(payload.get("trade_date") or "") != str(
+        trade_date
+    ):
+        failures.append(f"{prefix}:trade_date_mismatch")
+
+    try:
+        control = load_sleeve_control_registry()
+    except Exception as exc:
+        failures.append(
+            f"{prefix}:registry_integrity_error:{type(exc).__name__}"
+        )
+        return failures
+
+    expected_definitions = control.evaluated_definitions()
+    expected_ids = [item.sleeve_id for item in expected_definitions]
+    expected_by_id = {item.sleeve_id: item for item in expected_definitions}
+    declared_ids = payload.get("expected_non_frozen_sleeve_ids")
+    if declared_ids != expected_ids:
+        failures.append(f"{prefix}:expected_sleeve_ids_mismatch")
+
+    envelopes = payload.get("envelopes")
+    if not isinstance(envelopes, list):
+        failures.append(f"{prefix}:envelopes_not_list")
+        return failures
+
+    actual_ids: list[str] = []
+    status_counts: Counter[str] = Counter()
+    for idx, envelope in enumerate(envelopes):
+        item_prefix = f"{prefix}:envelope[{idx}]"
+        if not isinstance(envelope, dict):
+            failures.append(f"{item_prefix}:not_object")
+            continue
+        sleeve_id = str(envelope.get("sleeve_id") or "")
+        actual_ids.append(sleeve_id)
+        definition = expected_by_id.get(sleeve_id)
+        if definition is None:
+            failures.append(f"{item_prefix}:unregistered_sleeve")
+            continue
+        if envelope.get("schema_version") != ENVELOPE_SCHEMA_VERSION:
+            failures.append(f"{item_prefix}:invalid_schema_version")
+        if trade_date is not None and str(envelope.get("trade_date") or "") != str(
+            trade_date
+        ):
+            failures.append(f"{item_prefix}:trade_date_mismatch")
+        evaluation = envelope.get("evaluation")
+        status = ""
+        if not isinstance(evaluation, dict):
+            failures.append(f"{item_prefix}:evaluation_not_object")
+        else:
+            status = str(evaluation.get("status") or "")
+            if status not in TERMINAL_STATUSES:
+                failures.append(f"{item_prefix}:non_terminal_status")
+            else:
+                status_counts[status] += 1
+        lifecycle = envelope.get("lifecycle")
+        if not isinstance(lifecycle, dict):
+            failures.append(f"{item_prefix}:lifecycle_not_object")
+        elif (
+            lifecycle.get("status") != definition.lifecycle_status
+            or lifecycle.get("frozen") is not False
+        ):
+            failures.append(f"{item_prefix}:lifecycle_mismatch")
+        eligibility = envelope.get("eligibility")
+        if not isinstance(eligibility, dict):
+            failures.append(f"{item_prefix}:eligibility_not_object")
+        else:
+            expected_eligibility = {
+                "evaluation_eligible": True,
+                "evaluation_only": definition.evaluation_only,
+                "capital_eligible": definition.capital_eligible,
+                "paper_execution_eligible": definition.execution_eligible,
+                "live_execution_eligible": False,
+                "execution_impact": definition.execution_impact,
+            }
+            if any(
+                eligibility.get(key) != value
+                for key, value in expected_eligibility.items()
+            ):
+                failures.append(f"{item_prefix}:eligibility_mismatch")
+            if (
+                sleeve_id != control.paper_capital_authority
+                and eligibility.get("evaluation_usable_for_capital") is not False
+            ):
+                failures.append(f"{item_prefix}:unauthorized_capital_use")
+            if sleeve_id == control.paper_capital_authority:
+                opportunity = envelope.get("opportunity")
+                source_artifacts = (
+                    (envelope.get("provenance") or {}).get("source_artifacts")
+                    if isinstance(envelope.get("provenance"), dict)
+                    else None
+                )
+                if status != "OK":
+                    failures.append(f"{item_prefix}:capital_authority_not_ok")
+                if eligibility.get("evaluation_usable_for_capital") is not True:
+                    failures.append(f"{item_prefix}:capital_authority_not_usable")
+                if (
+                    not isinstance(opportunity, dict)
+                    or opportunity.get("decision_eligible") is not True
+                ):
+                    failures.append(f"{item_prefix}:capital_authority_not_decision_eligible")
+                if not isinstance(source_artifacts, list) or not source_artifacts:
+                    failures.append(f"{item_prefix}:capital_authority_source_missing")
+
+    if actual_ids != expected_ids:
+        failures.append(f"{prefix}:envelope_coverage_mismatch")
+    if len(actual_ids) != len(set(actual_ids)):
+        failures.append(f"{prefix}:duplicate_envelope")
+
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        failures.append(f"{prefix}:summary_not_object")
+    else:
+        if summary.get("expected_count") != len(expected_ids):
+            failures.append(f"{prefix}:summary_expected_count_mismatch")
+        if summary.get("envelope_count") != len(envelopes):
+            failures.append(f"{prefix}:summary_envelope_count_mismatch")
+        expected_capital = [control.paper_capital_authority]
+        if summary.get("capital_eligible_sleeve_ids") != expected_capital:
+            failures.append(f"{prefix}:capital_authority_mismatch")
+        if summary.get("execution_eligible_sleeve_ids") != expected_capital:
+            failures.append(f"{prefix}:execution_authority_mismatch")
+        declared_counts = summary.get("terminal_status_counts")
+        expected_counts = {
+            status: int(status_counts.get(status, 0))
+            for status in TERMINAL_STATUSES
+        }
+        if declared_counts != expected_counts:
+            failures.append(f"{prefix}:terminal_status_counts_mismatch")
+
+    if payload.get("paper_capital_authority") != control.paper_capital_authority:
+        failures.append(f"{prefix}:paper_capital_authority_mismatch")
+    expected_frozen = [
+        {"sleeve_id": item.sleeve_id, "reason": item.frozen_reason}
+        for item in control.frozen_definitions()
+    ]
+    if payload.get("frozen_sleeves") != expected_frozen:
+        failures.append(f"{prefix}:frozen_sleeves_mismatch")
+    expected_retired = [
+        item.sleeve_id
+        for item in control.definitions
+        if item.lifecycle_status == "retired"
+    ]
+    if payload.get("retired_sleeve_ids") != expected_retired:
+        failures.append(f"{prefix}:retired_sleeves_mismatch")
+
+    registry = payload.get("registry")
+    if not isinstance(registry, dict):
+        failures.append(f"{prefix}:registry_provenance_not_object")
+    else:
+        expected_registry_sha = _sha256(control.registry_path)
+        expected_manifest_sha = _sha256(control.manifest_path)
+        if registry.get("sha256") != expected_registry_sha:
+            failures.append(f"{prefix}:registry_hash_mismatch")
+        if registry.get("manifest_sha256") != expected_manifest_sha:
+            failures.append(f"{prefix}:manifest_hash_mismatch")
+        for idx, envelope in enumerate(envelopes):
+            if not isinstance(envelope, dict):
+                continue
+            provenance = envelope.get("provenance")
+            if not isinstance(provenance, dict):
+                failures.append(
+                    f"{prefix}:envelope[{idx}]:provenance_not_object"
+                )
+                continue
+            if (
+                provenance.get("registry_sha256") != expected_registry_sha
+                or provenance.get("manifest_sha256") != expected_manifest_sha
+            ):
+                failures.append(f"{prefix}:envelope[{idx}]:provenance_hash_mismatch")
+
+    return failures
+
+
+def validate_sleeve_evaluation_payload(
+    payload: Any, *, trade_date: str
+) -> list[str]:
+    """Public semantic validator used by both bundle and exact authority."""
+    return _sleeve_evaluation_failures(payload, trade_date=trade_date)
+
+
 def validate_precompute_bundle(
     bundle_dir: Path,
     *,
@@ -114,6 +331,10 @@ def validate_precompute_bundle(
             non_finite_values.append({"file": name, "paths": non_finite})
         if name == "planned_execution_payload.json":
             semantic_failures.extend(_planned_trade_failures(payload))
+        if name == "sleeve_evaluations.json":
+            semantic_failures.extend(
+                _sleeve_evaluation_failures(payload, trade_date=trade_date)
+            )
 
     trade_date_mismatches: list[dict[str, str]] = []
     if trade_date:

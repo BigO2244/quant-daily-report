@@ -70,6 +70,17 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     _write_text(path, json.dumps(dict(payload), indent=2, sort_keys=True, default=str) + "\n")
 
 
+def _write_immutable_json(path: Path, payload: Mapping[str, Any]) -> None:
+    """Exclusive authority publication; an identical retry is idempotent."""
+
+    serialized = json.dumps(dict(payload), indent=2, sort_keys=True, default=str) + "\n"
+    if path.exists():
+        if path.read_text(encoding="utf-8") != serialized:
+            raise ValueError(f"immutable authority artifact conflict: {path}")
+        return
+    safe_write_text(path, serialized, allow_overwrite=False)
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -812,6 +823,14 @@ def build_live_pilot_plan(
 
     authority_lane_id = str(lane or "manual")
     authority_stem = f"{trade_date}:{authority_lane_id}:{approved_sleeve}"
+    sleeve_evaluations_path = payload_path.with_name("sleeve_evaluations.json")
+    if lane_id == "paper" and not sleeve_evaluations_path.is_file():
+        raise ValueError("governed PAPER sleeve_evaluations.json is missing")
+    sleeve_authority_refs = (
+        (str(sleeve_evaluations_path), f"sha256:{_file_sha256(sleeve_evaluations_path)}")
+        if sleeve_evaluations_path.is_file()
+        else ()
+    )
     decision_target_rows = [
         {
             "symbol": _clean_symbol(row.get("ticker")),
@@ -826,6 +845,7 @@ def build_live_pilot_plan(
         source_refs=(
             str(signals_path),
             str(payload_path),
+            *sleeve_authority_refs,
             *(
                 (f"sha256:{decision_source_artifact['sha256']}",)
                 if decision_source_artifact
@@ -843,6 +863,7 @@ def build_live_pilot_plan(
         source_refs=(
             str(signals_path),
             str(payload_path),
+            *sleeve_authority_refs,
             *(
                 (f"sha256:{decision_source_artifact['sha256']}",)
                 if decision_source_artifact
@@ -867,7 +888,15 @@ def build_live_pilot_plan(
         source_refs=(f"decision:{decision.package_id}",),
     )
     execution = execution_package_from_risk(risk)
-    authority_dir = output_dir / "authority" / trade_date
+    # Authority packages are decision/content-addressed. A later same-date
+    # build may advance the mutable latest plan, but it can never overwrite the
+    # Evidence→Decision→Risk→Execution bytes already bound into an exact plan.
+    authority_dir = (
+        output_dir
+        / "authority"
+        / trade_date
+        / f"execution-{execution.content_hash}"
+    )
     authority_paths = {
         "evidence": authority_dir / "evidence_package.json",
         "decision": authority_dir / "decision_package.json",
@@ -882,7 +911,7 @@ def build_live_pilot_plan(
     }
     authority_dir.mkdir(parents=True, exist_ok=True)
     for name, path in authority_paths.items():
-        _write_json(path, authority_payloads[name])
+        _write_immutable_json(path, authority_payloads[name])
 
     plan = _plan_scaffold(
         trade_date=trade_date,
@@ -923,6 +952,12 @@ def build_live_pilot_plan(
                 else None
             ),
             "approved_execution_package": execution.to_dict(),
+            "source_sleeve_evaluations": str(sleeve_evaluations_path),
+            "source_sleeve_evaluations_sha256": (
+                _file_sha256(sleeve_evaluations_path)
+                if sleeve_evaluations_path.is_file()
+                else None
+            ),
             "authority_package_paths": {
                 name: str(path) for name, path in authority_paths.items()
             },

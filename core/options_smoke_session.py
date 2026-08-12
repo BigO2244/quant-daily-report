@@ -7,6 +7,10 @@ from typing import Any
 
 from brokers.alpaca_broker import AlpacaBroker
 from core.options_execution import build_option_symbol
+from core.execution_authority_policy import (
+    OPTIONS_CAPITAL_EXECUTION_AUTHORITY,
+    OPTIONS_MUTATION_REASON,
+)
 
 DEFAULT_SMOKE_POLICY: dict[str, Any] = {
     "benchmark": "SPY",
@@ -114,6 +118,10 @@ def build_options_smoke_session(
     action = "hold"
     reasons: list[str] = []
     submitted_orders: list[dict[str, Any]] = []
+    submission_requested = bool(allow_submission)
+    allow_submission = False
+    if submission_requested:
+        reasons.append(OPTIONS_MUTATION_REASON)
     if open_qty == 0:
         action = "open_pair"
         reasons.append("no open option positions")
@@ -138,21 +146,22 @@ def build_options_smoke_session(
                         client_order_id=f"opt-smoke:{trade_date}:{symbol}",
                     )
                 )
-        last_open_date = today
-        last_action_date = today
-        _write_session_state(
-            state_root,
-            {
-                "generated_at": _now_utc(),
-                "trade_date": trade_date,
-                "asof_date": asof_date,
-                "last_action_date": last_action_date,
-                "last_open_date": last_open_date,
-                "last_close_date": last_close_date,
-                "open_symbols": [call_symbol, put_symbol],
-                "action": action,
-            },
-        )
+        if submitted_orders:
+            last_open_date = today
+            last_action_date = today
+            _write_session_state(
+                state_root,
+                {
+                    "generated_at": _now_utc(),
+                    "trade_date": trade_date,
+                    "asof_date": asof_date,
+                    "last_action_date": last_action_date,
+                    "last_open_date": last_open_date,
+                    "last_close_date": last_close_date,
+                    "open_symbols": [call_symbol, put_symbol],
+                    "action": action,
+                },
+            )
     elif action == "close_open_positions":
         for pos in option_positions:
             symbol = str(pos.get("symbol") or "")
@@ -168,21 +177,22 @@ def build_options_smoke_session(
                         client_order_id=f"opt-smoke-close:{trade_date}:{symbol}",
                     )
                 )
-        last_close_date = today
-        last_action_date = today
-        _write_session_state(
-            state_root,
-            {
-                "generated_at": _now_utc(),
-                "trade_date": trade_date,
-                "asof_date": asof_date,
-                "last_action_date": last_action_date,
-                "last_open_date": last_open_date,
-                "last_close_date": last_close_date,
-                "open_symbols": [],
-                "action": action,
-            },
-        )
+        if submitted_orders:
+            last_close_date = today
+            last_action_date = today
+            _write_session_state(
+                state_root,
+                {
+                    "generated_at": _now_utc(),
+                    "trade_date": trade_date,
+                    "asof_date": asof_date,
+                    "last_action_date": last_action_date,
+                    "last_open_date": last_open_date,
+                    "last_close_date": last_close_date,
+                    "open_symbols": [],
+                    "action": action,
+                },
+            )
 
     review = {
         "generated_at": _now_utc(),
@@ -206,6 +216,11 @@ def build_options_smoke_session(
         },
         "submitted_orders": submitted_orders,
         "submitted_count": len(submitted_orders),
+        "submission_requested": submission_requested,
+        "execution_authority": OPTIONS_CAPITAL_EXECUTION_AUTHORITY,
+        "execution_status": (
+            "BLOCKED_OWNER_POLICY" if submission_requested else "REVIEW_ONLY"
+        ),
         "policy": policy,
     }
     return review

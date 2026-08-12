@@ -295,7 +295,7 @@ def test_broker_market_submit_guard_failure_does_not_call_sdk(monkeypatch: pytes
     client = Client()
     broker = AlpacaBroker(client, paper=False, base_url="https://api.alpaca.markets")
 
-    with pytest.raises(RuntimeError, match="missing_live_order_notional"):
+    with pytest.raises(RuntimeError, match="live_capital_disabled_by_owner_policy"):
         broker.submit_market_order(
             symbol="AAPL",
             qty=1,

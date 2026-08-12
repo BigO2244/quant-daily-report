@@ -6,6 +6,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from core.sleeve_control_plane import dispatch_all_sleeves, load_sleeve_control_registry
+
 from scripts.live_pilot_build_plan_from_precompute import (
     TARGET_PORTFOLIO_SCHEMA,
     build_live_pilot_plan,
@@ -82,6 +84,10 @@ def _build(tmp_path: Path, payload_path: Path, *, prices: dict[str, float], **kw
         state_dir=tmp_path / "live_state",
     )
     defaults.update(kwargs)
+    if defaults.get("lane") == "paper" and not payload_path.with_name(
+        "sleeve_evaluations.json"
+    ).exists():
+        _write_sleeve_evaluations(payload_path, tmp_path)
     return build_live_pilot_plan(payload_path=payload_path, **defaults)
 
 
@@ -119,12 +125,33 @@ def _orion_shadow(
     return path
 
 
+def _write_sleeve_evaluations(payload_path: Path, tmp_path: Path) -> Path:
+    registry = load_sleeve_control_registry()
+    trade_date = payload_path.parent.name
+    path = payload_path.with_name("sleeve_evaluations.json")
+    payload = dispatch_all_sleeves(
+        trade_date=trade_date,
+        run_id="test-plan-builder",
+        daily_snapshot={
+            "asof": trade_date,
+            "sleeve_allocations": {
+                key: 0.0 for key in registry.functional_allocation_keys()
+            },
+        },
+        runtime_root=tmp_path,
+        registry=registry,
+    )
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
 def test_paper_lane_uses_exact_governed_orion_snapshot(tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path,
         signals=[{"ticker": "JNJ", "target_weight": 1.0, "sleeve": "sleeve_quality"}],
     )
     source_path = _orion_shadow(tmp_path)
+    _write_sleeve_evaluations(payload_path, tmp_path)
 
     plan = _build(
         tmp_path,
@@ -342,6 +369,10 @@ def test_full_target_all_names_emitted_and_priced(tmp_path: Path) -> None:
     assert approved["approved_target_rows"] == tp
     assert approved["approved_cash_weight"] == pytest.approx(plan["cash_target_weight"])
     assert all(Path(path).exists() for path in plan["authority_package_paths"].values())
+    assert all(
+        "execution-" in Path(path).parent.name
+        for path in plan["authority_package_paths"].values()
+    )
     # The shared temporary pilot cap clips AAPL to 30%; unclassified sector-cap
     # behavior is unchanged and remains outside this guardrail change.
     assert tp[0]["symbol"] == "AAPL"

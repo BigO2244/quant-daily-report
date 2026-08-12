@@ -58,6 +58,10 @@ from paper.trading_calendar import ET_TZ, market_session_status, prev_trading_da
 from paper.run_manager import generate_run_id, safe_write_text
 
 
+class _DryRunEconomicNotApplicable(Exception):
+    """Internal control flow: dry runs validate state but create no fill economics."""
+
+
 def _now_utc() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
 
@@ -879,14 +883,12 @@ def _core_rows_from_frame(frame: pd.DataFrame, *, plan: Mapping[str, Any]) -> li
         order_type = str(source.get("order_type") or "market").strip().lower()
         if order_type not in {"market", "limit"}:
             order_type = "market"
-        rows.append(
-            {
+        exact_row = {
                 "ticker": symbol,
                 "symbol": symbol,
                 "side": str(row.get("side") or "").strip().upper(),
                 "shares": float(row.get("shares") or 0.0),
                 "qty": float(row.get("shares") or 0.0),
-                "limit_price": float(row.get("price") or 0.0),
                 "price": float(row.get("price") or 0.0),
                 "expected_price": float(row.get("price") or 0.0),
                 "cap_enforcement_price": float(row.get("price") or 0.0),
@@ -895,7 +897,9 @@ def _core_rows_from_frame(frame: pd.DataFrame, *, plan: Mapping[str, Any]) -> li
                 "source_reason": row.get("reason"),
                 **{key: source[key] for key in PLAN_PROVENANCE_KEYS if key in source},
             }
-        )
+        if order_type == "limit":
+            exact_row["limit_price"] = float(row.get("price") or 0.0)
+        rows.append(exact_row)
     return rows
 
 
@@ -3657,6 +3661,15 @@ def _write_blocked_artifacts(
         submitted=submitted,
         errors=[reason_code],
     )
+    reconciliation.update(
+        {
+            "terminal_status": "BLOCKED",
+            "terminal_outcome": "SYSTEM_FAILURE",
+            "failure_class": "AUTHORIZATION_FAILURE",
+            "reason_code": reason_code,
+            "reconciliation_status": "FAILED_PRE_SUBMIT",
+        }
+    )
     if capital_gate:
         reconciliation.update(
             {
@@ -3678,7 +3691,11 @@ def _write_blocked_artifacts(
         "run_id": run_id,
         # Honest mode label (PAPER for the unified paper lane, LIVE_PILOT for live).
         "mode": str(preflight.get("requested_mode") or LIVE_PILOT_MODE).upper(),
+        "trade_date": trade_date,
         "terminal_status": "BLOCKED",
+        "terminal_outcome": "SYSTEM_FAILURE",
+        "failure_class": "AUTHORIZATION_FAILURE",
+        "reconciliation_status": "FAILED_PRE_SUBMIT",
         "reason_code": reason_code,
         "live_orders_allowed": False,
         "submitted_count": 0,
@@ -3765,7 +3782,67 @@ def _write_blocked_artifacts(
         },
     )
     _write_json(run_root / "live_pilot_operator_summary.json", summary)
+    _write_json(run_root / "operator_summary.json", summary)
     _write_json(run_root / "live_pilot_preflight.json", dict(preflight))
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "schema_version": "caerus.execution_payload.v3",
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "status": "BLOCKED",
+            "reason_code": reason_code,
+            "execution_source": "exact_execution_plan_v3",
+            "execution_status": "HALTED",
+            "operator_execution_status": "system_failure",
+            "orders_requested_count": len(intended),
+            "orders_submitted_count": len(submitted),
+            "orders_filled_count": 0,
+            "trades": [
+                {
+                    "ticker": row.get("symbol"),
+                    "side": row.get("side"),
+                    "shares": row.get("quantity"),
+                    "entry_price": (
+                        row.get("filled_avg_price")
+                        or row.get("expected_price")
+                        or row.get("limit_price")
+                    ),
+                    "notional": row.get("notional"),
+                    "order_id": row.get("order_id"),
+                    "client_order_id": row.get("client_order_id"),
+                }
+                for row in intended
+            ],
+            "orders": intended,
+        },
+    )
+    _write_json(
+        run_root / "execution_timeline.json",
+        {
+            "schema_version": "caerus.execution_lifecycle_timeline.v2",
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "terminal_status": "BLOCKED",
+            "terminal_outcome": "SYSTEM_FAILURE",
+            "reason_code": reason_code,
+            "reconciliation_status": "FAILED_PRE_SUBMIT",
+            "stages": [{"stage": "AUTHORIZE", "status": "FAILED"}],
+        },
+    )
+    _write_json(
+        run_root / "audit" / "execution_integrity.json",
+        {
+            "schema_version": "caerus.execution_integrity.v2",
+            "generated_at": _now_utc(),
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "status": "FAIL",
+            "terminal_outcome": "SYSTEM_FAILURE",
+            "reconciliation_status": "FAILED_PRE_SUBMIT",
+            "findings": [reason_code],
+        },
+    )
     _write_json(
         run_root / "execution_results.json",
         _build_live_pilot_execution_results(
@@ -3778,9 +3855,1083 @@ def _write_blocked_artifacts(
             reconciliation=reconciliation,
             dry_run=dry_run,
             run_root=run_root,
-            extra_fields=capital_gate_fields,
+            extra_fields={
+                **capital_gate_fields,
+                "terminal_outcome": "SYSTEM_FAILURE",
+                "failure_class": "AUTHORIZATION_FAILURE",
+                "reconciliation_status": "FAILED_PRE_SUBMIT",
+            },
         ),
     )
+    if str(summary.get("mode") or "").upper() == "PAPER":
+        try:
+            from core.execution_attempt_registry import (
+                AttemptRecord,
+                append_attempt_and_update_selection,
+                attempt_path,
+            )
+            from core.failure_semantics import FailureClass, TerminalOutcome
+
+            registry_root = run_root.parent.parent / "execution_attempts"
+            def build_blocked_record(prior):
+                return AttemptRecord(
+                    attempt_id=run_id,
+                    trade_date=trade_date,
+                    run_id=run_id,
+                    lane="paper",
+                    sequence=len(prior) + 1,
+                    terminal_outcome=TerminalOutcome.SYSTEM_FAILURE,
+                    recorded_at=_now_utc(),
+                    run_root=str(run_root),
+                    submitted_count=0,
+                    filled_count=0,
+                    failure_class=FailureClass.AUTHORIZATION_FAILURE,
+                    reason_code=reason_code,
+                    source_artifacts=(
+                        str(run_root / "execution_payload.json"),
+                        str(run_root / "live_pilot_reconciliation.json"),
+                    ),
+                )
+
+            _attempt_path, selection, _selection_path = (
+                append_attempt_and_update_selection(
+                    registry_root,
+                    trade_date=trade_date,
+                    build_record=build_blocked_record,
+                )
+            )
+            summary.update(
+                {
+                    "attempt_registry_status": selection.status.value,
+                    "attempt_registry_selection": str(
+                        registry_root / trade_date / "selection.json"
+                    ),
+                }
+            )
+        except Exception as exc:
+            summary.update(
+                {
+                    "attempt_registry_status": "FAILED",
+                    "attempt_registry_error": str(exc),
+                }
+            )
+        _write_json(run_root / "live_pilot_operator_summary.json", summary)
+        _write_json(run_root / "operator_summary.json", summary)
+    return summary
+
+
+def _run_exact_execution_path(
+    *,
+    plan: Mapping[str, Any],
+    broker: Any,
+    env: Mapping[str, str],
+    preflight: Mapping[str, Any],
+    pre_snapshot: Mapping[str, Any],
+    run_root: Path,
+    run_id: str,
+    trade_date: str,
+    output_root: Path | str,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Consume v3 as exact orders. No target reconstruction is reachable here."""
+    from core.failure_semantics import TerminalOutcome
+    from execution.exact_executor import execute_exact_plan
+
+    package = plan.get("exact_execution_plan")
+    if not isinstance(package, Mapping):
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code="exact_execution_plan_required",
+            operator_action="Publish one fresh broker-state-bound exact v3 plan.",
+            preflight=preflight,
+        )
+    workflow_plan_id: str | None = None
+    state_root = Path(output_root) / "orchestrator_state"
+    try:
+        from authority.exact_plan import exact_execution_plan_from_dict
+
+        expected_plan_id = str(plan.get("exact_execution_plan_id") or "").strip()
+        expected_plan_hash = str(plan.get("exact_execution_plan_hash") or "").strip()
+        expected_authority_run = str(
+            plan.get("exact_execution_authority_run_id") or ""
+        ).strip()
+        expected_status = (
+            "AUTHORIZED_NO_TRADE"
+            if not list(package.get("sell_orders") or [])
+            and not list(package.get("buy_orders") or [])
+            else "AUTHORIZED_EXACT_PLAN"
+        )
+        if str(plan.get("schema_version") or "") != "caerus.authorized_execution_handoff.v1":
+            raise ValueError("governed exact-plan handoff schema is required")
+        if str(plan.get("status") or "").strip().upper() != expected_status:
+            raise ValueError("governed exact-plan handoff status is invalid")
+        if str(plan.get("execution_authority") or "") != "exact_execution_plan_only":
+            raise ValueError("exact execution authority boundary is required")
+        if plan.get("precompute_execution_authority") is not False:
+            raise ValueError("precompute artifacts cannot carry execution authority")
+        if not expected_plan_id or not expected_plan_hash or not expected_authority_run:
+            raise ValueError("outer exact-plan identity binding is required")
+        bound = exact_execution_plan_from_dict(
+            package,
+            expected_plan_id=expected_plan_id,
+            expected_run_id=expected_authority_run,
+            expected_account_scope="PAPER",
+        )
+        if bound.content_hash != expected_plan_hash:
+            raise ValueError("outer exact-plan hash does not match inner package")
+        if bound.trade_date != trade_date:
+            raise ValueError("outer trade_date does not match inner exact plan")
+    except Exception as exc:
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=f"exact_execution_plan_invalid:{exc}",
+            operator_action="Preserve the invalid plan and obtain a new authorization.",
+            preflight=preflight,
+        )
+
+    can_append_reconcile = False
+    if not dry_run:
+        registry_root = Path(output_root) / "execution_attempts"
+        record_appended = False
+        try:
+            from core.orchestrator_state import STAGES, append_orchestrator_transition
+
+            workflow_plan_id = f"{bound.plan_id}:{run_id}"
+            decision_source = plan.get("decision_source_artifact")
+            decision_source_path = (
+                str(decision_source.get("path") or "")
+                if isinstance(decision_source, Mapping)
+                else ""
+            )
+            source_refs = tuple(str(item) for item in bound.source_precompute_ids)
+            source_hash_refs = tuple(
+                f"{path}=sha256:{digest}"
+                for path, digest in sorted(bound.source_artifact_hashes.items())
+            )
+            stage_refs = {
+                "OBSERVE": (
+                    str(run_root / "live_pilot_broker_snapshot_pre.json"),
+                    f"market_state:{bound.market_state_id}",
+                ),
+                "RESEARCH": tuple(
+                    item for item in (*source_refs, *source_hash_refs) if item
+                ),
+                "PRECOMPUTE": tuple(
+                    item for item in (*source_refs, *source_hash_refs) if item
+                ),
+                "DECIDE": tuple(
+                    item for item in (decision_source_path, *source_hash_refs) if item
+                ),
+                "AUTHORIZE": (
+                    f"plan_id:{bound.plan_id}",
+                    f"sha256:{bound.content_hash}",
+                ),
+            }
+            # These imported stages are accepted only after their immutable
+            # source hashes and the exact authorization have been revalidated
+            # above. Each stage names its own evidence rather than manufacturing
+            # one indistinguishable set of references for the whole lifecycle.
+            for stage in STAGES[:5]:
+                append_orchestrator_transition(
+                    state_root,
+                    trade_date=trade_date,
+                    plan_id=workflow_plan_id,
+                    stage=stage,
+                    status="PASS",
+                    recorded_at=_now_utc(),
+                    artifact_refs=stage_refs[stage],
+                )
+        except Exception as exc:
+            return _write_blocked_artifacts(
+                run_root=run_root,
+                run_id=run_id,
+                trade_date=trade_date,
+                env=env,
+                reason_code=f"orchestrator_state_persistence_failed:{exc}",
+                operator_action="Repair append-only state persistence before retrying.",
+                preflight=preflight,
+            )
+
+    try:
+        outcome = execute_exact_plan(
+            plan_payload=package,
+            broker=broker,
+            env=env,
+            wal_root=Path(output_root) / "submission_wal",
+            attempt_id=run_id,
+            dry_run=bool(dry_run),
+        )
+    except Exception as exc:
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=env,
+            reason_code=f"exact_execution_internal_failure:{exc}",
+            operator_action="Inspect WAL evidence and recover by stable client order ID before retrying.",
+            preflight=preflight,
+        )
+
+    result = outcome.to_dict()
+    intended = [dict(row) for row in outcome.orders_requested]
+    submitted = [dict(row) for row in outcome.orders_submitted]
+    suppressed = [dict(row) for row in outcome.orders_suppressed]
+    _write_json(
+        run_root / "live_pilot_orders_intended.json",
+        {
+            "schema_version": "caerus.exact_orders_intended.v1",
+            "plan_id": outcome.plan_id_received,
+            "plan_hash": outcome.plan_hash_received,
+            "orders": intended,
+            "dropped_orders": [],
+            "suppressed_orders": suppressed,
+        },
+    )
+    _write_json(
+        run_root / "live_pilot_orders_submitted.json",
+        {"schema_version": "caerus.exact_orders_submitted.v1", "orders": submitted},
+    )
+    reconciliation = {
+        "schema_version": "live_pilot_reconciliation.v1",
+        "generated_at": _now_utc(),
+        "status": outcome.reconciliation_status,
+        "state": outcome.status,
+        "intended_count": len(intended),
+        "submitted_count": len(submitted),
+        "filled_count": len(outcome.orders_filled),
+        "rejected_count": len(outcome.orders_rejected),
+        "suppressed_count": len(suppressed),
+        "suppressed_orders": suppressed,
+        "terminal_outcome": outcome.terminal_outcome.value,
+        "reason_code": outcome.reason_code,
+        "plan_id": outcome.plan_id_received,
+        "plan_hash": outcome.plan_hash_received,
+        "final_positions": [dict(row) for row in outcome.final_positions],
+        "final_cash": outcome.final_cash,
+    }
+    _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
+    try:
+        post_snapshot = _broker_snapshot(broker)
+    except Exception as exc:
+        post_snapshot = {
+            "captured_at": _now_utc(),
+            "status": "SNAPSHOT_FAILED",
+            "error": str(exc),
+            "positions": [dict(row) for row in outcome.final_positions],
+            "account": {"cash": outcome.final_cash},
+        }
+    _write_json(run_root / "live_pilot_broker_snapshot_post.json", post_snapshot)
+
+    economic_status = "NOT_RUN"
+    economic_reason: str | None = None
+    try:
+        if dry_run:
+            if str(post_snapshot.get("status") or "").upper() == "SNAPSHOT_FAILED":
+                raise RuntimeError("dry-run post-validation broker snapshot failed")
+            raise _DryRunEconomicNotApplicable()
+        from authority.exact_plan import exact_execution_plan_from_dict
+        from core.economic_reconciliation import (
+            EconomicTolerance,
+            Fill,
+            MarkedPosition,
+            SleeveAttributionRow,
+            reconcile_economic_truth,
+            reconcile_sleeve_attribution,
+            verify_canonical_economics,
+            write_canonical_economic_verification,
+        )
+
+        exact = exact_execution_plan_from_dict(package)
+        fills = []
+        for row in outcome.orders_filled:
+            quantity = _finite_float(
+                row.get("filled_qty")
+                or row.get("filled_quantity")
+                or row.get("quantity")
+                or row.get("qty")
+            )
+            price = _finite_float(
+                row.get("filled_avg_price")
+                or row.get("fill_price")
+                or row.get("average_price")
+            )
+            if quantity is None or quantity <= 0 or price is None or price < 0:
+                raise ValueError(f"actual broker fill economics missing for {row.get('order_id')}")
+            fills.append(
+                Fill(
+                    symbol=str(row.get("symbol") or ""),
+                    side=str(row.get("side") or ""),
+                    quantity=quantity,
+                    price=price,
+                    fees=float(_finite_float(row.get("fees")) or 0.0),
+                    sleeve=str(row.get("sleeve") or "caerus_orion"),
+                    order_id=str(row.get("id") or row.get("order_id") or ""),
+                )
+            )
+        marked_positions = []
+        broker_position_value = 0.0
+        for row in post_snapshot.get("positions") or []:
+            if not isinstance(row, Mapping):
+                continue
+            quantity = _finite_float(
+                row.get("qty") or row.get("quantity") or row.get("shares")
+            )
+            market_value = _finite_float(row.get("market_value"))
+            mark = _finite_float(
+                row.get("current_price")
+                or row.get("mark")
+                or (
+                    market_value / quantity
+                    if market_value is not None and quantity not in {None, 0.0}
+                    else None
+                )
+            )
+            if quantity is None or mark is None:
+                raise ValueError(f"broker mark missing for {row.get('symbol')}")
+            if market_value is not None:
+                broker_position_value += market_value
+            marked_positions.append(
+                MarkedPosition(
+                    symbol=str(row.get("symbol") or ""),
+                    quantity=quantity,
+                    mark=mark,
+                    broker_market_value=market_value,
+                )
+            )
+        post_account = (
+            post_snapshot.get("account")
+            if isinstance(post_snapshot.get("account"), Mapping)
+            else {}
+        )
+        ending_cash = _finite_float((post_account or {}).get("cash"))
+        ending_equity = _finite_float(
+            (post_account or {}).get("portfolio_value")
+            or (post_account or {}).get("equity")
+        )
+        if ending_cash is None or ending_equity is None:
+            raise ValueError("broker ending cash/equity missing")
+        economic = reconcile_economic_truth(
+            trade_date=trade_date,
+            starting_cash=exact.starting_cash,
+            starting_positions={
+                str(row["symbol"]): float(row["quantity"])
+                for row in exact.starting_positions
+            },
+            fills=fills,
+            ending_cash=ending_cash,
+            ending_positions=marked_positions,
+            broker_equity=ending_equity,
+            broker_position_value=(broker_position_value if marked_positions else 0.0),
+            # Alpaca account and position endpoints are not an atomic market
+            # snapshot. Preserve cent-level cash/quantity truth while allowing
+            # at most 5 bps of mark movement between those two read calls.
+            tolerance=EconomicTolerance(
+                nav_abs=max(0.01, abs(ending_equity) * 0.0005),
+                position_value_abs=max(0.01, abs(ending_equity) * 0.0005),
+            ),
+        )
+        portfolio_result = ending_equity - exact.portfolio_nav
+        starting_position_value = sum(
+            float(_finite_float(row.get("market_value")) or 0.0)
+            for row in pre_snapshot.get("positions") or []
+            if isinstance(row, Mapping)
+        )
+        ending_position_value = sum(
+            float(_finite_float(row.get("market_value")) or 0.0)
+            for row in post_snapshot.get("positions") or []
+            if isinstance(row, Mapping)
+        )
+        independently_attributed_orion_result = (
+            ending_position_value
+            - starting_position_value
+            + ending_cash
+            - exact.starting_cash
+        )
+        attribution = reconcile_sleeve_attribution(
+            trade_date=trade_date,
+            portfolio_result=portfolio_result,
+            rows=[
+                SleeveAttributionRow(
+                    trade_date=trade_date,
+                    sleeve="caerus_orion",
+                    result_dollars=independently_attributed_orion_result,
+                    source_artifact=(
+                        f"{run_root / 'live_pilot_broker_snapshot_pre.json'};"
+                        f"{run_root / 'live_pilot_broker_snapshot_post.json'}"
+                    ),
+                )
+            ],
+            # Attribution compares account NAV with separately fetched position
+            # marks at both the pre- and posttrade snapshots. Alpaca does not
+            # provide those as one atomic read, so allow the same 5 bps mark
+            # movement budget per snapshot (10 bps total), while quantity/cash
+            # reconciliation above remains exact to its own strict tolerances.
+            tolerance=max(
+                0.01,
+                max(abs(ending_equity), abs(exact.portfolio_nav)) * 0.001,
+            ),
+        )
+        verification = verify_canonical_economics(
+            economic_reconciliation=economic,
+            sleeve_attribution_reconciliation=attribution,
+        )
+        write_canonical_economic_verification(
+            run_root / "canonical_economic_verification.json",
+            verification,
+        )
+        economic_status = verification.status.value
+        if not verification.reconciled:
+            economic_reason = "canonical_economic_or_sleeve_attribution_mismatch"
+    except _DryRunEconomicNotApplicable:
+        economic_status = "NOT_APPLICABLE_DRY_RUN"
+        economic_reason = None
+    except Exception as exc:
+        economic_status = "FAILED_RECONCILIATION"
+        economic_reason = f"canonical_economic_verification_failed:{exc}"
+        _write_json(
+            run_root / "canonical_economic_verification_failure.json",
+            {
+                "schema_version": "caerus.canonical_economic_verification_failure.v1",
+                "trade_date": trade_date,
+                "status": economic_status,
+                "reason_code": economic_reason,
+            },
+        )
+
+    dry_validation_suppressions = bool(dry_run) and all(
+        str((row.get("suppression") or {}).get("reason_code") or "")
+        == "DRY_RUN_VALIDATION_ONLY"
+        for row in outcome.orders_suppressed
+    )
+    equality_ok = (
+        (not outcome.orders_suppressed or dry_validation_suppressions)
+        and len(outcome.orders_submitted) in {0, len(outcome.orders_requested)}
+        and outcome.terminal_outcome
+        not in {TerminalOutcome.SUBMISSION_UNKNOWN}
+    )
+    equality = {
+        "schema_version": "caerus.execution_equality_gate.v2",
+        "generated_at": _now_utc(),
+        "plan_id": outcome.plan_id_received,
+        "authorized_plan_hash": outcome.plan_hash_received,
+        "plan_hash_validated": outcome.plan_hash_validated,
+        "authorization_validated": outcome.authorization_validated,
+        "authorized_order_ids": [row.get("order_id") for row in intended],
+        "submitted_order_ids": [row.get("order_id") for row in submitted],
+        "orders_suppressed": suppressed,
+        "decision": (
+            "VALIDATED_NO_SUBMISSION"
+            if dry_validation_suppressions and equality_ok
+            else "WOULD_PROCEED"
+            if equality_ok
+            else "WOULD_HALT_HASH_MISMATCH"
+        ),
+        "enforced_pre_submit": True,
+        "execution_source": "exact_execution_plan_v3",
+    }
+    _write_json(run_root / "equality_gate.json", equality)
+
+    if outcome.status == "DRY_RUN":
+        terminal_status = "DRY_RUN"
+    elif outcome.terminal_outcome is TerminalOutcome.AUTHORIZED_NO_TRADE:
+        terminal_status = "AUTHORIZED_NO_TRADE"
+    elif outcome.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS:
+        terminal_status = "SUBMITTED"
+    elif outcome.terminal_outcome is TerminalOutcome.SUBMISSION_UNKNOWN:
+        terminal_status = "SUBMISSION_UNKNOWN"
+    elif outcome.status in {"FAILED_RECONCILIATION", "SUBMITTED_UNFILLED", "SELL_PHASE_UNRESOLVED"}:
+        terminal_status = "FAILED_RECONCILIATION"
+    else:
+        terminal_status = "FAILED_PLAN_INTEGRITY" if "plan" in outcome.reason_code else "BLOCKED"
+    if (
+        economic_status == "FAILED_RECONCILIATION"
+        and outcome.terminal_outcome is not TerminalOutcome.SUBMISSION_UNKNOWN
+    ):
+        terminal_status = "BLOCKED" if dry_run else "FAILED_RECONCILIATION"
+    final_terminal_outcome = outcome.terminal_outcome
+    final_failure_class = outcome.failure_class
+    final_reason = outcome.reason_code
+    final_reconciliation_status = outcome.reconciliation_status
+    if (
+        economic_status == "FAILED_RECONCILIATION"
+        and outcome.terminal_outcome is not TerminalOutcome.SUBMISSION_UNKNOWN
+    ):
+        final_terminal_outcome = TerminalOutcome.SYSTEM_FAILURE
+        from core.failure_semantics import FailureClass
+
+        final_failure_class = FailureClass.RECONCILIATION_FAILURE
+        final_reason = economic_reason or "canonical_economic_verification_failed"
+        final_reconciliation_status = "FAILED_RECONCILIATION"
+    summary = {
+        "schema_version": "live_pilot_operator_summary.v1",
+        "generated_at": _now_utc(),
+        "run_id": run_id,
+        "trade_date": trade_date,
+        "mode": "PAPER",
+        "terminal_status": terminal_status,
+        "terminal_outcome": final_terminal_outcome.value,
+        "reason_code": final_reason,
+        "dry_run": bool(dry_run),
+        "execution_source": "exact_execution_plan_v3",
+        "plan_id_received": outcome.plan_id_received,
+        "plan_hash_received": outcome.plan_hash_received,
+        "plan_hash_validated": outcome.plan_hash_validated,
+        "authorization_validated": outcome.authorization_validated,
+        "intended_count": len(intended),
+        "submitted_count": 0 if dry_run else len(submitted),
+        "filled_count": len(outcome.orders_filled),
+        "rejected_count": len(outcome.orders_rejected),
+        "suppressed_count": len(suppressed),
+        "suppressed_orders": suppressed,
+        "reconciliation_status": final_reconciliation_status,
+        "canonical_economic_verification_status": economic_status,
+        "canonical_economic_verification_reason": economic_reason,
+        "execution_equality_status": equality["decision"],
+        "run_root": str(run_root),
+    }
+    _write_json(run_root / "live_pilot_operator_summary.json", summary)
+    _write_json(
+        run_root / "execution_results.json",
+        {
+            **result,
+            "raw_execution_status": result.get("status"),
+            "status": terminal_status,
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "mode": "PAPER",
+            "terminal_status": terminal_status,
+            "run_root": str(run_root),
+        },
+    )
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "schema_version": "caerus.execution_payload.v2",
+            "generated_at": _now_utc(),
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "mode": "PAPER",
+            "execution_source": "exact_execution_plan_v3",
+            "price_freshness_scope": "fresh_broker_state_at_authorization",
+            "execution_status": (
+                "EXECUTED"
+                if terminal_status == "SUBMITTED"
+                else (
+                    "NO_ACTION"
+                    if terminal_status == "AUTHORIZED_NO_TRADE"
+                    else "HALTED"
+                )
+            ),
+            "operator_execution_status": (
+                "reconciled_success"
+                if final_terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+                else final_terminal_outcome.value.lower()
+            ),
+            "orders_requested_count": len(intended),
+            "orders_submitted_count": len(submitted),
+            "orders_filled_count": len(outcome.orders_filled),
+            "orders_suppressed_count": len(suppressed),
+            "orders_suppressed": suppressed,
+            "trades": [
+                {
+                    "ticker": row.get("symbol"),
+                    "side": row.get("side"),
+                    "shares": row.get("quantity"),
+                    "entry_price": (
+                        row.get("filled_avg_price")
+                        or row.get("expected_price")
+                        or row.get("limit_price")
+                    ),
+                    "notional": row.get("notional"),
+                    "order_id": row.get("order_id"),
+                    "client_order_id": row.get("client_order_id"),
+                }
+                for row in intended
+            ],
+            "exact_execution_plan": dict(package),
+            "exact_execution_plan_hash": outcome.plan_hash_received,
+            # Preserve the governed Orion target lineage for downstream
+            # reconciliation.  It is evidence only here; the executor has
+            # already consumed the immutable exact orders above.
+            "approved_execution_package": (
+                dict(plan.get("approved_execution_package"))
+                if isinstance(plan.get("approved_execution_package"), Mapping)
+                else None
+            ),
+            "decision_source_artifact": (
+                dict(plan.get("decision_source_artifact"))
+                if isinstance(plan.get("decision_source_artifact"), Mapping)
+                else None
+            ),
+        },
+    )
+    audit_dir = run_root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    integrity_ok = (
+        equality_ok
+        and outcome.terminal_outcome
+        in {TerminalOutcome.RECONCILED_SUCCESS, TerminalOutcome.AUTHORIZED_NO_TRADE}
+        and economic_status == "RECONCILED"
+    )
+    if dry_run:
+        integrity_ok = equality_ok and economic_status != "FAILED_RECONCILIATION"
+    _write_json(
+        audit_dir / "execution_integrity.json",
+        {
+            "schema_version": "caerus.execution_integrity.v2",
+            "generated_at": _now_utc(),
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "status": "OK" if integrity_ok else "FAIL",
+            "plan_id": outcome.plan_id_received,
+            "plan_hash": outcome.plan_hash_received,
+            "terminal_outcome": final_terminal_outcome.value,
+            "reconciliation_status": final_reconciliation_status,
+            "canonical_economic_verification_status": economic_status,
+            "equality_gate_status": equality["decision"],
+            "findings": [] if integrity_ok else [final_reason],
+        },
+    )
+    _write_json(
+        run_root / "execution_timeline.json",
+        {
+            "schema_version": "caerus.execution_lifecycle_timeline.v2",
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "plan_id": outcome.plan_id_received,
+            "provenance": {
+                "execution_source": "exact_execution_plan_v3",
+                "price_freshness_scope": "fresh_broker_state_at_authorization",
+                "plan_hash": outcome.plan_hash_received,
+            },
+            "stages": [
+                {"stage": "AUTHORIZE", "status": "PASS"},
+                {"stage": "EXECUTE", "status": outcome.status},
+                {"stage": "RECONCILE", "status": outcome.reconciliation_status},
+            ],
+        },
+    )
+    if not dry_run:
+        try:
+            from core.orchestrator_state import STAGES, append_orchestrator_transition
+
+            if workflow_plan_id is None:
+                raise RuntimeError("pre-execution orchestrator state was not established")
+            # RECONCILE and LEARN are appended only after the canonical attempt
+            # registry and selection pointer are durable below. This prevents a
+            # persistence failure from leaving an immutable all-PASS lifecycle.
+            for stage in STAGES[5:7]:
+                if stage == "EXECUTE":
+                    stage_status = (
+                        "NO_ACTION"
+                        if final_terminal_outcome is TerminalOutcome.AUTHORIZED_NO_TRADE
+                        else "PASS"
+                        if outcome.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+                        else "FAILED"
+                    )
+                elif stage == "VERIFY":
+                    stage_status = (
+                        "PASS"
+                        if final_terminal_outcome
+                        in {
+                            TerminalOutcome.RECONCILED_SUCCESS,
+                            TerminalOutcome.AUTHORIZED_NO_TRADE,
+                        }
+                        else "FAILED"
+                    )
+                else:
+                    stage_status = "PASS"
+                transition = append_orchestrator_transition(
+                    state_root,
+                    trade_date=trade_date,
+                    plan_id=workflow_plan_id,
+                    stage=stage,
+                    status=stage_status,
+                    recorded_at=_now_utc(),
+                    artifact_refs=(
+                        str(run_root / "execution_payload.json"),
+                        str(run_root / "live_pilot_reconciliation.json"),
+                    ),
+                )
+                if stage_status == "FAILED":
+                    break
+            can_append_reconcile = (
+                transition.stage == "VERIFY" and transition.status == "PASS"
+            )
+            summary["orchestrator_state_status"] = transition.status
+            summary["orchestrator_state_hash"] = transition.content_hash
+            summary["orchestrator_state_root"] = str(state_root)
+            summary["orchestrator_workflow_plan_id"] = workflow_plan_id
+        except Exception as exc:
+            from core.failure_semantics import FailureClass
+
+            final_terminal_outcome = TerminalOutcome.SYSTEM_FAILURE
+            final_failure_class = FailureClass.STATE_FAILURE
+            final_reason = f"orchestrator_state_persistence_failed:{exc}"
+            final_reconciliation_status = "FAILED_RECONCILIATION"
+            terminal_status = "FAILED_RECONCILIATION"
+            summary.update(
+                {
+                    "terminal_status": terminal_status,
+                    "terminal_outcome": final_terminal_outcome.value,
+                    "reason_code": final_reason,
+                    "reconciliation_status": final_reconciliation_status,
+                    "orchestrator_state_status": "FAILED",
+                }
+            )
+    if not dry_run:
+        try:
+            from core.execution_attempt_registry import (
+                AttemptRecord,
+                append_attempt_and_update_selection,
+                attempt_path,
+            )
+
+            from core.submission_wal import OrderIntent
+
+            wal_clients: list[str] = []
+            wal_dir = Path(output_root) / "submission_wal" / trade_date / "intents"
+            for path in sorted(wal_dir.glob("*.json")) if wal_dir.exists() else []:
+                intent = OrderIntent.from_dict(
+                    json.loads(path.read_text(encoding="utf-8"))
+                )
+                if intent.plan_id == outcome.plan_id_received:
+                    wal_clients.append(intent.client_order_id)
+            def build_exact_record(prior_attempts):
+                resolves = ()
+                if final_terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS and any(
+                    bool(row.get("recovered_by_client_order_id"))
+                    for row in outcome.orders_submitted
+                ):
+                    recovered_clients = {
+                        str(row.get("client_order_id") or "")
+                        for row in outcome.orders_submitted
+                        if bool(row.get("recovered_by_client_order_id"))
+                    }
+                    resolves = tuple(
+                        row.attempt_id
+                        for row in prior_attempts
+                        if row.terminal_outcome is TerminalOutcome.SUBMISSION_UNKNOWN
+                        and row.plan_id == outcome.plan_id_received
+                        and bool(row.client_order_ids)
+                        and set(row.client_order_ids).issubset(recovered_clients)
+                    )
+                return AttemptRecord(
+                    attempt_id=run_id,
+                    trade_date=trade_date,
+                    run_id=run_id,
+                    lane="paper",
+                    sequence=len(prior_attempts) + 1,
+                    terminal_outcome=final_terminal_outcome,
+                    recorded_at=_now_utc(),
+                    run_root=str(run_root),
+                    submitted_count=len(outcome.orders_submitted),
+                    filled_count=len(outcome.orders_filled),
+                    failure_class=final_failure_class,
+                    reason_code=final_reason,
+                    source_artifacts=(
+                        str(run_root / "execution_payload.json"),
+                        str(run_root / "live_pilot_reconciliation.json"),
+                    ),
+                    resolves_attempt_ids=resolves,
+                    plan_id=outcome.plan_id_received,
+                    client_order_ids=tuple(sorted(set(wal_clients))),
+                )
+
+            _attempt_path, selection, _selection_path = (
+                append_attempt_and_update_selection(
+                    registry_root,
+                    trade_date=trade_date,
+                    build_record=build_exact_record,
+                )
+            )
+            record_appended = True
+            summary["attempt_registry_status"] = selection.status.value
+            summary["attempt_registry_selection"] = str(
+                registry_root / trade_date / "selection.json"
+            )
+            _write_json(run_root / "live_pilot_operator_summary.json", summary)
+        except Exception as exc:
+            from core.failure_semantics import FailureClass
+
+            record_appended = record_appended or attempt_path(
+                registry_root,
+                trade_date=trade_date,
+                attempt_id=run_id,
+            ).exists()
+
+            summary["attempt_registry_status"] = "FAILED"
+            summary["attempt_registry_error"] = str(exc)
+            if terminal_status in {"SUBMITTED", "AUTHORIZED_NO_TRADE"}:
+                terminal_status = "FAILED_RECONCILIATION"
+                final_terminal_outcome = TerminalOutcome.SYSTEM_FAILURE
+                final_failure_class = FailureClass.STATE_FAILURE
+                final_reason = "execution_attempt_registry_persistence_failed"
+                final_reconciliation_status = "FAILED_RECONCILIATION"
+                summary.update(
+                    {
+                        "terminal_status": terminal_status,
+                        "terminal_outcome": final_terminal_outcome.value,
+                        "reason_code": final_reason,
+                        "reconciliation_status": final_reconciliation_status,
+                    }
+                )
+            # If the immutable economic attempt was already appended but its
+            # required selection pointer was not durable, preserve the later
+            # workflow failure as a second immutable terminal attempt. The
+            # selector always honors the latest terminal attempt.
+            if record_appended:
+                try:
+                    def build_finalization_correction(correction_prior):
+                        return AttemptRecord(
+                            attempt_id=f"{run_id}.finalization_failure",
+                            trade_date=trade_date,
+                            run_id=run_id,
+                            lane="paper",
+                            sequence=len(correction_prior) + 1,
+                            terminal_outcome=TerminalOutcome.SYSTEM_FAILURE,
+                            recorded_at=_now_utc(),
+                            run_root=str(run_root),
+                            submitted_count=len(outcome.orders_submitted),
+                            filled_count=len(outcome.orders_filled),
+                            failure_class=FailureClass.STATE_FAILURE,
+                            reason_code="execution_attempt_selection_persistence_failed",
+                            source_artifacts=(
+                                str(run_root / "execution_payload.json"),
+                                str(run_root / "live_pilot_reconciliation.json"),
+                            ),
+                            plan_id=outcome.plan_id_received,
+                            client_order_ids=tuple(sorted(set(wal_clients))),
+                        )
+
+                    _path, corrected_selection, _pointer = (
+                        append_attempt_and_update_selection(
+                            registry_root,
+                            trade_date=trade_date,
+                            build_record=build_finalization_correction,
+                        )
+                    )
+                    summary["attempt_registry_status"] = (
+                        corrected_selection.status.value
+                    )
+                except Exception as correction_exc:
+                    summary["attempt_registry_correction_error"] = str(correction_exc)
+    if not dry_run and can_append_reconcile:
+        try:
+            reconciliation_stage_status = (
+                "PASS"
+                if final_terminal_outcome
+                in {
+                    TerminalOutcome.RECONCILED_SUCCESS,
+                    TerminalOutcome.AUTHORIZED_NO_TRADE,
+                }
+                else "FAILED"
+            )
+            transition = append_orchestrator_transition(
+                state_root,
+                trade_date=trade_date,
+                plan_id=workflow_plan_id,
+                stage="RECONCILE",
+                status=reconciliation_stage_status,
+                recorded_at=_now_utc(),
+                artifact_refs=(
+                    str(run_root / "execution_payload.json"),
+                    str(run_root / "live_pilot_reconciliation.json"),
+                    str(Path(output_root) / "execution_attempts" / trade_date / "selection.json"),
+                ),
+            )
+            if transition.status == "PASS":
+                transition = append_orchestrator_transition(
+                    state_root,
+                    trade_date=trade_date,
+                    plan_id=workflow_plan_id,
+                    stage="LEARN",
+                    status="PASS",
+                    recorded_at=_now_utc(),
+                    artifact_refs=(
+                        str(Path(output_root) / "execution_attempts" / trade_date / "selection.json"),
+                        str(run_root / "canonical_economic_verification.json"),
+                    ),
+                )
+            summary["orchestrator_state_status"] = transition.status
+            summary["orchestrator_state_hash"] = transition.content_hash
+            summary["orchestrator_workflow_plan_id"] = workflow_plan_id
+        except Exception as exc:
+            from core.failure_semantics import FailureClass
+
+            learn_followed_success = final_terminal_outcome in {
+                TerminalOutcome.RECONCILED_SUCCESS,
+                TerminalOutcome.AUTHORIZED_NO_TRADE,
+            }
+            if final_terminal_outcome in {
+                TerminalOutcome.RECONCILED_SUCCESS,
+                TerminalOutcome.AUTHORIZED_NO_TRADE,
+            }:
+                terminal_status = "FAILED_RECONCILIATION"
+                final_terminal_outcome = TerminalOutcome.SYSTEM_FAILURE
+                final_failure_class = FailureClass.STATE_FAILURE
+                final_reason = f"orchestrator_learn_persistence_failed:{exc}"
+                final_reconciliation_status = "FAILED_RECONCILIATION"
+            summary["orchestrator_state_status"] = "FAILED"
+            if learn_followed_success:
+                try:
+                    def build_learn_correction(learn_prior):
+                        return AttemptRecord(
+                            attempt_id=f"{run_id}.learn_failure",
+                            trade_date=trade_date,
+                            run_id=run_id,
+                            lane="paper",
+                            sequence=len(learn_prior) + 1,
+                            terminal_outcome=TerminalOutcome.SYSTEM_FAILURE,
+                            recorded_at=_now_utc(),
+                            run_root=str(run_root),
+                            submitted_count=len(outcome.orders_submitted),
+                            filled_count=len(outcome.orders_filled),
+                            failure_class=FailureClass.STATE_FAILURE,
+                            reason_code=final_reason,
+                            source_artifacts=(
+                                str(run_root / "execution_payload.json"),
+                                str(run_root / "live_pilot_reconciliation.json"),
+                            ),
+                            plan_id=outcome.plan_id_received,
+                            client_order_ids=tuple(sorted(set(wal_clients))),
+                        )
+
+                    _path, corrected_selection, _pointer = (
+                        append_attempt_and_update_selection(
+                            registry_root,
+                            trade_date=trade_date,
+                            build_record=build_learn_correction,
+                        )
+                    )
+                    summary["attempt_registry_status"] = corrected_selection.status.value
+                except Exception as correction_exc:
+                    summary["attempt_registry_correction_error"] = str(correction_exc)
+    # Rewrite the final views only after every required terminal persistence step
+    # so summary/results/integrity cannot disagree about success versus failure.
+    summary.update(
+        {
+            "terminal_status": terminal_status,
+            "terminal_outcome": final_terminal_outcome.value,
+            "reason_code": final_reason,
+            "reconciliation_status": final_reconciliation_status,
+        }
+    )
+    _write_json(run_root / "live_pilot_operator_summary.json", summary)
+    # The canonical workflow/health/confirmation readers use operator_summary.
+    # Keep the legacy-named view as an identical compatibility alias so every
+    # consumer observes the same final terminal semantics.
+    _write_json(run_root / "operator_summary.json", summary)
+    reconciliation.update(
+        {
+            "status": final_reconciliation_status,
+            "state": terminal_status,
+            "terminal_outcome": final_terminal_outcome.value,
+            "reason_code": final_reason,
+        }
+    )
+    _write_json(run_root / "live_pilot_reconciliation.json", reconciliation)
+    timeline_payload = _load_plan(run_root / "execution_timeline.json")
+    timeline_payload["terminal_status"] = terminal_status
+    timeline_payload["terminal_outcome"] = final_terminal_outcome.value
+    timeline_payload["reason_code"] = final_reason
+    timeline_payload["reconciliation_status"] = final_reconciliation_status
+    if final_terminal_outcome is TerminalOutcome.SYSTEM_FAILURE:
+        stages = timeline_payload.get("stages")
+        if isinstance(stages, list):
+            for stage in stages:
+                if isinstance(stage, dict) and stage.get("stage") in {
+                    "VERIFY",
+                    "RECONCILE",
+                    "LEARN",
+                }:
+                    stage["status"] = "FAILED"
+            stages.append(
+                {
+                    "stage": "FINALIZE",
+                    "status": "FAILED",
+                    "reason_code": final_reason,
+                }
+            )
+    _write_json(run_root / "execution_timeline.json", timeline_payload)
+    execution_payload_path = run_root / "execution_payload.json"
+    execution_payload = _load_plan(execution_payload_path)
+    execution_payload.update(
+        {
+            "execution_status": (
+                "EXECUTED"
+                if terminal_status == "SUBMITTED"
+                else (
+                    "NO_ACTION"
+                    if terminal_status == "AUTHORIZED_NO_TRADE"
+                    else "HALTED"
+                )
+            ),
+            "operator_execution_status": (
+                "reconciled_success"
+                if final_terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+                else final_terminal_outcome.value.lower()
+            ),
+            "terminal_status": terminal_status,
+            "terminal_outcome": final_terminal_outcome.value,
+            "reconciliation_status": final_reconciliation_status,
+            "halt_reason": (
+                None
+                if terminal_status in {"SUBMITTED", "AUTHORIZED_NO_TRADE", "DRY_RUN"}
+                else final_reason
+            ),
+        }
+    )
+    _write_json(execution_payload_path, execution_payload)
+    _write_json(
+        run_root / "execution_results.json",
+        {
+            **result,
+            "raw_execution_status": result.get("status"),
+            "status": terminal_status,
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "mode": "PAPER",
+            "terminal_status": terminal_status,
+            "terminal_outcome": final_terminal_outcome.value,
+            "reason_code": final_reason,
+            "failure_class": (
+                final_failure_class.value if final_failure_class is not None else None
+            ),
+            "reconciliation_status": final_reconciliation_status,
+            "run_root": str(run_root),
+        },
+    )
+    integrity_path = audit_dir / "execution_integrity.json"
+    integrity_payload = _load_plan(integrity_path) if integrity_path.exists() else {}
+    integrity_payload.update(
+        {
+            "status": (
+                "OK"
+                if terminal_status in {"SUBMITTED", "AUTHORIZED_NO_TRADE", "DRY_RUN"}
+                and final_terminal_outcome
+                in {
+                    TerminalOutcome.RECONCILED_SUCCESS,
+                    TerminalOutcome.AUTHORIZED_NO_TRADE,
+                }
+                else "FAIL"
+            ),
+            "terminal_outcome": final_terminal_outcome.value,
+            "reconciliation_status": final_reconciliation_status,
+            "findings": (
+                []
+                if terminal_status in {"SUBMITTED", "AUTHORIZED_NO_TRADE", "DRY_RUN"}
+                else [final_reason]
+            ),
+        }
+    )
+    _write_json(integrity_path, integrity_payload)
     return summary
 
 
@@ -3833,6 +4984,56 @@ def run_live_pilot(
     require_approved_package = str(
         environ.get("CAERUS_REQUIRE_APPROVED_EXECUTION_PACKAGE") or ""
     ).strip().lower() in {"1", "true", "yes", "y", "on"}
+    require_exact_package = str(
+        environ.get("CAERUS_REQUIRE_EXACT_EXECUTION_PLAN") or ""
+    ).strip().lower() in {"1", "true", "yes", "y", "on"}
+    # PAPER has one structural execution authority. Environment flags may
+    # tighten behavior but can never re-enable mutable target reconstruction.
+    test_only_legacy_fake = bool(
+        os.environ.get("PYTEST_CURRENT_TEST")
+        and broker is not None
+        and not isinstance(broker, AlpacaBroker)
+        and str(environ.get("CAERUS_TEST_ONLY_ALLOW_LEGACY_FAKE_EXECUTION") or "")
+        .strip()
+        .lower()
+        in {"1", "true", "yes"}
+    )
+    paper_scope_requires_exact = (
+        str(gate.requested_mode or "").strip().lower() == PAPER_MODE
+        and not test_only_legacy_fake
+    )
+    if (require_exact_package or paper_scope_requires_exact) and not isinstance(
+        plan.get("exact_execution_plan"), Mapping
+    ):
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
+            reason_code="exact_execution_plan_required",
+            operator_action=(
+                "Run the fresh broker-state Decision/Authorization stage. The "
+                "executor cannot reconstruct orders from targets or precompute."
+            ),
+            preflight=preflight,
+        )
+    live_capital_scope = (
+        str(gate.requested_mode or "").strip().lower() == LIVE_PILOT_MODE
+        or not broker_paper
+    )
+    if live_capital_scope and not test_only_legacy_fake:
+        return _write_blocked_artifacts(
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            env=environ,
+            reason_code="live_capital_disabled_by_owner_policy",
+            operator_action=(
+                "Live capital remains code-level disabled. A future owner-approved "
+                "transition must introduce a separately reviewed exact-plan scope."
+            ),
+            preflight=preflight,
+        )
     if require_approved_package and not isinstance(
         plan.get("approved_execution_package"), Mapping
     ):
@@ -4013,6 +5214,20 @@ def run_live_pilot(
             preflight=preflight,
         )
     gate = dataclasses.replace(gate, capital_cap_usd=resolved_cap)
+
+    if isinstance(plan.get("exact_execution_plan"), Mapping):
+        return _run_exact_execution_path(
+            plan=plan,
+            broker=broker,
+            env=environ,
+            preflight=preflight,
+            pre_snapshot=pre_snapshot,
+            run_root=run_root,
+            run_id=run_id,
+            trade_date=trade_date,
+            output_root=output_root,
+            dry_run=bool(gate.dry_run),
+        )
 
     return _run_live_pilot_core_path(
         plan=plan,
@@ -4455,10 +5670,56 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def recover_exact_run(run_root: Path) -> dict[str, Any]:
+    """Resume one exact-v3 PAPER run through WAL/client-ID recovery only."""
+
+    payload = _load_plan(run_root / "execution_payload.json")
+    exact_payload = payload.get("exact_execution_plan")
+    if (
+        payload.get("execution_source") != "exact_execution_plan_v3"
+        or not isinstance(exact_payload, Mapping)
+    ):
+        raise RuntimeError("refresh-run is not an exact-v3 PAPER recovery artifact")
+    from authority.exact_plan import exact_execution_plan_from_dict
+
+    exact = exact_execution_plan_from_dict(
+        exact_payload,
+        expected_account_scope="PAPER",
+    )
+    recovery_id = (
+        f"{run_root.name}.recovery."
+        f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}"
+    )
+    handoff = {
+        "schema_version": "caerus.authorized_execution_handoff.v1",
+        "trade_date": exact.trade_date,
+        "status": "AUTHORIZED_NO_TRADE" if not exact.orders else "AUTHORIZED_EXACT_PLAN",
+        "exact_execution_plan": exact.to_dict(),
+        "exact_execution_plan_id": exact.plan_id,
+        "exact_execution_plan_hash": exact.content_hash,
+        "exact_execution_authority_run_id": exact.run_id,
+        "execution_authority": "exact_execution_plan_only",
+        "precompute_execution_authority": False,
+        "recovery_source_run_root": str(run_root),
+    }
+    return run_live_pilot(
+        plan=handoff,
+        run_id=recovery_id,
+        output_root=run_root.parent.parent,
+        env=os.environ,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     if args.refresh_run:
-        result = refresh_live_pilot_reconciliation(run_root=Path(args.refresh_run))
+        refresh_root = Path(args.refresh_run)
+        payload_path = refresh_root / "execution_payload.json"
+        payload = _load_plan(payload_path) if payload_path.exists() else {}
+        if payload.get("execution_source") == "exact_execution_plan_v3":
+            result = recover_exact_run(refresh_root)
+        else:
+            result = refresh_live_pilot_reconciliation(run_root=refresh_root)
     else:
         if not args.plan:
             raise SystemExit("--plan is required unless --refresh-run is provided")
@@ -4470,7 +5731,11 @@ def main(argv: list[str] | None = None) -> int:
             output_root=Path(args.output_root),
         )
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 0 if str(result.get("terminal_status") or "").upper() in {"DRY_RUN", "SUBMITTED"} else 1
+    return 0 if str(result.get("terminal_status") or "").upper() in {
+        "DRY_RUN",
+        "SUBMITTED",
+        "AUTHORIZED_NO_TRADE",
+    } else 1
 
 
 if __name__ == "__main__":

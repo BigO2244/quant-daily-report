@@ -85,6 +85,7 @@ def _paper_env(*, dry_run: str = "0", base_url: str = PAPER_HOST) -> dict[str, s
         "CAERUS_LIVE_PILOT_APPROVED": "1",
         "CAERUS_LIVE_PILOT_CRON_APPROVED": "1",
         "CAERUS_LIVE_PILOT_SUBMIT_APPROVED": "1",
+        "CAERUS_TEST_ONLY_ALLOW_LEGACY_FAKE_EXECUTION": "1",
     }
 
 
@@ -664,6 +665,19 @@ def test_cron_execute_pins_planning_equity_to_capital_cap() -> None:
     assert "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP" not in live
 
 
+def test_choice2_cron_has_one_authority_and_terminal_verification_order() -> None:
+    text = (REPO_ROOT / "scripts" / "cron_execute.sh").read_text(encoding="utf-8")
+    assert text.index("scripts/authorize_exact_execution_plan.py") < text.index(
+        "=== PAPER LANE DRY RUN ==="
+    ) < text.index("=== PAPER LANE SUBMISSION ===")
+    assert text.index("scripts.live_vs_shadow_reconciliation") < text.index(
+        "scripts/run_operational_drag_analysis.py"
+    ) < text.index("scripts.caerus_daily_health_check")
+    assert "execute_options_review.py" not in text
+    assert "execute_options_orders.py" not in text
+    assert "options_execution_authority=DISABLED_PENDING_EXACT_PLAN_INTEGRATION" in text
+
+
 def test_cron_execute_pins_two_minute_confirmed_proceeds_rotation() -> None:
     paper = (REPO_ROOT / "scripts" / "cron_execute.sh").read_text(encoding="utf-8")
     ci_dry_run = (REPO_ROOT / "scripts" / "ci_dry_run.sh").read_text(encoding="utf-8")
@@ -780,9 +794,8 @@ def test_summary_field_extracts_last_json_object_from_noisy_output(tmp_path: Pat
     assert clean.stdout.strip() == "SUBMITTED"
 
 
-def test_live_account_pin_gate_unchanged_for_live_broker(tmp_path: Path) -> None:
-    """The paper-lane account-pin skip must NOT weaken the live lane: a live
-    (non-paper) broker with a mismatched pinned account still blocks."""
+def test_live_broker_is_blocked_by_owner_policy_before_account_gates(tmp_path: Path) -> None:
+    """Choice 2 keeps live capital structurally disabled regardless of arming."""
 
     class FakeLiveBroker(FakePaperBroker):
         paper = False
@@ -810,7 +823,7 @@ def test_live_account_pin_gate_unchanged_for_live_broker(tmp_path: Path) -> None
         now_et=_market_open_now(),
     )
     assert result["terminal_status"] == "BLOCKED"
-    assert result["reason_code"] == "account_id_mismatch"
+    assert result["reason_code"] == "live_capital_disabled_by_owner_policy"
     assert broker.submit_calls == 0
 
 

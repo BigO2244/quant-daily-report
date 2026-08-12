@@ -73,7 +73,7 @@ class OptionsExecutionTests(unittest.TestCase):
             self.assertFalse(review["submission"]["submitted"])
             self.assertTrue((Path(tmp) / "run" / "options_execution_review.json").exists())
 
-    def test_submits_when_enabled(self) -> None:
+    def test_owner_policy_blocks_submission_even_when_enabled(self) -> None:
         paper_review = {
             "paper_review_status": "READY_FOR_PAPER_REVIEW",
             "paper_ready": True,
@@ -109,10 +109,14 @@ class OptionsExecutionTests(unittest.TestCase):
                 broker=broker,
                 policy_path=policy_path,
             )
-            self.assertEqual(review["execution_status"], "SUBMITTED")
-            self.assertTrue(review["submission"]["attempted"])
-            self.assertTrue(review["submission"]["submitted"])
-            self.assertEqual(len(broker.submitted), 1)
+            self.assertEqual(review["execution_status"], "BLOCKED_OWNER_POLICY")
+            self.assertFalse(review["submission"]["attempted"])
+            self.assertFalse(review["submission"]["submitted"])
+            self.assertEqual(len(broker.submitted), 0)
+            self.assertIn(
+                "options_capital_disabled_by_owner_policy",
+                review["execution_reasons"],
+            )
 
     def test_blocks_non_allowed_strategies_even_when_submission_enabled(self) -> None:
         blocked = ["covered_call", "leap_call", "put_spread", "call_butterfly", "long_straddle"]

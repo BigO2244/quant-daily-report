@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import sys
+import datetime as dt
 from pathlib import Path
 
 # Ensure repo root is on sys.path when invoked as `python scripts/send_trading_confirmation_email.py`
@@ -42,6 +44,41 @@ from core.shadow_scoreboard import build_shadow_scoreboard
 from core.timing_policy import current_et
 
 logger = logging.getLogger(__name__)
+
+
+def _record_confirmation_delivery(
+    run_root: Path,
+    *,
+    operator_summary_fields: dict,
+    confirmation_email_sent: bool,
+) -> None:
+    """Record email delivery without rewriting certified Choice-2 truth."""
+
+    existing = load_operator_summary(run_root)
+    if str(existing.get("execution_source") or "") == "exact_execution_plan_v3":
+        operator_bytes = json.dumps(
+            existing,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        payload = {
+            "schema_version": "caerus.trading_confirmation_delivery.v1",
+            "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "run_id": existing.get("run_id"),
+            "trade_date": existing.get("trade_date"),
+            "confirmation_email_sent": bool(confirmation_email_sent),
+            "operator_summary_sha256": hashlib.sha256(operator_bytes).hexdigest(),
+        }
+        path = run_root / "trading_confirmation_delivery.json"
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return
+    write_operator_summary(
+        run_root,
+        **operator_summary_fields,
+        confirmation_email_sent=confirmation_email_sent,
+    )
 
 
 def _resolve_trade_date() -> str:
@@ -534,6 +571,19 @@ def _load_performance_data(trade_date: str) -> dict | None:
 
 
 def _load_reconciliation_data(trade_date: str, results_path: Path) -> dict:
+    results_payload = _load_json_dict(results_path) if results_path.exists() else {}
+    terminal_outcome = str(results_payload.get("terminal_outcome") or "").upper()
+    terminal_status = str(results_payload.get("terminal_status") or "").upper()
+    if terminal_outcome in {"SYSTEM_FAILURE", "SUBMISSION_UNKNOWN"} or terminal_status in {
+        "FAILED_RECONCILIATION", "SUBMISSION_UNKNOWN", "BLOCKED",
+        "FAILED_PLAN_INTEGRITY",
+    }:
+        return {
+            "status": "FAILED_RECONCILIATION",
+            "path": results_path,
+            "payload": results_payload,
+            "reason": str(results_payload.get("reason_code") or terminal_status),
+        }
     candidates: list[Path] = []
     run_root = results_path.parent if results_path.name in {"execution_results.json", "execution_payload.json"} else None
     if run_root is not None:
@@ -579,7 +629,7 @@ def _format_reconciliation_section(recon: dict) -> tuple[str, str, bool]:
     # SUBMITTED_UNFILLED (WARNING §f fix) is a non-terminal in-flight broker
     # state, not a drift/failure signal — treat it as healthy here too so this
     # section doesn't render an open-but-not-yet-filled batch as unhealthy.
-    healthy = status in {"OK", "PASS", "OK_RECONCILED", "CLEAN", "DRY_RUN_NO_SUBMISSION", "SUBMITTED_UNFILLED"}
+    healthy = status in {"OK", "PASS", "OK_RECONCILED", "CLEAN", "DRY_RUN_NO_SUBMISSION"}
     if healthy:
         explanation = "Broker positions match expected post-execution state."
     elif status == "DRIFT_DETECTED":
@@ -816,11 +866,16 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     """
     trade_date = str(results.get("trade_date") or "")
     run_id = str(results.get("run_id") or "")
-    status = str(results.get("status") or "UNKNOWN")
+    terminal_outcome = str(results.get("terminal_outcome") or "").strip().upper()
+    status = str(results.get("terminal_status") or results.get("status") or "UNKNOWN").strip().upper()
     mode = str(results.get("mode") or "UNKNOWN")
-    submitted = int(results.get("submitted_count") or 0)
-    accepted = int(results.get("accepted_count") or 0)
-    rejected = int(results.get("rejected_count") or 0)
+    submitted = int(
+        results.get("submitted_count") or results.get("orders_submitted_count") or 0
+    )
+    accepted = int(results.get("accepted_count") or submitted)
+    rejected = int(
+        results.get("rejected_count") or results.get("orders_rejected_count") or 0
+    )
     filled = int(
         results.get("filled_count")
         or results.get("orders_filled_count")
@@ -835,10 +890,23 @@ def _build_confirmation_email(results: dict, results_path: Path) -> tuple[str, s
     final_execution_reason = str(results.get("final_execution_reason") or "").strip()
 
     # Determine status display
-    if status == STATUS_SKIPPED_DUPLICATE or (submitted > 0 and halt_reason and "duplicate" in halt_reason.lower()):
+    if terminal_outcome in {"SYSTEM_FAILURE", "SUBMISSION_UNKNOWN"} or status in {
+        "FAILED_RECONCILIATION", "SUBMISSION_UNKNOWN", "BLOCKED",
+        "FAILED_PLAN_INTEGRITY",
+    }:
+        status_display = "HALTED"
+        status_emoji = "🛑"
+    elif status == STATUS_SKIPPED_DUPLICATE or (submitted > 0 and halt_reason and "duplicate" in halt_reason.lower()):
         status_display = "SKIPPED_DUPLICATE"
         status_emoji = "⏭️"
-    elif reconciled_to_target_state or operator_execution_status == "reconciled_success":
+    elif terminal_outcome == "AUTHORIZED_NO_TRADE":
+        status_display = "NO_ACTION"
+        status_emoji = "—"
+    elif (
+        terminal_outcome == "RECONCILED_SUCCESS"
+        or reconciled_to_target_state
+        or operator_execution_status == "reconciled_success"
+    ):
         # Raw broker-abort PARTIAL that post-trade reconciliation confirmed
         # reached the expected post-execution state. Surface the final status;
         # the raw status/reason are preserved in the diagnostic section below.
@@ -1143,13 +1211,18 @@ def main() -> None:
         "run_id": str(results.get("run_id") or ""),
         "trade_date": str(results.get("trade_date") or ""),
         "mode": str(results.get("mode") or ""),
-        "terminal_status": str(results.get("status") or "UNKNOWN"),
+        "terminal_status": str(
+            results.get("terminal_status")
+            or results.get("terminal_outcome")
+            or results.get("status")
+            or "UNKNOWN"
+        ),
         "submitted_count": _to_int(results.get("submitted_count")),
         "accepted_count": _to_int(results.get("accepted_count")),
         "rejected_count": _to_int(results.get("rejected_count")),
         "post_execution_recon_status": (
             "DRY_RUN_NO_SUBMISSION"
-            if str(results.get("status") or "").upper() == "DRY_RUN"
+            if str(results.get("terminal_status") or results.get("status") or "").upper() == "DRY_RUN"
             else reconciliation_data.get("status")
         ),
         "broker_authoritative_state": bool(
@@ -1168,9 +1241,9 @@ def main() -> None:
     if not event.should_send():
         logger.info("[TRADING_CONFIRMATION] governance suppressed")
         if run_root:
-            write_operator_summary(
+            _record_confirmation_delivery(
                 run_root,
-                **operator_summary_fields,
+                operator_summary_fields=operator_summary_fields,
                 confirmation_email_sent=False,
             )
         return
@@ -1178,9 +1251,9 @@ def main() -> None:
     if str(os.getenv("EMAIL_DRY_RUN", "")).strip().lower() in {"1", "true", "yes", "y", "on"}:
         logger.info("[TRADING_CONFIRMATION] dry-run enabled; skipping send")
         if run_root:
-            write_operator_summary(
+            _record_confirmation_delivery(
                 run_root,
-                **operator_summary_fields,
+                operator_summary_fields=operator_summary_fields,
                 confirmation_email_sent=False,
             )
         return
@@ -1191,9 +1264,9 @@ def main() -> None:
 
     # Update operator summary with confirmation email sent
     if run_root:
-        write_operator_summary(
+        _record_confirmation_delivery(
             run_root,
-            **operator_summary_fields,
+            operator_summary_fields=operator_summary_fields,
             confirmation_email_sent=True,
         )
 

@@ -1,0 +1,61 @@
+{
+  "fixture_schema": "caerus.historical_incident_replay.v1",
+  "trade_date": "2026-08-12",
+  "provenance": "sanitized excerpts from scheduler VM artifacts inspected 2026-08-12",
+  "planned_symbols": {
+    "BUY": ["AMGN", "BDX", "BKNG", "FTNT", "HON", "ROST", "RTX"],
+    "SELL": ["INTC", "LRCX", "MU", "STX", "WDC"]
+  },
+  "attempts": [
+    {
+      "attempt_id": "paper-cron-dry-093502",
+      "run_id": "2026-08-12T20260812T093502-0400_paper_cron_dry",
+      "sequence": 1,
+      "recorded_at": "2026-08-12T13:35:10Z",
+      "terminal_outcome": "SYSTEM_FAILURE",
+      "failure_class": "EXECUTION_FAILURE",
+      "reason_code": "paper_lane_dry_run_failed",
+      "submitted_count": 0,
+      "filled_count": 0,
+      "run_root": "outputs/paper_lane/runs/2026-08-12T20260812T093502-0400_paper_cron_dry",
+      "source_artifacts": [
+        "live_pilot_execution_payload.json",
+        "live_pilot_preflight.json",
+        "live_pilot_broker_snapshot_pre.json",
+        "live_pilot_settled_cash.json",
+        "logs/execute_2026-08-12.log"
+      ],
+      "missing_terminal_artifacts": [
+        "execution_results.json",
+        "live_pilot_reconciliation.json",
+        "operator_summary.json"
+      ]
+    },
+    {
+      "attempt_id": "paper-recovery-submit-112727",
+      "run_id": "2026-08-12T20260812T112727-0400_paper_cron_submit",
+      "sequence": 2,
+      "recorded_at": "2026-08-12T15:28:22Z",
+      "terminal_outcome": "RECONCILED_SUCCESS",
+      "failure_class": null,
+      "reason_code": "CLEAN",
+      "submitted_count": 1,
+      "filled_count": 1,
+      "run_root": "outputs/paper_lane/runs/2026-08-12T20260812T112727-0400_paper_cron_submit",
+      "source_artifacts": [
+        "live_pilot_orders_intended.json",
+        "live_pilot_orders_submitted.json",
+        "execution_results.json",
+        "live_pilot_reconciliation.json"
+      ],
+      "submitted_orders": [["STX", "SELL", 1]],
+      "reconciliation_status": "CLEAN"
+    }
+  ],
+  "canonical_pointer": {
+    "path": "outputs/workflow/2026-08-12/execution.json",
+    "selected_attempt_id": "paper-recovery-submit-112727",
+    "status": "success"
+  },
+  "replay_assertion": "later success may be selected only while the zero-submission failed attempt remains immutable and queryable"
+}

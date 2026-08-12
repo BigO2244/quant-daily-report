@@ -227,6 +227,37 @@ def test_inspect_attempt_requires_known_transient_reason_and_zero_submissions(tm
     assert stale.retryable is False
 
 
+def test_inspect_attempt_recognizes_exact_submitted_unfilled_count(tmp_path: Path) -> None:
+    trade_date = "2026-08-12"
+    run_root = tmp_path / "outputs" / "paper_lane" / "runs" / "exact-open"
+    run_root.mkdir(parents=True)
+    (run_root / "execution_results.json").write_text(
+        json.dumps(
+            {
+                "raw_execution_status": "SUBMITTED_UNFILLED",
+                "terminal_status": "FAILED_RECONCILIATION",
+                "reason_code": "exact_order_not_terminal:order-1",
+                "orders_submitted_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    write_paper_lane_pointers(
+        trade_date=trade_date,
+        run_id="exact-open",
+        run_root=str(run_root),
+        terminal_status="FAILED_RECONCILIATION",
+        reason_code="paper_posttrade_verification_failed:exact_order_not_terminal",
+        workspace_root=str(tmp_path),
+    )
+
+    outcome = inspect_attempt(tmp_path, trade_date, 1)
+
+    assert outcome.reason_code == "SUBMITTED_UNFILLED"
+    assert outcome.submitted_count == 1
+    assert outcome.retryable is False
+
+
 def test_main_runs_normal_confirmation_after_fifth_attempt_recovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -328,6 +359,33 @@ def test_global_lock_blocks_overlapping_dates(tmp_path: Path) -> None:
         )
 
     assert exit_code == 75
+
+
+def test_cron_enters_global_retry_lock_before_replacing_canonical_pointer() -> None:
+    script = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
+    lock_entry = 'flock -n 9'
+    pointer_claim = 'bootstrap_pointer "running" "paper_execution_bootstrap"'
+    assert script.index(lock_entry) < script.index(pointer_claim)
+    assert 'if [[ "${CAERUS_PAPER_RETRY_CHILD:-0}" != "1" ]]' in script
+    assert '--inherited-lock-fd 9' in script
+    harness_exec = script.index('exec "${PYTHON_BIN}" -m scripts.paper_execution_retry')
+    assert script.index('export ALPACA_BASE_URL="https://paper-api.alpaca.markets"') < harness_exec
+    assert script.index('export CAERUS_REQUIRE_EXACT_EXECUTION_PLAN="1"') < harness_exec
+
+
+def test_cron_never_uses_empty_or_untrusted_submit_run_root() -> None:
+    script = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
+    assert 'EXPECTED_SUBMIT_RUN_ROOT="${PAPER_LANE_ROOT}/runs/${SUBMIT_RUN_ID}"' in script
+    assert 'SUBMIT_RUN_ROOT="${EXPECTED_SUBMIT_RUN_ROOT}"' in script
+    assert 'exact_execution_run_root_identity_mismatch' in script
+
+
+def test_cron_cannot_exit_success_after_emergency_pointer_fallback() -> None:
+    script = Path("scripts/cron_execute.sh").read_text(encoding="utf-8")
+    assert "The emergency pointer is intentionally a failure artifact" in script
+    assert "canonical terminal execution pointer publication failed" in script
+    assert "if ! write_paper_pointer" in script
+    assert '"${FINAL_TERMINAL}"' in script
 
 
 def test_cli_does_not_accept_an_arbitrary_child_script() -> None:

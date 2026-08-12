@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.options_smoke_session import build_options_smoke_session
+from core.execution_authority_policy import require_options_capital_disabled
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,6 +25,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--policy-path", default="config/options_smoke_session_policy.json")
     parser.add_argument("--submit", action="store_true", help="Actually submit the paper session orders.")
     args = parser.parse_args(argv)
+    if args.submit:
+        require_options_capital_disabled(
+            mutation_path="scripts.options_smoke_session"
+        )
 
     api_key = os.environ.get("ALPACA_API_KEY_ID") or os.environ.get("ALPACA_KEY_ID")
     api_secret = os.environ.get("ALPACA_API_SECRET_KEY") or os.environ.get("ALPACA_SECRET_KEY")

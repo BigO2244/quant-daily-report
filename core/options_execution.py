@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from brokers.alpaca_broker import AlpacaBroker
+from core.execution_authority_policy import (
+    OPTIONS_CAPITAL_EXECUTION_AUTHORITY,
+    OPTIONS_MUTATION_REASON,
+)
 
 DEFAULT_EXECUTION_POLICY: dict[str, Any] = {
     "benchmark": "SPY",
@@ -157,7 +161,12 @@ def build_options_execution_review(
     policy = _load_policy(policy_path)
     paper_review = dict(paper_review or {})
     paper_status = str(paper_review.get("paper_review_status") or "").strip().lower()
-    live_submission_allowed = bool(allow_live_submission and policy.get("allow_live_submission"))
+    configured_live_submission = bool(
+        allow_live_submission and policy.get("allow_live_submission")
+    )
+    # Choice 2: options remain research/review-only.  This is deliberately not
+    # configurable by policy JSON or environment state.
+    live_submission_allowed = False
     allocator_ready = _allocator_ready(paper_review)
     paper_ready = _paper_ready(paper_review)
     require_allocator_ready = bool(policy.get("require_allocator_ready", True))
@@ -193,10 +202,16 @@ def build_options_execution_review(
             live_plan = {}
         else:
             ready_for_submission = True
-            if live_submission_allowed:
-                execution_status = "READY_FOR_LIVE_SUBMISSION"
-            else:
-                execution_status = "READY_FOR_LIVE_REVIEW"
+            execution_status = "READY_FOR_LIVE_REVIEW"
+    plan_ready_for_review = ready_for_submission
+    # Keep the legacy field honest: nothing in this module is ready for capital
+    # submission while Choice 2 is active.  The candidate itself remains
+    # available under ``live_plan`` for review.
+    ready_for_submission = False
+    if configured_live_submission:
+        reasons.append(OPTIONS_MUTATION_REASON)
+        if plan_ready_for_review:
+            execution_status = "BLOCKED_OWNER_POLICY"
     submission: dict[str, Any] = {
         "attempted": False,
         "submitted": False,
@@ -237,16 +252,19 @@ def build_options_execution_review(
         "north_star": str(policy.get("north_star") or ""),
         "policy": {
             "allow_live_submission": live_submission_allowed,
+            "configured_allow_live_submission": configured_live_submission,
+            "execution_authority": OPTIONS_CAPITAL_EXECUTION_AUTHORITY,
             "max_contracts": int(_to_float(policy.get("max_contracts")) or 1),
             "allowed_strategies": list(policy.get("allowed_strategies") or []),
         },
         "paper_review_status": paper_review.get("paper_review_status"),
         "paper_ready": paper_ready,
         "allocator_review_status": paper_review.get("allocator_review_status"),
+        "ready_for_review": plan_ready_for_review,
         "ready_for_submission": ready_for_submission,
         "execution_status": execution_status,
         "execution_reasons": reasons,
-        "live_plan": live_plan if ready_for_submission else {},
+        "live_plan": live_plan if plan_ready_for_review else {},
         "submission": submission,
         "paper_review": paper_review,
     }

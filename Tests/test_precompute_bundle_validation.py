@@ -7,9 +7,14 @@ from core.precompute_bundle_validation import (
     build_execution_self_heal_status,
     validate_precompute_bundle,
 )
+from core.precompute_contract import BUNDLE_REQUIRED_FILES
+from core.sleeve_control_plane import (
+    dispatch_all_sleeves,
+    load_sleeve_control_registry,
+)
 
 
-REQUIRED_FILES = ("contract.json", "daily_snapshot.json", "signals.json", "planned_execution_payload.json")
+REQUIRED_FILES = BUNDLE_REQUIRED_FILES
 
 
 def _write_bundle_file(bundle_dir: Path, name: str, trade_date: str = "2026-05-15") -> None:
@@ -25,6 +30,42 @@ def _write_bundle_file(bundle_dir: Path, name: str, trade_date: str = "2026-05-1
                 "notional": 100.0,
             }
         ]
+    elif name == "sleeve_evaluations.json":
+        registry = load_sleeve_control_registry()
+        runtime_root = bundle_dir.parents[2]
+        orion = (
+            runtime_root
+            / "outputs"
+            / "shadow_candidates"
+            / trade_date
+            / "caerus_orion.json"
+        )
+        orion.parent.mkdir(parents=True, exist_ok=True)
+        orion.write_text(
+            json.dumps(
+                {
+                    "trade_date": trade_date,
+                    "effective_trade_date": trade_date,
+                    "strategy_slug": "caerus_orion",
+                    "decision_eligible": True,
+                    "target_weights": {"AAPL": 1.0},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        payload = dispatch_all_sleeves(
+            trade_date=trade_date,
+            run_id="test-precompute-bundle",
+            daily_snapshot={
+                "asof": trade_date,
+                "sleeve_allocations": {
+                    key: 0.0 for key in registry.functional_allocation_keys()
+                },
+            },
+            runtime_root=runtime_root,
+            registry=registry,
+        )
     (bundle_dir / name).write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
 
@@ -40,8 +81,10 @@ def test_validate_precompute_bundle_requires_all_execution_artifacts(tmp_path: P
         "daily_snapshot.json",
         "signals.json",
         "planned_execution_payload.json",
+        "sleeve_evaluations.json",
     }
     assert "missing:planned_execution_payload.json" in result["validation_failures"]
+    assert "missing:sleeve_evaluations.json" in result["validation_failures"]
 
 
 def test_validate_precompute_bundle_passes_complete_bundle(tmp_path: Path) -> None:
@@ -54,7 +97,54 @@ def test_validate_precompute_bundle_passes_complete_bundle(tmp_path: Path) -> No
     assert result["status"] == "OK"
     assert result["missing_files"] == []
     assert result["validation_failures"] == []
-    assert result["integrity_summary"]["present_count"] == 4
+    assert result["integrity_summary"]["present_count"] == 5
+    sleeve_payload = json.loads(
+        (bundle_dir / "sleeve_evaluations.json").read_text(encoding="utf-8")
+    )
+    assert any(
+        envelope["evaluation"]["status"] == "BLOCKED"
+        and envelope["eligibility"]["evaluation_only"] is True
+        for envelope in sleeve_payload["envelopes"]
+    )
+
+
+def test_validate_precompute_bundle_rejects_corrupt_sleeve_coverage(
+    tmp_path: Path,
+) -> None:
+    bundle_dir = tmp_path / "outputs" / "precompute" / "2026-05-15"
+    for name in REQUIRED_FILES:
+        _write_bundle_file(bundle_dir, name)
+    sidecar_path = bundle_dir / "sleeve_evaluations.json"
+    payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    payload["envelopes"].pop()
+    payload["summary"]["envelope_count"] -= 1
+    sidecar_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    result = validate_precompute_bundle(bundle_dir, trade_date="2026-05-15")
+
+    assert result["status"] == "FAILED"
+    assert "sleeve_evaluations:envelope_coverage_mismatch" in result[
+        "semantic_failures"
+    ]
+
+
+def test_validate_precompute_bundle_rejects_nonterminal_sleeve_status(
+    tmp_path: Path,
+) -> None:
+    bundle_dir = tmp_path / "outputs" / "precompute" / "2026-05-15"
+    for name in REQUIRED_FILES:
+        _write_bundle_file(bundle_dir, name)
+    sidecar_path = bundle_dir / "sleeve_evaluations.json"
+    payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    payload["envelopes"][0]["evaluation"]["status"] = "PENDING"
+    sidecar_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    result = validate_precompute_bundle(bundle_dir, trade_date="2026-05-15")
+
+    assert result["status"] == "FAILED"
+    assert "sleeve_evaluations:envelope[0]:non_terminal_status" in result[
+        "semantic_failures"
+    ]
 
 
 def test_validate_precompute_bundle_rejects_nonfinite_execution_values(tmp_path: Path) -> None:

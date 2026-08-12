@@ -27,7 +27,7 @@ class DummyBroker:
 
 
 class OptionsSmokeSessionTests(unittest.TestCase):
-    def test_open_pair_when_no_positions(self) -> None:
+    def test_open_pair_review_cannot_submit_under_owner_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             policy_path = Path(tmp) / "policy.json"
             policy_path.write_text(
@@ -51,7 +51,13 @@ class OptionsSmokeSessionTests(unittest.TestCase):
                 allow_submission=True,
             )
             self.assertEqual(review["action"], "open_pair")
-            self.assertEqual(review["submitted_count"], 2)
+            self.assertEqual(review["submitted_count"], 0)
+            self.assertEqual(review["execution_status"], "BLOCKED_OWNER_POLICY")
+            self.assertIn(
+                "options_capital_disabled_by_owner_policy",
+                review["reasons"],
+            )
+            self.assertFalse((Path(tmp) / "state" / "options_smoke_session_state.json").exists())
 
     def test_hold_when_same_day_open_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

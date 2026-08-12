@@ -24,7 +24,7 @@ from scripts.fetch_precompute_artifact import (
 
 REPORT_DATE = "2026-03-18"
 ARTIFACT_NAME = f"alpaca-precompute-{REPORT_DATE}"
-BUNDLE_FILES = {"contract.json", "daily_snapshot.json", "signals.json", "planned_execution_payload.json"}
+BUNDLE_FILES = set(BUNDLE_REQUIRED_FILES)
 
 
 class _Result:
@@ -33,7 +33,7 @@ class _Result:
 
 
 def _write_full_bundle(bundle_dir: Path) -> None:
-    """Write a complete bundle (all 4 required files) into *bundle_dir*."""
+    """Write every required bundle member into *bundle_dir*."""
     bundle_dir.mkdir(parents=True, exist_ok=True)
     for name in BUNDLE_FILES:
         (bundle_dir / name).write_text("{}", encoding="utf-8")

@@ -214,6 +214,10 @@ from core.live_regime_review import build_returns_by_ticker, write_live_regime_r
 from core.options_overlay_paper import write_options_overlay_paper_review  # noqa: E402
 from core.options_execution import write_options_execution_review  # noqa: E402
 from core.options_overlay_shadow import write_options_overlay_shadow  # noqa: E402
+from core.execution_authority_policy import (  # noqa: E402
+    OPTIONS_CAPITAL_MUTATION_ENABLED,
+    OPTIONS_MUTATION_REASON,
+)
 from alpha_stack._config_loader import get_flag as get_alpha_stack_flag  # noqa: E402
 from engine.backtest_engine import (  # noqa: E402
     infer_latest_entries,
@@ -7842,12 +7846,16 @@ def main(argv: list[str] | None = None):
             )
             options_live_context = str(os.getenv("WORKFLOW_KIND") or "").strip().lower() == "live"
             options_submission_enabled = bool(
-                options_submission_requested and options_live_context and not options_plan_only
+                OPTIONS_CAPITAL_MUTATION_ENABLED
+                and options_submission_requested
+                and options_live_context
+                and not options_plan_only
             )
             if options_submission_requested and not options_submission_enabled:
                 logger.warning(
-                    "[OPTIONS_OVERLAY] live submission requested but blocked "
+                    "[OPTIONS_OVERLAY] %s "
                     "(plan_only=%s workflow_kind=%s)",
+                    OPTIONS_MUTATION_REASON,
                     options_plan_only,
                     str(os.getenv("WORKFLOW_KIND") or "unset"),
                 )

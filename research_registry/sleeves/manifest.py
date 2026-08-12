@@ -15,6 +15,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST_PATH = Path(__file__).with_name("manifest.json")
+DEFAULT_STRATEGY_REGISTRY_PATH = REPO_ROOT / "config" / "research" / "strategy_registry.json"
 MANIFEST_SCHEMA_VERSION = "caerus_sleeve_manifest_v1"
 
 REQUIRED_TOP_LEVEL_FIELDS = {
@@ -32,6 +33,8 @@ REQUIRED_SLEEVE_FIELDS = {
     "display_name",
     "status",
     "lifecycle_stage",
+    "strategy_registry_status",
+    "control_plane_frozen",
     "sleeve_type",
     "family",
     "thesis",
@@ -50,7 +53,8 @@ REQUIRED_SLEEVE_FIELDS = {
 }
 
 ALLOWED_STATUSES = {
-    "current_paper_baseline",
+    "current_paper_authority",
+    "current_shadow_baseline",
     "current_shadow_challenger",
     "research_placeholder",
 }
@@ -74,6 +78,7 @@ ALLOWED_SLEEVE_TYPES = {
 ALLOWED_IMPLEMENTATION_STATUSES = {
     "existing_strategy_reference",
     "existing_shadow_reference",
+    "existing_paper_reference",
     "research_placeholder",
 }
 
@@ -96,7 +101,11 @@ def load_sleeve_manifest(path: str | Path | None = None) -> dict[str, Any]:
     return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
-def validate_sleeve_manifest(path: str | Path | None = None) -> dict[str, Any]:
+def validate_sleeve_manifest(
+    path: str | Path | None = None,
+    *,
+    strategy_registry_path: str | Path | None = None,
+) -> dict[str, Any]:
     manifest_path = Path(path) if path is not None else DEFAULT_MANIFEST_PATH
     errors: list[SleeveManifestError] = []
     warnings: list[str] = []
@@ -160,6 +169,20 @@ def validate_sleeve_manifest(path: str | Path | None = None) -> dict[str, Any]:
             )
         if sleeve.get("behavior_change_allowed") is not False:
             errors.append(SleeveManifestError(f"{base}.behavior_change_allowed", "Phase B sleeves must set behavior_change_allowed=false"))
+        if sleeve.get("strategy_registry_status") not in {"paper", "shadow", "research", "retired"}:
+            errors.append(
+                SleeveManifestError(
+                    f"{base}.strategy_registry_status",
+                    f"invalid strategy_registry_status: {sleeve.get('strategy_registry_status')!r}",
+                )
+            )
+        if not isinstance(sleeve.get("control_plane_frozen"), bool):
+            errors.append(
+                SleeveManifestError(
+                    f"{base}.control_plane_frozen",
+                    "control_plane_frozen must be boolean",
+                )
+            )
 
         artifact_requirements = sleeve.get("artifact_requirements")
         if not isinstance(artifact_requirements, dict):
@@ -203,6 +226,17 @@ def validate_sleeve_manifest(path: str | Path | None = None) -> dict[str, Any]:
     for sleeve_id in extra_live_markers:
         errors.append(SleeveManifestError("$.sleeves", f"Phase B manifest contains disallowed live/promotion marker: {sleeve_id}"))
 
+    should_check_parity = strategy_registry_path is not None or (
+        manifest_path.resolve() == DEFAULT_MANIFEST_PATH.resolve()
+    )
+    if should_check_parity:
+        registry_path = (
+            Path(strategy_registry_path)
+            if strategy_registry_path is not None
+            else DEFAULT_STRATEGY_REGISTRY_PATH
+        )
+        errors.extend(_registry_parity_errors(manifest, registry_path))
+
     return _validation_payload(manifest_path, manifest, errors, warnings)
 
 
@@ -221,6 +255,8 @@ def sleeve_inventory_payload(path: str | Path | None = None) -> dict[str, Any]:
             "display_name": item.get("display_name"),
             "status": item.get("status"),
             "lifecycle_stage": item.get("lifecycle_stage"),
+            "strategy_registry_status": item.get("strategy_registry_status"),
+            "control_plane_frozen": item.get("control_plane_frozen"),
             "sleeve_type": item.get("sleeve_type"),
             "family": item.get("family"),
             "mcp_visibility": item.get("mcp_visibility"),
@@ -269,3 +305,114 @@ def _validation_payload(
         "errors": [error.to_dict() for error in errors],
         "warnings": list(warnings),
     }
+
+
+def _registry_parity_errors(
+    manifest: dict[str, Any],
+    registry_path: Path,
+) -> list[SleeveManifestError]:
+    errors: list[SleeveManifestError] = []
+    try:
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return [
+            SleeveManifestError(
+                "$.strategy_registry",
+                f"strategy registry not found for parity check: {registry_path}",
+            )
+        ]
+    except json.JSONDecodeError as exc:
+        return [
+            SleeveManifestError(
+                "$.strategy_registry",
+                f"strategy registry invalid JSON: {exc}",
+            )
+        ]
+
+    strategy_rows = registry.get("strategies")
+    control = registry.get("sleeve_control_plane")
+    overrides = control.get("strategy_overrides") if isinstance(control, dict) else None
+    if not isinstance(strategy_rows, list) or not isinstance(overrides, dict):
+        return [
+            SleeveManifestError(
+                "$.strategy_registry",
+                "strategy registry missing strategies/control-plane overrides",
+            )
+        ]
+
+    expected = {
+        str(item.get("strategy_id") or ""): item
+        for item in strategy_rows
+        if isinstance(item, dict)
+        and item.get("strategy_id")
+        and item.get("strategy_type") not in {"benchmark", "reference_portfolio"}
+    }
+    manifest_rows = {
+        str(item.get("strategy_id") or ""): item
+        for item in list(manifest.get("sleeves") or [])
+        if isinstance(item, dict) and item.get("strategy_id")
+    }
+    if set(expected) != set(manifest_rows):
+        errors.append(
+            SleeveManifestError(
+                "$.sleeves",
+                "strategy registry / sleeve manifest identity mismatch: "
+                f"registry_only={sorted(set(expected) - set(manifest_rows))} "
+                f"manifest_only={sorted(set(manifest_rows) - set(expected))}",
+            )
+        )
+    for strategy_id in sorted(set(expected) & set(manifest_rows)):
+        strategy = expected[strategy_id]
+        row = manifest_rows[strategy_id]
+        override = overrides.get(strategy_id)
+        path = f"$.sleeves[{strategy_id}]"
+        status = str(strategy.get("status") or "")
+        role = str(strategy.get("role") or "")
+        expected_manifest_status = (
+            "current_paper_authority"
+            if status == "paper"
+            else "current_shadow_baseline"
+            if status == "shadow" and role == "baseline"
+            else "current_shadow_challenger"
+            if status == "shadow"
+            else "research_placeholder"
+            if status == "research"
+            else None
+        )
+        if row.get("strategy_registry_status") != status:
+            errors.append(
+                SleeveManifestError(
+                    f"{path}.strategy_registry_status",
+                    f"must equal strategy registry status {status!r}",
+                )
+            )
+        if expected_manifest_status and row.get("status") != expected_manifest_status:
+            errors.append(
+                SleeveManifestError(
+                    f"{path}.status",
+                    f"must reflect registry lifecycle as {expected_manifest_status!r}",
+                )
+            )
+        expected_stage = "paper_observed" if status == "paper" else "shadow_observed" if status == "shadow" else None
+        if expected_stage and row.get("lifecycle_stage") != expected_stage:
+            errors.append(
+                SleeveManifestError(
+                    f"{path}.lifecycle_stage",
+                    f"must reflect registry lifecycle as {expected_stage!r}",
+                )
+            )
+        if not isinstance(override, dict):
+            errors.append(
+                SleeveManifestError(
+                    f"{path}.control_plane_frozen",
+                    "strategy is missing its control-plane override",
+                )
+            )
+        elif row.get("control_plane_frozen") is not override.get("frozen"):
+            errors.append(
+                SleeveManifestError(
+                    f"{path}.control_plane_frozen",
+                    "must equal the canonical control-plane frozen value",
+                )
+            )
+    return errors
