@@ -24,6 +24,8 @@ from typing import Any, Iterable, Mapping, Sequence
 
 ECONOMIC_SCHEMA_VERSION = "caerus.economic_reconciliation.v1"
 ATTRIBUTION_SCHEMA_VERSION = "caerus.sleeve_attribution_reconciliation.v1"
+DEFAULT_MARK_TIMING_TOLERANCE_BPS = 25.0
+MAX_MARK_TIMING_TOLERANCE_BPS = 50.0
 
 
 class ReconciliationStatus(str, Enum):
@@ -175,13 +177,14 @@ class SleeveAttributionReconciliation:
     attribution_delta: float
     tolerance: float
     source_artifacts: tuple[str, ...]
+    timing_evidence: Mapping[str, Any] | None = None
 
     @property
     def reconciled(self) -> bool:
         return self.status is ReconciliationStatus.RECONCILED
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": ATTRIBUTION_SCHEMA_VERSION,
             "trade_date": self.trade_date,
             "status": self.status.value,
@@ -194,6 +197,9 @@ class SleeveAttributionReconciliation:
             "tolerance": self.tolerance,
             "source_artifacts": list(self.source_artifacts),
         }
+        if self.timing_evidence is not None:
+            payload["timing_evidence"] = dict(self.timing_evidence)
+        return payload
 
 
 @dataclass(frozen=True)
@@ -400,12 +406,44 @@ def reconcile_economic_truth(
 _UNKNOWN_SLEEVES = {"UNKNOWN", "UNATTRIBUTED", "UNASSIGNED", "NONE", "N/A"}
 
 
+def mark_timing_tolerance(
+    *,
+    starting_equity: float,
+    ending_equity: float,
+    tolerance_bps: float = DEFAULT_MARK_TIMING_TOLERANCE_BPS,
+) -> float:
+    """Bound non-atomic broker mark drift as a percentage of portfolio NAV.
+
+    This allowance is only for the sleeve-attribution comparison.  It must not
+    be used for cash, fill, quantity, or broker-NAV reconciliation.
+    """
+
+    for label, value in (
+        ("starting_equity", starting_equity),
+        ("ending_equity", ending_equity),
+        ("tolerance_bps", tolerance_bps),
+    ):
+        if not _finite(value):
+            raise ValueError(f"{label} must be finite")
+    bps = float(tolerance_bps)
+    if bps < 0.0 or bps > MAX_MARK_TIMING_TOLERANCE_BPS:
+        raise ValueError(
+            "mark timing tolerance must be between 0 and "
+            f"{MAX_MARK_TIMING_TOLERANCE_BPS:g} basis points"
+        )
+    nav_basis = max(abs(float(starting_equity)), abs(float(ending_equity)))
+    if nav_basis <= 0.0:
+        raise ValueError("mark timing tolerance requires positive portfolio NAV")
+    return max(0.01, nav_basis * bps / 10_000.0)
+
+
 def reconcile_sleeve_attribution(
     *,
     trade_date: str,
     portfolio_result: float,
     rows: Iterable[SleeveAttributionRow],
     tolerance: float = 0.01,
+    timing_evidence: Mapping[str, Any] | None = None,
 ) -> SleeveAttributionReconciliation:
     """Prove that date+sleeve attribution sums to the portfolio result."""
 
@@ -446,6 +484,41 @@ def reconcile_sleeve_attribution(
     if abs(delta) > float(tolerance):
         reasons.append("SLEEVE_SUM_PORTFOLIO_MISMATCH")
 
+    normalized_timing_evidence: dict[str, Any] | None = None
+    if timing_evidence is not None:
+        normalized_timing_evidence = dict(timing_evidence)
+        for key in (
+            "starting_equity",
+            "ending_equity",
+            "starting_cash",
+            "ending_cash",
+            "starting_position_value",
+            "ending_position_value",
+            "starting_snapshot_residual",
+            "ending_snapshot_residual",
+            "per_snapshot_tolerance",
+            "total_tolerance",
+            "tolerance_bps",
+        ):
+            if key not in normalized_timing_evidence or not _finite(
+                normalized_timing_evidence[key]
+            ):
+                raise ValueError(f"timing_evidence.{key} must be finite")
+        per_snapshot = float(normalized_timing_evidence["per_snapshot_tolerance"])
+        total_tolerance = float(normalized_timing_evidence["total_tolerance"])
+        if per_snapshot < 0 or total_tolerance < 0:
+            raise ValueError("timing evidence tolerances must be non-negative")
+        if abs(float(normalized_timing_evidence["starting_snapshot_residual"])) > (
+            per_snapshot
+        ):
+            reasons.append("STARTING_SNAPSHOT_NAV_IDENTITY_MISMATCH")
+        if abs(float(normalized_timing_evidence["ending_snapshot_residual"])) > (
+            per_snapshot
+        ):
+            reasons.append("ENDING_SNAPSHOT_NAV_IDENTITY_MISMATCH")
+        if abs(total_tolerance - float(tolerance)) > 1e-9:
+            raise ValueError("timing evidence total tolerance does not match attribution")
+
     return SleeveAttributionReconciliation(
         trade_date=normalized_date,
         status=(
@@ -460,6 +533,7 @@ def reconcile_sleeve_attribution(
         attribution_delta=delta,
         tolerance=float(tolerance),
         source_artifacts=tuple(sorted(sources)),
+        timing_evidence=normalized_timing_evidence,
     )
 
 

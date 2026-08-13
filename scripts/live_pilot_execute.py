@@ -4138,11 +4138,13 @@ def _run_exact_execution_path(
         from authority.exact_plan import exact_execution_plan_from_dict
         from core.economic_reconciliation import (
             EconomicTolerance,
+            DEFAULT_MARK_TIMING_TOLERANCE_BPS,
             Fill,
             MarkedPosition,
             SleeveAttributionRow,
             reconcile_economic_truth,
             reconcile_sleeve_attribution,
+            mark_timing_tolerance,
             verify_canonical_economics,
             write_canonical_economic_verification,
         )
@@ -4236,22 +4238,64 @@ def _run_exact_execution_path(
                 position_value_abs=max(0.01, abs(ending_equity) * 0.0005),
             ),
         )
-        portfolio_result = ending_equity - exact.portfolio_nav
-        starting_position_value = sum(
-            float(_finite_float(row.get("market_value")) or 0.0)
-            for row in pre_snapshot.get("positions") or []
-            if isinstance(row, Mapping)
+        pre_account = (
+            pre_snapshot.get("account")
+            if isinstance(pre_snapshot.get("account"), Mapping)
+            else {}
         )
-        ending_position_value = sum(
-            float(_finite_float(row.get("market_value")) or 0.0)
-            for row in post_snapshot.get("positions") or []
-            if isinstance(row, Mapping)
+        starting_equity = _finite_float(
+            (pre_account or {}).get("portfolio_value")
+            or (pre_account or {}).get("equity")
         )
+        starting_cash = _finite_float((pre_account or {}).get("cash"))
+        if starting_equity is None or starting_equity <= 0 or starting_cash is None:
+            raise ValueError("broker starting cash/equity missing for attribution")
+
+        def snapshot_position_value(snapshot: Mapping[str, Any], label: str) -> float:
+            total = 0.0
+            for row in snapshot.get("positions") or []:
+                if not isinstance(row, Mapping):
+                    raise ValueError(f"{label} broker position row is malformed")
+                market_value = _finite_float(row.get("market_value"))
+                if market_value is None:
+                    raise ValueError(
+                        f"{label} broker market value missing for {row.get('symbol')}"
+                    )
+                total += market_value
+            return total
+
+        # Both sides of attribution must span the same execution interval.
+        # exact.portfolio_nav is the earlier authorization snapshot and remains
+        # immutable lineage, but market movement between authorization and this
+        # pre-execution snapshot is not execution-period P&L.
+        portfolio_result = ending_equity - starting_equity
+        starting_position_value = snapshot_position_value(pre_snapshot, "starting")
+        ending_position_value = snapshot_position_value(post_snapshot, "ending")
         independently_attributed_orion_result = (
             ending_position_value
             - starting_position_value
             + ending_cash
-            - exact.starting_cash
+            - starting_cash
+        )
+        attribution_tolerance_bps = float(
+            exact.constraints.get(
+                "sleeve_attribution_mark_timing_tolerance_bps",
+                DEFAULT_MARK_TIMING_TOLERANCE_BPS,
+            )
+        )
+        # Split the governed total allowance evenly so a bad pre snapshot and a
+        # bad post snapshot cannot cancel one another in the interval delta.
+        total_attribution_tolerance = mark_timing_tolerance(
+            starting_equity=starting_equity,
+            ending_equity=ending_equity,
+            tolerance_bps=attribution_tolerance_bps,
+        )
+        per_snapshot_tolerance = total_attribution_tolerance / 2.0
+        starting_snapshot_residual = (
+            starting_cash + starting_position_value - starting_equity
+        )
+        ending_snapshot_residual = (
+            ending_cash + ending_position_value - ending_equity
         )
         attribution = reconcile_sleeve_attribution(
             trade_date=trade_date,
@@ -4267,15 +4311,29 @@ def _run_exact_execution_path(
                     ),
                 )
             ],
-            # Attribution compares account NAV with separately fetched position
-            # marks at both the pre- and posttrade snapshots. Alpaca does not
-            # provide those as one atomic read, so allow the same 5 bps mark
-            # movement budget per snapshot (10 bps total), while quantity/cash
-            # reconciliation above remains exact to its own strict tolerances.
-            tolerance=max(
-                0.01,
-                max(abs(ending_equity), abs(exact.portfolio_nav)) * 0.001,
-            ),
+            # Alpaca account and position endpoints are sequential rather than
+            # atomic. A sealed percentage allowance covers only that mark timing
+            # difference; cash, fills, quantities, and broker NAV stay governed
+            # by the separate strict economic reconciliation above.
+            tolerance=total_attribution_tolerance,
+            timing_evidence={
+                "interval": "execution_pre_to_post_broker_nav",
+                "authorization_nav": exact.portfolio_nav,
+                "authorization_to_execution_pre_nav_delta": (
+                    starting_equity - exact.portfolio_nav
+                ),
+                "starting_equity": starting_equity,
+                "ending_equity": ending_equity,
+                "starting_cash": starting_cash,
+                "ending_cash": ending_cash,
+                "starting_position_value": starting_position_value,
+                "ending_position_value": ending_position_value,
+                "starting_snapshot_residual": starting_snapshot_residual,
+                "ending_snapshot_residual": ending_snapshot_residual,
+                "per_snapshot_tolerance": per_snapshot_tolerance,
+                "total_tolerance": total_attribution_tolerance,
+                "tolerance_bps": attribution_tolerance_bps,
+            },
         )
         verification = verify_canonical_economics(
             economic_reconciliation=economic,

@@ -26,6 +26,7 @@ from authority.exact_plan import build_exact_execution_plan, exact_execution_pla
 from authority.pipeline import validate_persisted_authority_chain
 from brokers.alpaca_broker import AlpacaBroker
 from core.broker_retry_policy import is_retryable_broker_read_error
+from core.economic_reconciliation import DEFAULT_MARK_TIMING_TOLERANCE_BPS
 from core.live_pilot_guardrails import resolve_dynamic_cap
 from core.precompute_bundle_validation import validate_sleeve_evaluation_payload
 from core.paper_drill_epoch import scoped_wal_root, validate_drill_epoch
@@ -763,6 +764,10 @@ def authorize_exact_execution_plan(
             "allow_fractional": bool(plan.get("allow_fractional", False)),
             "sell_first": True,
             "post_sell_rebudgeting": "FORBIDDEN",
+            "sleeve_attribution_interval": "execution_pre_to_post_broker_nav",
+            "sleeve_attribution_mark_timing_tolerance_bps": (
+                DEFAULT_MARK_TIMING_TOLERANCE_BPS
+            ),
             "cash_reconciliation_tolerance_usd": max(
                 1.0,
                 sum(float(row.get("notional") or 0.0) for row in exact_rows) * 0.01,

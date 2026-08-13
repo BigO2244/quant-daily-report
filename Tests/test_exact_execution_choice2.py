@@ -419,6 +419,14 @@ def test_exact_contract_rejects_cap_authority_and_economic_lies():
         _rebuild_exact(payload, buy_orders=understated)
     with pytest.raises(AuthorityContractError, match="order count"):
         _rebuild_exact(payload, constraints={**payload["constraints"], "max_orders": 1})
+    with pytest.raises(AuthorityContractError, match="exceeds 50 basis points"):
+        _rebuild_exact(
+            payload,
+            constraints={
+                **payload["constraints"],
+                "sleeve_attribution_mark_timing_tolerance_bps": 50.01,
+            },
+        )
     with pytest.raises(AuthorityContractError, match="capital-eligible"):
         _rebuild_exact(
             payload,
@@ -1272,6 +1280,111 @@ def test_production_entrypoint_routes_v3_directly_and_writes_canonical_artifacts
     ]
 
 
+def test_no_trade_attribution_uses_execution_pre_to_post_nav_not_authorization_nav(
+    tmp_path: Path,
+):
+    class MovingMarkNoTradeBroker(TrackingPaperBroker):
+        def __init__(self):
+            super().__init__()
+            self.account_reads = 0
+            self.position_reads = 0
+
+        def get_account(self):
+            self.account_reads += 1
+            # Authorization NAV in the exact plan is $1,000. Execution begins
+            # after a $23 market move and ends another $0.20 lower.
+            equity = 977.0 if self.account_reads < 3 else 976.8
+            return {
+                "id": self.account_id,
+                "status": "ACTIVE",
+                "cash": "900",
+                "equity": str(equity),
+                "portfolio_value": str(equity),
+                "buying_power": "900",
+            }
+
+        def get_positions(self):
+            self.position_reads += 1
+            market_value = 77.0 if self.position_reads < 3 else 76.8
+            return [{"symbol": "OLD", "qty": "1", "market_value": str(market_value)}]
+
+    broker = MovingMarkNoTradeBroker()
+    exact = _plan(no_trade=True)
+    result = run_live_pilot(
+        plan=_handoff(exact),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        run_id="moving-mark-no-trade",
+        output_root=tmp_path / "paper_lane",
+    )
+    assert result["terminal_status"] == "AUTHORIZED_NO_TRADE"
+    assert result["canonical_economic_verification_status"] == "RECONCILED"
+    assert broker.submit_calls == 0
+    verification = json.loads(
+        (Path(result["run_root"]) / "canonical_economic_verification.json").read_text()
+    )
+    attribution = verification["sleeve_attribution_reconciliation"]
+    assert attribution["portfolio_result"] == pytest.approx(-0.2)
+    assert attribution["attributed_result"] == pytest.approx(-0.2)
+    assert attribution["attribution_delta"] == pytest.approx(0.0)
+    timing = attribution["timing_evidence"]
+    assert timing["interval"] == "execution_pre_to_post_broker_nav"
+    assert timing["authorization_nav"] == pytest.approx(1000.0)
+    assert timing["authorization_to_execution_pre_nav_delta"] == pytest.approx(-23.0)
+    assert timing["starting_snapshot_residual"] == pytest.approx(0.0)
+    assert timing["ending_snapshot_residual"] == pytest.approx(0.0)
+
+
+def test_no_trade_fails_when_pre_snapshot_residual_exceeds_its_bps_budget(
+    tmp_path: Path,
+):
+    class ExcessPreSnapshotResidualBroker(TrackingPaperBroker):
+        def __init__(self):
+            super().__init__()
+            self.account_reads = 0
+
+        def get_account(self):
+            self.account_reads += 1
+            # Pre: cash 900 + position MV 98 differs from equity 1000 by $2.
+            # Post: the same economics equal equity 998. Interval attribution
+            # delta is only $2 (inside the $2.50 total 25-bps allowance), but
+            # pre snapshot residual exceeds its independently allocated $1.25.
+            equity = 1000.0 if self.account_reads < 3 else 998.0
+            return {
+                "id": self.account_id,
+                "status": "ACTIVE",
+                "cash": "900",
+                "equity": str(equity),
+                "portfolio_value": str(equity),
+                "buying_power": "900",
+            }
+
+        def get_positions(self):
+            return [{"symbol": "OLD", "qty": "1", "market_value": "98"}]
+
+    broker = ExcessPreSnapshotResidualBroker()
+    result = run_live_pilot(
+        plan=_handoff(_plan(no_trade=True)),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        run_id="excess-pre-snapshot-residual",
+        output_root=tmp_path / "paper_lane",
+    )
+    assert result["terminal_status"] == "FAILED_RECONCILIATION"
+    assert result["canonical_economic_verification_status"] == (
+        "FAILED_RECONCILIATION"
+    )
+    assert broker.submit_calls == 0
+    verification = json.loads(
+        (Path(result["run_root"]) / "canonical_economic_verification.json").read_text()
+    )
+    attribution = verification["sleeve_attribution_reconciliation"]
+    assert attribution["attribution_delta"] == pytest.approx(2.0)
+    assert attribution["tolerance"] == pytest.approx(2.5)
+    assert "SLEEVE_SUM_PORTFOLIO_MISMATCH" not in attribution["reason_codes"]
+    assert "STARTING_SNAPSHOT_NAV_IDENTITY_MISMATCH" in attribution["reason_codes"]
+
+
 def test_exact_extended_hours_limit_round_trip_is_sealed_and_reconciled(tmp_path: Path):
     broker = TrackingPaperBroker()
     base = _plan().to_dict()
@@ -1615,6 +1728,10 @@ def test_fresh_broker_decision_seals_transition_before_executor(tmp_path: Path):
     assert authorized["precompute_execution_authority"] is False
     assert [row["side"] for row in exact.orders] == ["SELL", "BUY"]
     assert [row["symbol"] for row in exact.orders] == ["OLD", "AAPL"]
+    assert exact.constraints["sleeve_attribution_interval"] == (
+        "execution_pre_to_post_broker_nav"
+    )
+    assert exact.constraints["sleeve_attribution_mark_timing_tolerance_bps"] == 25.0
     assert exact.constraints["paper_drill_epoch"] == "2026-08-12T1230ET"
     assert exact.constraints["paper_drill_live_eligible"] is False
 

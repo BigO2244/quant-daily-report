@@ -503,6 +503,23 @@ def build_exact_execution_plan(
             "emergency regime risk response vetoes all new buy exposure"
         )
     constraint_values = {str(key): _as_plain(value) for key, value in constraints.items()}
+    if "sleeve_attribution_mark_timing_tolerance_bps" in constraint_values:
+        attribution_bps = _finite(
+            constraint_values["sleeve_attribution_mark_timing_tolerance_bps"],
+            "constraints.sleeve_attribution_mark_timing_tolerance_bps",
+            minimum=0.0,
+        )
+        if attribution_bps > 50.0:
+            raise AuthorityContractError(
+                "sleeve attribution mark timing tolerance exceeds 50 basis points"
+            )
+        constraint_values["sleeve_attribution_mark_timing_tolerance_bps"] = (
+            attribution_bps
+        )
+    if "sleeve_attribution_interval" in constraint_values and str(
+        constraint_values["sleeve_attribution_interval"]
+    ) != "execution_pre_to_post_broker_nav":
+        raise AuthorityContractError("unsupported sleeve attribution interval")
     try:
         max_orders = int(constraint_values["max_orders"])
         capital_cap = _finite(
