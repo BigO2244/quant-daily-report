@@ -1426,12 +1426,41 @@ def _execute_exact_plan_locked(
         plan.expected_posttrade_positions, 0.0
     )
     actual_positions_hash = compute_starting_state_hash(final_positions, 0.0)
+    # Market orders are authorized and sealed at a fresh reference price, but
+    # broker cash settles at the actual fill price.  Reconcile cash from the
+    # terminal fill evidence rather than treating favorable/adverse slippage as
+    # unexplained state drift.  Position equality remains exact below.
+    fill_adjusted_cash = float(plan.starting_cash)
+    fill_economics_complete = len(filled) == len(plan.orders)
+    seen_fill_ids: set[str] = set()
+    for fill in filled:
+        client_order_id = str(fill.get("client_order_id") or "").strip()
+        quantity = _filled_quantity(fill)
+        fill_price = _finite(fill.get("filled_avg_price") or fill.get("fill_price"))
+        order = orders_by_client.get(client_order_id)
+        if (
+            not client_order_id
+            or client_order_id in seen_fill_ids
+            or order is None
+            or quantity <= 0
+            or fill_price is None
+            or fill_price <= 0
+        ):
+            fill_economics_complete = False
+            continue
+        seen_fill_ids.add(client_order_id)
+        notional = quantity * fill_price
+        fill_adjusted_cash += notional if str(order["side"]) == "SELL" else -notional
+    fill_economics_complete = (
+        fill_economics_complete and len(seen_fill_ids) == len(plan.orders)
+    )
     cash_tolerance = _finite(plan.constraints.get("cash_reconciliation_tolerance_usd"))
     if cash_tolerance is None or cash_tolerance < 0:
         cash_tolerance = 0.01
     if (
-        expected_positions_hash != actual_positions_hash
-        or abs(final_cash - plan.expected_posttrade_cash) > cash_tolerance + 1e-9
+        not fill_economics_complete
+        or expected_positions_hash != actual_positions_hash
+        or abs(final_cash - fill_adjusted_cash) > cash_tolerance + 1e-9
     ):
         return _outcome(
             plan,

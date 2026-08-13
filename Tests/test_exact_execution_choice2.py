@@ -513,6 +513,34 @@ def test_exact_executor_submits_sealed_sell_then_buy_and_reconciles(tmp_path: Pa
     assert not result.orders_suppressed
 
 
+def test_exact_executor_reconciles_market_order_cash_at_actual_fill_prices(
+    tmp_path: Path,
+):
+    class SlippagePaperBroker(TrackingPaperBroker):
+        def submit_market_order(self, **kwargs):
+            adjusted = dict(kwargs)
+            quantity = float(adjusted["qty"])
+            actual_price = 120.0 if str(adjusted["side"]).upper() == "SELL" else 45.0
+            adjusted["estimated_notional"] = quantity * actual_price
+            return super().submit_market_order(**adjusted)
+
+    broker = SlippagePaperBroker()
+    plan = _plan()
+    result = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="market-slippage-cash-reconciliation",
+        dry_run=False,
+    )
+
+    assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert result.reconciliation_status == "CLEAN"
+    assert result.final_cash == pytest.approx(930.0)
+    assert result.final_cash != pytest.approx(plan.expected_posttrade_cash)
+
+
 def test_exact_executor_blocks_identical_state_from_different_paper_account(
     tmp_path: Path,
 ):
