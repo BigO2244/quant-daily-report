@@ -89,6 +89,76 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _canonical_sha256(payload: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            dict(payload),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _governed_market_state_from_precompute(
+    *, payload_path: Path, payload: Mapping[str, Any], trade_date: str
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Bind Risk to the dated regime source bar in the validated bundle.
+
+    The exact-plan authorizer persists regime hysteresis across runs.  Its input
+    must therefore identify the immutable precompute observation, rather than a
+    mutable outer-plan alias or a synthetic identifier created at authorization
+    time.  The daily snapshot is the canonical source of the composite regime.
+    """
+
+    snapshot_path = payload_path.with_name("daily_snapshot.json")
+    if not snapshot_path.is_file():
+        raise ValueError(f"governed daily_snapshot.json is missing: {snapshot_path}")
+    snapshot = _read_json(snapshot_path)
+    if not isinstance(snapshot, Mapping):
+        raise ValueError("governed daily snapshot must be a JSON object")
+
+    snapshot_asof = str(snapshot.get("asof") or "").strip()
+    snapshot_date = snapshot_asof[:10]
+    if snapshot_date != str(trade_date):
+        raise ValueError(
+            "governed daily snapshot date does not match execution trade date: "
+            f"snapshot={snapshot_date or 'MISSING'} trade_date={trade_date}"
+        )
+    payload_trade_date = str(payload.get("trade_date") or "").strip()
+    if payload_trade_date != str(trade_date):
+        raise ValueError("planned execution payload trade_date is inconsistent")
+    precompute_run_id = str(payload.get("run_id") or "").strip()
+    if not precompute_run_id:
+        raise ValueError("planned execution payload lacks stable run_id lineage")
+
+    regime_summary = snapshot.get("regime_summary")
+    if not isinstance(regime_summary, Mapping):
+        raise ValueError("governed daily snapshot lacks regime_summary")
+    observed_state = str(regime_summary.get("composite_regime") or "").strip()
+    if observed_state.lower() in {"", "unknown", "n/a", "none"}:
+        raise ValueError("governed daily snapshot lacks a usable composite regime")
+
+    snapshot_hash = _file_sha256(snapshot_path)
+    source_bar = {
+        "schema_version": "caerus.market_state_source_bar.v1",
+        "trade_date": str(trade_date),
+        "source_asof": snapshot_asof,
+        "source_artifact": snapshot_path.name,
+        "source_artifact_sha256": snapshot_hash,
+        "source_precompute_run_id": precompute_run_id,
+        "observed_state": observed_state.upper(),
+        "confidence": 1.0,
+        "regime_summary": dict(regime_summary),
+    }
+    source_bar_hash = _canonical_sha256(source_bar)
+    source_bar["market_state_id"] = (
+        f"market:{trade_date}:daily_snapshot:{source_bar_hash}"
+    )
+    return source_bar, (str(snapshot_path), f"sha256:{snapshot_hash}")
+
+
 def _canonical_strategy_id(value: object) -> str:
     raw = str(value or "").strip().lower()
     return {"orion": "caerus_orion", "polaris": "caerus_polaris"}.get(raw, raw)
@@ -545,6 +615,29 @@ def build_live_pilot_plan(
     signals_path = _resolve_signals_path(payload_path, payload)
     decision_source_artifact: dict[str, Any] | None = None
     lane_id = str(lane or "").strip().lower()
+    governed_market_state: dict[str, Any] | None = None
+    market_state_source_refs: tuple[str, ...] = ()
+    if lane_id == "paper":
+        try:
+            governed_market_state, market_state_source_refs = (
+                _governed_market_state_from_precompute(
+                    payload_path=payload_path,
+                    payload=payload,
+                    trade_date=trade_date,
+                )
+            )
+        except Exception as exc:
+            return _emit_blocked_plan(
+                output_dir=output_dir,
+                trade_date=trade_date,
+                approved_sleeve=approved_sleeve,
+                lane=lane,
+                capital_cap=float(capital_cap),
+                max_orders=int(max_orders),
+                allow_fractional=bool(allow_fractional),
+                reason_code="paper_governed_market_state_invalid",
+                diagnostics={"error": str(exc), "payload_path": str(payload_path)},
+            )
     if lane_id == "paper" and recovery_policy:
         return _emit_blocked_plan(
             output_dir=output_dir,
@@ -873,6 +966,9 @@ def build_live_pilot_plan(
     )
     risk_constraints = dict(result.to_artifact())
     if lane_id == "paper":
+        if not governed_market_state:
+            raise ValueError("governed PAPER market state is unresolved")
+        risk_constraints["market_state"] = governed_market_state
         target_policy = dict(
             (decision_source_artifact or {}).get("target_attainment_policy") or {}
         )
@@ -885,7 +981,7 @@ def build_live_pilot_plan(
         approved_target_rows=target_portfolio,
         approved_cash_weight=float(result.cash_target_weight),
         constraints=risk_constraints,
-        source_refs=(f"decision:{decision.package_id}",),
+        source_refs=(f"decision:{decision.package_id}", *market_state_source_refs),
     )
     execution = execution_package_from_risk(risk)
     # Authority packages are decision/content-addressed. A later same-date
@@ -933,7 +1029,11 @@ def build_live_pilot_plan(
             "target_portfolio_schema": TARGET_PORTFOLIO_SCHEMA,
             "target_portfolio": target_portfolio,
             "target_name_count": len(target_portfolio),
-            "risk_controls": result.to_artifact(),
+            "risk_controls": {
+                key: value
+                for key, value in risk_constraints.items()
+                if key != "target_attainment_policy"
+            },
             "price_sources": {row["symbol"]: row["price_source"] for row in target_portfolio},
             "strategy_identity_validation": identity_validation
             or {

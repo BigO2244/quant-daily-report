@@ -39,11 +39,13 @@ def _bundle(
     trade_date: str = "2026-06-22",
     cash_target_weight: float | None = None,
     strategy_identity: dict[str, object] | None = None,
+    composite_regime: str = "risk_on_trending",
 ) -> Path:
     bundle = tmp_path / "outputs" / "precompute" / trade_date
     bundle.mkdir(parents=True, exist_ok=True)
     payload: dict[str, object] = {
         "trade_date": trade_date,
+        "run_id": f"{trade_date}:test:precompute",
         "mode": "PAPER",
         "execution_status": "PLANNED",
         "trades": payload_trades or [],
@@ -63,6 +65,24 @@ def _bundle(
                     if strategy_identity is not None
                     else {}
                 ),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (bundle / "daily_snapshot.json").write_text(
+        json.dumps(
+            {
+                "asof": f"{trade_date} 00:00:00",
+                "regime_summary": {
+                    "composite_regime": composite_regime,
+                    "trend_state": "weak_up",
+                    "volatility_state": "calm",
+                    "breadth_state": "healthy",
+                    "macro_state": "neutral",
+                },
             },
             indent=2,
             sort_keys=True,
@@ -169,6 +189,16 @@ def test_paper_lane_uses_exact_governed_orion_snapshot(tmp_path: Path) -> None:
     assert plan["cash_target_weight"] == pytest.approx(0.05)
     assert plan["strategy_identity_validation"]["status"] == "PASS"
     assert plan["execution_lane"] == "paper"
+    market_state = plan["risk_controls"]["market_state"]
+    assert market_state["observed_state"] == "RISK_ON_TRENDING"
+    assert market_state["market_state_id"].startswith(
+        "market:2026-06-22:daily_snapshot:"
+    )
+    assert len(market_state["source_artifact_sha256"]) == 64
+    assert (
+        plan["approved_execution_package"]["constraints"]["market_state"]
+        == market_state
+    )
     assert "ALPACA_PAPER=1" in plan["required_dry_run_command"]
     assert "ALPACA_BASE_URL=https://paper-api.alpaca.markets" in plan["required_dry_run_command"]
     assert "ALPACA_BASE_URL=https://api.alpaca.markets" not in plan["required_dry_run_command"]
@@ -265,6 +295,116 @@ def test_paper_lane_skips_current_preclose_reporting_snapshot(
         ]
         == policy
     )
+
+
+@pytest.mark.parametrize(
+    "snapshot_mutation,error_fragment",
+    [
+        (None, "daily_snapshot.json is missing"),
+        ({"asof": "2026-08-10 00:00:00", "regime_summary": {}}, "date does not match"),
+        ({"asof": "2026-08-11 00:00:00"}, "lacks regime_summary"),
+        (
+            {
+                "asof": "2026-08-11 00:00:00",
+                "regime_summary": {"composite_regime": "unknown"},
+            },
+            "lacks a usable composite regime",
+        ),
+    ],
+)
+def test_paper_lane_fails_closed_on_invalid_governed_market_state(
+    tmp_path: Path,
+    snapshot_mutation: dict[str, object] | None,
+    error_fragment: str,
+) -> None:
+    trade_date = "2026-08-11"
+    payload_path = _bundle(tmp_path, signals=[], trade_date=trade_date)
+    snapshot_path = payload_path.with_name("daily_snapshot.json")
+    if snapshot_mutation is None:
+        snapshot_path.unlink()
+    else:
+        snapshot_path.write_text(
+            json.dumps(snapshot_mutation, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    plan = _build(
+        tmp_path,
+        payload_path,
+        prices={},
+        approved_sleeve="caerus_orion",
+        lane="paper",
+        shadow_root=tmp_path / "outputs" / "shadow_candidates",
+    )
+
+    assert plan["status"] == "BLOCKED"
+    assert plan["reason_code"] == "paper_governed_market_state_invalid"
+    assert error_fragment in plan["block_diagnostics"]["error"]
+
+
+def test_paper_market_state_identity_is_idempotent_and_source_sensitive(
+    tmp_path: Path,
+) -> None:
+    trade_date = "2026-08-11"
+    payload_path = _bundle(tmp_path, signals=[], trade_date=trade_date)
+    _orion_shadow(tmp_path, trade_date=trade_date)
+    kwargs = dict(
+        prices={
+            "AAPL": 100.0,
+            "MSFT": 200.0,
+            "JNJ": 150.0,
+            "PNC": 170.0,
+            "SPG": 180.0,
+        },
+        approved_sleeve="caerus_orion",
+        lane="paper",
+        shadow_root=tmp_path / "outputs" / "shadow_candidates",
+    )
+    first = _build(tmp_path, payload_path, **kwargs)
+    repeated = _build(tmp_path, payload_path, **kwargs)
+    first_state = first["risk_controls"]["market_state"]
+    repeated_state = repeated["risk_controls"]["market_state"]
+    assert repeated_state == first_state
+    assert (
+        repeated["approved_execution_package"]["content_hash"]
+        == first["approved_execution_package"]["content_hash"]
+    )
+
+    snapshot_path = payload_path.with_name("daily_snapshot.json")
+    changed_snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    changed_snapshot["regime_summary"]["composite_regime"] = "high_volatility"
+    snapshot_path.write_text(
+        json.dumps(changed_snapshot, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    changed = _build(tmp_path, payload_path, **kwargs)
+    changed_state = changed["risk_controls"]["market_state"]
+    assert changed_state["observed_state"] == "HIGH_VOLATILITY"
+    assert changed_state["market_state_id"] != first_state["market_state_id"]
+    assert (
+        changed["approved_execution_package"]["content_hash"]
+        != first["approved_execution_package"]["content_hash"]
+    )
+
+
+def test_paper_market_state_rejects_missing_precompute_run_lineage(
+    tmp_path: Path,
+) -> None:
+    payload_path = _bundle(tmp_path, signals=[], trade_date="2026-08-11")
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload.pop("run_id")
+    payload_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+
+    plan = _build(
+        tmp_path,
+        payload_path,
+        prices={},
+        approved_sleeve="caerus_orion",
+        lane="paper",
+        shadow_root=tmp_path / "outputs" / "shadow_candidates",
+    )
+    assert plan["status"] == "BLOCKED"
+    assert plan["reason_code"] == "paper_governed_market_state_invalid"
+    assert "stable run_id lineage" in plan["block_diagnostics"]["error"]
 
 
 def test_paper_lane_rejects_provisional_previous_session_snapshot(
