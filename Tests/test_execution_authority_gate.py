@@ -51,6 +51,53 @@ def test_approved_execution_package_is_the_only_source_on_migrated_path():
     assert meta["target_cash_weight"] == 0.8
 
 
+def test_broker_authoritative_price_cannot_be_overwritten_by_package_mark():
+    rows = [{"symbol": "AAPL", "target_weight": 0.2, "price": 100.0}]
+    evidence = build_evidence_package(
+        package_id="evidence:broker-price",
+        trade_date="2026-08-07",
+        source_refs=["signals.json"],
+        observations=rows,
+    )
+    decision = build_decision_package(
+        package_id="decision:broker-price",
+        trade_date="2026-08-07",
+        evidence=evidence,
+        target_rows=rows,
+        target_cash_weight=0.8,
+        source_refs=["signals.json"],
+    )
+    risk = build_risk_package(
+        package_id="risk:broker-price",
+        decision=decision,
+        approved_target_rows=rows,
+        approved_cash_weight=0.8,
+        constraints={},
+        source_refs=["decision:decision:broker-price"],
+    )
+    request = ExecutionRequest(
+        holdings=pd.DataFrame(columns=["ticker", "shares"]),
+        targets=None,
+        prices=pd.Series({"AAPL": 50.0}),
+        total_equity=1000.0,
+        starting_cash=1000.0,
+        target_cash_weight=0.0,
+        planning_account={"cash": 1000.0, "equity": 1000.0},
+        run_id="broker-authoritative-price",
+        price_basis="timestamped_alpaca_latest_trade_at_authorization",
+        approved_execution_package=execution_package_from_risk(risk).to_dict(),
+    )
+
+    trades, meta = compute_transition_trades(request=request, config=_config())
+
+    assert list(trades["ticker"]) == ["AAPL"]
+    assert list(trades["shares"]) == [4.0]
+    assert list(trades["price"]) == [50.0]
+    assert list(trades["notional"]) == [200.0]
+    assert meta["price_basis"] == "timestamped_alpaca_latest_trade_at_authorization"
+    assert meta["broker_authoritative_prices"] is True
+
+
 @pytest.mark.parametrize("package", [{}, {"schema_version": "wrong"}, {"schema_version": "caerus.execution.v1", "approved_target_rows": []}])
 def test_migrated_path_fails_closed_for_malformed_package(package):
     request = ExecutionRequest(

@@ -7,7 +7,7 @@ import math
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time as datetime_time, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -495,6 +495,69 @@ class AlpacaBroker:
         )
         return out
 
+    def get_market_session_calendar(self, trade_date: str) -> Dict[str, Any]:
+        """Return Alpaca's authoritative open/close for one market date."""
+
+        try:
+            requested_date = datetime.fromisoformat(str(trade_date)).date()
+        except ValueError as exc:
+            raise RuntimeError("Alpaca calendar trade date is invalid") from exc
+        try:
+            from alpaca.trading.requests import GetCalendarRequest
+
+            rows = self.trading_client.get_calendar(
+                GetCalendarRequest(start=requested_date, end=requested_date)
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Alpaca market-calendar read failed: {_safe_str(exc)}"
+            ) from exc
+        if not isinstance(rows, (list, tuple)) or len(rows) != 1:
+            raise RuntimeError(
+                "Alpaca market calendar did not return exactly one session"
+            )
+        row = rows[0]
+        raw = _as_dict(row)
+        returned_date = raw.get("date") or getattr(row, "date", None)
+        if str(returned_date) != requested_date.isoformat():
+            raise RuntimeError("Alpaca market-calendar date does not match request")
+        open_at = raw.get("open") or getattr(row, "open", None)
+        close_at = raw.get("close") or getattr(row, "close", None)
+        et = ZoneInfo("America/New_York")
+
+        def normalize_bound(value: Any) -> datetime:
+            # alpaca-py 0.43.2 currently returns naive datetimes, but accepting
+            # its documented date+time representation as well keeps the
+            # adapter robust across SDK serialization variants.
+            if isinstance(value, datetime):
+                combined = value
+            elif isinstance(value, datetime_time):
+                combined = datetime.combine(requested_date, value)
+            else:
+                raise RuntimeError(
+                    "Alpaca market-calendar session bounds are malformed"
+                )
+            return (
+                combined.replace(tzinfo=et)
+                if combined.tzinfo is None
+                else combined.astimezone(et)
+            )
+
+        open_et = normalize_bound(open_at)
+        close_et = normalize_bound(close_at)
+        if (
+            open_et.date() != requested_date
+            or close_et.date() != requested_date
+            or close_et <= open_et
+        ):
+            raise RuntimeError("Alpaca market-calendar session bounds are invalid")
+        return {
+            "calendar": "Alpaca",
+            "trade_date": requested_date.isoformat(),
+            "session_open_et": open_et.isoformat(),
+            "session_close_et": close_et.isoformat(),
+        }
+
     def get_positions(self) -> List[Dict[str, Any]]:
         positions = self.trading_client.get_all_positions()
         return [_normalize_position_obj(p) for p in positions]
@@ -535,6 +598,11 @@ class AlpacaBroker:
         for symbol in normalized:
             trade = payload.get(symbol)
             raw = _as_dict(trade) if trade is not None else {}
+            provider_symbol = _safe_str(
+                raw.get("symbol")
+                or raw.get("S")
+                or getattr(trade, "symbol", None)
+            ).strip().upper()
             price = raw.get("price") or raw.get("p") or getattr(trade, "price", None)
             timestamp = (
                 raw.get("timestamp")
@@ -542,11 +610,146 @@ class AlpacaBroker:
                 or getattr(trade, "timestamp", None)
             )
             result[symbol] = {
-                "symbol": symbol,
+                "symbol": provider_symbol,
                 "price": _safe_str(price),
                 "timestamp": _safe_str(timestamp),
                 "feed": "IEX",
             }
+        return result
+
+    def get_session_final_bars(
+        self,
+        symbols: List[str],
+        *,
+        session_open_et: datetime,
+        session_close_et: datetime,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Return each symbol's final regular-session one-minute IEX bar.
+
+        Alpaca applies its bar-eligibility rules when forming the close, so this
+        avoids treating a raw odd-lot or contingent print as the Decision mark.
+        The exact final minute is queried in one batch with no global row limit;
+        the authorizer independently validates every returned interval.
+        """
+
+        normalized = sorted(
+            {
+                str(symbol or "").strip().upper()
+                for symbol in symbols
+                if str(symbol or "").strip()
+            }
+        )
+        if not normalized:
+            return {}
+        if session_open_et.tzinfo is None or session_close_et.tzinfo is None:
+            raise RuntimeError("session-final bar bounds must be timezone-aware")
+        if session_close_et <= session_open_et:
+            raise RuntimeError("session-final bar bounds are invalid")
+        cfg = load_alpaca_env()
+        try:
+            from alpaca.common.enums import Sort, SupportedCurrencies
+            from alpaca.data.enums import Adjustment, DataFeed
+            from alpaca.data.historical import StockHistoricalDataClient
+            from alpaca.data.requests import StockBarsRequest
+            from alpaca.data.timeframe import TimeFrame
+
+            client = StockHistoricalDataClient(
+                api_key=cfg.key_id,
+                secret_key=cfg.secret_key,
+            )
+            query_start = session_close_et - timedelta(minutes=1)
+            query_end = session_close_et - timedelta(microseconds=1)
+            if query_start < session_open_et:
+                raise RuntimeError("session-final bar interval precedes session open")
+            response = client.get_stock_bars(
+                StockBarsRequest(
+                    symbol_or_symbols=normalized,
+                    timeframe=TimeFrame.Minute,
+                    start=query_start,
+                    end=query_end,
+                    sort=Sort.DESC,
+                    feed=DataFeed.IEX,
+                    adjustment=Adjustment.RAW,
+                    asof=session_close_et.date().isoformat(),
+                    currency=SupportedCurrencies.USD,
+                )
+            )
+            payload = getattr(response, "data", response)
+            if not isinstance(payload, dict):
+                try:
+                    payload = dict(payload)
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Alpaca session-final-bar response is malformed"
+                    ) from exc
+            result: Dict[str, Dict[str, Any]] = {}
+            for symbol in normalized:
+                rows: Any = payload.get(symbol, [])
+                if rows is None:
+                    rows = []
+                if not isinstance(rows, (list, tuple)):
+                    try:
+                        rows = list(rows)
+                    except Exception:
+                        rows = [rows]
+                matching: list[tuple[datetime, Any, dict[str, Any]]] = []
+                for trade in rows:
+                    raw = _as_dict(trade)
+                    provider_symbol = _safe_str(
+                        raw.get("symbol")
+                        or raw.get("S")
+                        or getattr(trade, "symbol", None)
+                    ).strip().upper()
+                    if provider_symbol != symbol:
+                        continue
+                    close = raw.get("close")
+                    if close is None:
+                        close = raw.get("c")
+                    if close is None:
+                        close = getattr(trade, "close", None)
+                    timestamp = (
+                        raw.get("timestamp")
+                        or raw.get("t")
+                        or getattr(trade, "timestamp", None)
+                    )
+                    try:
+                        parsed = datetime.fromisoformat(
+                            _safe_str(timestamp).replace("Z", "+00:00")
+                        )
+                    except ValueError:
+                        continue
+                    if parsed.tzinfo is None:
+                        continue
+                    parsed_et = parsed.astimezone(session_close_et.tzinfo)
+                    if parsed_et != query_start:
+                        continue
+                    matching.append((parsed_et, close, raw))
+                if len(matching) != 1:
+                    continue
+                bar_start, close, raw = matching[0]
+                result[symbol] = {
+                    "symbol": symbol,
+                    "price": _safe_str(close),
+                    "close": _safe_str(close),
+                    "bar_start": bar_start.isoformat(),
+                    "bar_end_exclusive": session_close_et.isoformat(),
+                    "open": _safe_str(raw.get("open") or raw.get("o")),
+                    "high": _safe_str(raw.get("high") or raw.get("h")),
+                    "low": _safe_str(raw.get("low") or raw.get("l")),
+                    "volume": _safe_str(raw.get("volume") or raw.get("v")),
+                    "trade_count": _safe_str(
+                        raw.get("trade_count") or raw.get("n")
+                    ),
+                    "vwap": _safe_str(raw.get("vwap") or raw.get("vw")),
+                    "timeframe": "1Min",
+                    "feed": "IEX",
+                    "adjustment": "raw",
+                    "currency": "USD",
+                }
+        except Exception as exc:
+            raise RuntimeError(
+                f"Alpaca session-final-bar read failed: {_safe_str(exc)}"
+            ) from exc
         return result
 
     def get_asset(self, symbol: str) -> Optional[Dict[str, Any]]:

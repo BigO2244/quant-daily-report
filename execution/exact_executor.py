@@ -37,18 +37,25 @@ from core.live_pilot_guardrails import (
 from core.paper_drill_epoch import claim_namespace, plan_drill_epoch, scoped_wal_root
 from paper.trading_calendar import ET_TZ, market_session_status
 from core.submission_wal import (
+    BrokerOrderEvidence,
     OrderIntent,
     ResolutionState,
     WalPersistenceError,
     append_resolution,
+    broker_observation_detail,
+    canonical_broker_fill_evidence,
+    economic_reconciliation_proof,
     intent_path,
     new_resolution,
     prepare_order_intent,
-    unresolved_intent_requires_lookup,
+    read_resolutions,
+    unresolved_foreign_intent_client_ids,
+    validate_broker_order_evidence,
 )
 
 
 _PLAN_CLAIM_SCHEMA_VERSION = "caerus.exact_execution_plan_claim.v1"
+_WAL_BASE_CLAIM_SCHEMA_VERSION = "caerus.submission_wal_base_claim.v1"
 _ACCOUNT_AUTHORITY_ROOT_ENV = "CAERUS_EXACT_ACCOUNT_AUTHORITY_ROOT"
 _DEFAULT_ACCOUNT_AUTHORITY_ROOT = (
     Path(__file__).resolve().parents[1]
@@ -102,6 +109,83 @@ def _exact_market_is_open(
             cutoff_time_et="16:00",
         ).is_open_now
     )
+
+
+def _execution_clock(now_et: dt.datetime | None) -> dt.datetime:
+    current = now_et or dt.datetime.now(ET_TZ)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=ET_TZ)
+    return current.astimezone(ET_TZ)
+
+
+def _open_decision_prices_fresh_at(
+    plan: ExactExecutionPlan,
+    *,
+    now_et: dt.datetime | None,
+) -> tuple[bool, str]:
+    """Validate sealed open-session pricing at a submission boundary.
+
+    Direct/historical exact plans with another declared price basis retain
+    their existing contract. Plans produced by the governed live authorizer
+    must carry its complete timestamped quote evidence and every new intent is
+    forbidden once that evidence exceeds the sealed freshness policy.
+    """
+
+    basis = str(plan.market_state.get("pricing_basis") or "").strip()
+    if basis != "timestamped_alpaca_latest_trade_at_authorization":
+        return True, "not_applicable_non_live_quote_basis"
+    evidence = plan.market_state.get("quote_evidence")
+    if not isinstance(evidence, Mapping):
+        return False, "missing_quote_evidence"
+    if str(evidence.get("pricing_basis") or "").strip() != basis:
+        return False, "quote_evidence_basis_mismatch"
+    if evidence.get("market_closed_at_authorization") is not False:
+        return False, "open_quote_evidence_market_state_mismatch"
+    if evidence.get("new_order_submission_allowed_at_authorization") is not True:
+        return False, "open_quote_evidence_submission_authority_missing"
+    max_age = _finite(evidence.get("max_age_seconds"))
+    raw_quotes = evidence.get("quotes")
+    if max_age is None or max_age <= 0 or not isinstance(raw_quotes, (list, tuple)):
+        return False, "quote_freshness_policy_invalid"
+    required_symbols = {
+        str(row.get("symbol") or "").strip().upper()
+        for row in [
+            *plan.starting_positions,
+            *plan.expected_posttrade_positions,
+            *plan.orders,
+        ]
+        if str(row.get("symbol") or "").strip()
+    }
+    observed_symbols: set[str] = set()
+    current = _execution_clock(now_et)
+    for raw in raw_quotes:
+        if not isinstance(raw, Mapping):
+            return False, "quote_evidence_row_malformed"
+        symbol = str(raw.get("symbol") or "").strip().upper()
+        if not symbol or symbol in observed_symbols:
+            return False, "quote_evidence_symbols_invalid"
+        try:
+            timestamp = dt.datetime.fromisoformat(
+                str(raw.get("timestamp") or "").replace("Z", "+00:00")
+            )
+        except ValueError:
+            return False, f"quote_timestamp_invalid:{symbol}"
+        if timestamp.tzinfo is None:
+            return False, f"quote_timestamp_timezone_missing:{symbol}"
+        age = (
+            current.astimezone(dt.timezone.utc)
+            - timestamp.astimezone(dt.timezone.utc)
+        ).total_seconds()
+        if age < -5.0 or age > max_age:
+            return False, f"quote_stale_at_submission_boundary:{symbol}"
+        observed_symbols.add(symbol)
+    # The authorizer prices all governed target symbols, including names whose
+    # whole-share target rounds to no order. Those additional sealed rows are
+    # legitimate and are still freshness-checked above; every held/requested
+    # order symbol must be covered.
+    if not required_symbols.issubset(observed_symbols):
+        return False, "quote_evidence_symbol_coverage_mismatch"
+    return True, "fresh"
 
 
 def _canonical_json(payload: Mapping[str, Any]) -> bytes:
@@ -274,6 +358,169 @@ def _ensure_plan_claim(
     return claim_path
 
 
+def _ensure_wal_base_claim(
+    authority_root: Path | str,
+    *,
+    trade_date: str,
+    account_id_hash: str,
+    base_wal_root: Path | str,
+    create: bool,
+) -> Path | None:
+    """Bind one canonical WAL base to an account/date across all epochs.
+
+    Epoch claims are intentionally distinct, so their per-epoch claim files
+    cannot by themselves prevent a caller from moving the WAL base directory.
+    This date-wide immutable claim closes that escape hatch while the global
+    account/date mutex is held.
+    """
+
+    claim_path = (
+        _account_date_root(
+            authority_root,
+            trade_date=trade_date,
+            account_id_hash=account_id_hash,
+        )
+        / "submission_wal_base_claim.json"
+    )
+    identity = {
+        "schema_version": _WAL_BASE_CLAIM_SCHEMA_VERSION,
+        "trade_date": trade_date,
+        "account_scope": "PAPER",
+        "account_id_hash": account_id_hash,
+        "submission_wal_base_root": str(
+            Path(base_wal_root).expanduser().resolve()
+        ),
+    }
+    if claim_path.exists():
+        try:
+            existing = json.loads(claim_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise PlanClaimError(f"wal_base_claim_integrity_failed:{exc}") from exc
+        if not isinstance(existing, Mapping):
+            raise PlanClaimError("wal_base_claim_integrity_failed:not_an_object")
+        if existing.get("content_hash") != _claim_hash(existing):
+            raise PlanClaimError(
+                "wal_base_claim_integrity_failed:content_hash_mismatch"
+            )
+        if any(existing.get(key) != value for key, value in identity.items()):
+            raise PlanClaimError("submission_wal_base_conflicts_with_account_date")
+        return claim_path
+    if not create:
+        return None
+    payload = {**identity, "claimed_at": _now()}
+    payload["content_hash"] = _claim_hash(payload)
+    try:
+        claim_path.parent.mkdir(parents=True, exist_ok=True)
+        serialized = json.dumps(
+            payload,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        ) + "\n"
+        with claim_path.open("x", encoding="utf-8") as handle:
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError:
+        return _ensure_wal_base_claim(
+            authority_root,
+            trade_date=trade_date,
+            account_id_hash=account_id_hash,
+            base_wal_root=base_wal_root,
+            create=create,
+        )
+    except OSError as exc:
+        raise PlanClaimError(f"wal_base_claim_persistence_failed:{exc}") from exc
+    try:
+        directory_fd = os.open(str(claim_path.parent), os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as exc:
+        raise PlanClaimError(f"wal_base_claim_persistence_failed:{exc}") from exc
+    return claim_path
+
+
+def _validate_plan_claim_epoch_order(
+    authority_root: Path | str,
+    *,
+    plan: ExactExecutionPlan,
+) -> None:
+    """Reject an epoch older than any immutable account/date plan claim.
+
+    WAL-only ordering misses authorized no-trade epochs because they correctly
+    create no order intent.  Plan claims cover both trading and zero-order
+    decisions and therefore define the complete governed epoch sequence.
+    """
+
+    date_root = _account_date_root(
+        authority_root,
+        trade_date=plan.trade_date,
+        account_id_hash=plan.account_id_hash,
+    )
+    if not date_root.exists():
+        return
+    current_epoch = str(plan_drill_epoch(plan) or "")
+    candidates = [date_root / "plan_claim.json"]
+    epoch_root = date_root / "epochs"
+    if epoch_root.exists():
+        candidates.extend(sorted(epoch_root.glob("*/plan_claim.json")))
+    for claim_path in candidates:
+        if not claim_path.exists():
+            continue
+        try:
+            existing = json.loads(claim_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise PlanClaimError(f"plan_claim_integrity_failed:{exc}") from exc
+        if not isinstance(existing, Mapping):
+            raise PlanClaimError("plan_claim_integrity_failed:not_an_object")
+        if existing.get("content_hash") != _claim_hash(existing):
+            raise PlanClaimError(
+                "plan_claim_integrity_failed:content_hash_mismatch"
+            )
+        if (
+            existing.get("schema_version") != _PLAN_CLAIM_SCHEMA_VERSION
+            or str(existing.get("trade_date") or "") != plan.trade_date
+            or str(existing.get("account_scope") or "") != "PAPER"
+            or str(existing.get("account_id_hash") or "") != plan.account_id_hash
+            or not str(existing.get("plan_id") or "").strip()
+            or not str(existing.get("plan_hash") or "").strip()
+            or not str(existing.get("submission_wal_root") or "").strip()
+        ):
+            raise PlanClaimError("plan_claim_integrity_failed:lineage_mismatch")
+        relative = claim_path.relative_to(date_root)
+        if relative.parts == ("plan_claim.json",):
+            claimed_epoch = ""
+        elif (
+            len(relative.parts) == 3
+            and relative.parts[0] == "epochs"
+            and relative.parts[2] == "plan_claim.json"
+        ):
+            claimed_epoch = relative.parts[1]
+            try:
+                parsed_epoch = dt.datetime.strptime(
+                    claimed_epoch,
+                    "%Y-%m-%dT%H%MET",
+                )
+            except ValueError as exc:
+                raise PlanClaimError(
+                    "plan_claim_integrity_failed:invalid_epoch_namespace"
+                ) from exc
+            if parsed_epoch.date().isoformat() != plan.trade_date:
+                raise PlanClaimError(
+                    "plan_claim_integrity_failed:epoch_date_mismatch"
+                )
+        else:
+            raise PlanClaimError(
+                "plan_claim_integrity_failed:invalid_namespace"
+            )
+        if (not current_epoch and claimed_epoch) or (
+            current_epoch and claimed_epoch and claimed_epoch > current_epoch
+        ):
+            raise PlanClaimError("paper drill epoch order is not monotonic")
+
+
 @dataclass(frozen=True)
 class ExactExecutionOutcome:
     plan_id_received: str
@@ -384,11 +631,15 @@ def _is_rejected(row: Mapping[str, Any]) -> bool:
 
 
 def _filled_quantity(row: Mapping[str, Any]) -> float:
-    quantity = _finite(row.get("filled_qty") or row.get("filled_quantity"))
+    if "filled_qty" in row:
+        raw_quantity = row.get("filled_qty")
+    elif "filled_quantity" in row:
+        raw_quantity = row.get("filled_quantity")
+    else:
+        raw_quantity = None
+    quantity = _finite(raw_quantity)
     if quantity is not None and quantity > 0:
         return quantity
-    if _is_filled(row):
-        return float(_finite(row.get("quantity") or row.get("qty")) or 0.0)
     return 0.0
 
 
@@ -413,6 +664,82 @@ def _notional(order: Mapping[str, Any]) -> float | None:
     return quantity * price
 
 
+def _fill_risk_violation(
+    *,
+    plan: ExactExecutionPlan,
+    observed_rows: Sequence[Mapping[str, Any]],
+    runtime_cap: float | None,
+    runtime_cap_client_ids: set[str] | None = None,
+    allow_missing_slippage_authority: bool = False,
+) -> str | None:
+    """Return a sealed slippage/capital breach in observed fill economics."""
+
+    tolerance_bps = _finite(
+        plan.constraints.get("max_adverse_fill_slippage_bps")
+    )
+    if tolerance_bps is None and allow_missing_slippage_authority:
+        # Compatibility applies only to lookup/reconciliation of orders whose
+        # intents were durable before this requirement existed.  Callers must
+        # still block every new intent for such a plan.
+        pass
+    elif tolerance_bps is None or tolerance_bps < 0 or tolerance_bps > 100.0:
+        return "exact_fill_slippage_authority_invalid"
+    orders_by_client = {
+        str(order["client_order_id"]): order for order in plan.orders
+    }
+    seen: set[str] = set()
+    actual_buy_notional = 0.0
+    runtime_buy_notional = 0.0
+    for observed in observed_rows:
+        client_order_id = str(observed.get("client_order_id") or "").strip()
+        order = orders_by_client.get(client_order_id)
+        if not client_order_id or client_order_id in seen or order is None:
+            return "exact_fill_evidence_identity_invalid"
+        seen.add(client_order_id)
+        quantity = _filled_quantity(observed)
+        if quantity <= 1e-12:
+            continue
+        fill_price = _finite(
+            observed.get("filled_avg_price") or observed.get("fill_price")
+        )
+        reference_price = _finite(
+            order.get("expected_price") or order.get("price")
+        )
+        if (
+            fill_price is None
+            or fill_price <= 0
+            or reference_price is None
+            or reference_price <= 0
+        ):
+            return f"exact_fill_price_evidence_invalid:{client_order_id}"
+        side = str(order["side"]).upper()
+        adverse_bps = (
+            (fill_price / reference_price - 1.0) * 10000.0
+            if side == "BUY"
+            else (1.0 - fill_price / reference_price) * 10000.0
+        )
+        if tolerance_bps is not None and adverse_bps > tolerance_bps + 1e-7:
+            return f"exact_adverse_fill_slippage_exceeded:{client_order_id}"
+        if side == "BUY":
+            actual_buy_notional += quantity * fill_price
+            if (
+                runtime_cap_client_ids is not None
+                and client_order_id in runtime_cap_client_ids
+            ):
+                runtime_buy_notional += quantity * fill_price
+    sealed_cap = _finite(plan.constraints.get("capital_cap_usd"))
+    if sealed_cap is None or sealed_cap < 0:
+        return "exact_fill_cap_authority_invalid"
+    if actual_buy_notional > sealed_cap + 1e-9:
+        return "exact_actual_buy_fill_notional_exceeds_cap"
+    if runtime_cap_client_ids:
+        if runtime_cap is None or runtime_cap < 0:
+            return "exact_fill_runtime_cap_unavailable"
+        if runtime_buy_notional > runtime_cap + 1e-9:
+            return "exact_actual_buy_fill_notional_exceeds_runtime_cap"
+    return None
+
+
 def _broker_lookup(broker: Any, client_order_id: str) -> Mapping[str, Any] | None:
     lookup = getattr(broker, "find_order_by_client_id", None)
     if not callable(lookup):
@@ -423,6 +750,40 @@ def _broker_lookup(broker: Any, client_order_id: str) -> Mapping[str, Any] | Non
     if not isinstance(result, Mapping):
         raise RuntimeError("broker client-order-id lookup returned malformed data")
     return dict(result)
+
+
+def _validated_broker_evidence(
+    *,
+    wal_root: Path | str,
+    intent: OrderIntent,
+    observed: Mapping[str, Any],
+) -> BrokerOrderEvidence:
+    events = read_resolutions(
+        wal_root,
+        trade_date=intent.trade_date,
+        client_order_id=intent.client_order_id,
+    )
+    return validate_broker_order_evidence(
+        intent,
+        observed,
+        resolution_events=events,
+    )
+
+
+def _broker_open_order_state(broker: Any) -> tuple[bool, str]:
+    """Return whether broker open-order truth permits a new WAL intent."""
+
+    try:
+        rows = broker.list_orders(status="open", limit=100)
+    except Exception:
+        return False, "lookup_failed"
+    if not isinstance(rows, list) or any(
+        not isinstance(row, Mapping) for row in rows
+    ):
+        return False, "response_malformed"
+    if rows:
+        return False, "unresolved_order"
+    return True, "clear"
 
 
 def _append_resolution(
@@ -445,6 +806,46 @@ def _append_resolution(
     )
 
 
+def _append_broker_observation(
+    wal_root: Path | str,
+    *,
+    intent: OrderIntent,
+    evidence: BrokerOrderEvidence,
+) -> None:
+    """Durably seal every validated broker fill observation."""
+
+    _append_resolution(
+        wal_root,
+        intent=intent,
+        state=ResolutionState.BROKER_OBSERVED,
+        broker_order_id=evidence.broker_order_id,
+        detail=broker_observation_detail(intent, evidence),
+    )
+
+
+def _merge_broker_evidence_with_order(
+    observed: Mapping[str, Any],
+    order: Mapping[str, Any],
+    *,
+    broker_order_id: str | None = None,
+    recovered: bool = False,
+) -> dict[str, Any]:
+    """Overlay sealed order economics without losing the broker's identifier."""
+
+    canonical_broker_id = str(
+        broker_order_id
+        or observed.get("id")
+        or observed.get("order_id")
+        or ""
+    ).strip()
+    row = {**dict(observed), **dict(order)}
+    if canonical_broker_id:
+        row["id"] = canonical_broker_id
+    if recovered:
+        row["recovered_by_client_order_id"] = True
+    return row
+
+
 def _submit_one(
     *,
     plan: ExactExecutionPlan,
@@ -453,31 +854,42 @@ def _submit_one(
     env: Mapping[str, str],
     wal_root: Path | str,
     attempt_id: str,
+    durable_intent: OrderIntent | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Return broker row or an explicit ambiguity reason. Never resubmit WAL rows."""
     order_type = str(order["order_type"]).lower()
-    intent = OrderIntent(
-        trade_date=plan.trade_date,
-        plan_id=plan.plan_id,
-        plan_hash=plan.content_hash,
-        attempt_id=attempt_id,
-        order_id=str(order["order_id"]),
-        client_order_id=str(order["client_order_id"]),
-        symbol=str(order["symbol"]),
-        side=str(order["side"]),
-        quantity=float(order["quantity"]),
-        order_type=order_type,
-        created_at=_now(),
-        limit_price=_finite(order.get("limit_price")),
-        stop_price=_finite(order.get("stop_price")),
-        expected_price=_finite(order.get("expected_price") or order.get("price")),
-        notional=_notional(order),
-        sleeve=str(order.get("sleeve") or "caerus_orion"),
-        time_in_force=str(order["time_in_force"]),
-    )
-    prepared = prepare_order_intent(wal_root, intent)
-    durable = prepared.intent
-    if not prepared.broker_submission_allowed:
+    if durable_intent is None:
+        intent = OrderIntent(
+            trade_date=plan.trade_date,
+            plan_id=plan.plan_id,
+            plan_hash=plan.content_hash,
+            attempt_id=attempt_id,
+            order_id=str(order["order_id"]),
+            client_order_id=str(order["client_order_id"]),
+            symbol=str(order["symbol"]),
+            side=str(order["side"]),
+            quantity=float(order["quantity"]),
+            order_type=order_type,
+            created_at=_now(),
+            limit_price=_finite(order.get("limit_price")),
+            stop_price=_finite(order.get("stop_price")),
+            expected_price=_finite(order.get("expected_price") or order.get("price")),
+            notional=_notional(order),
+            sleeve=str(order.get("sleeve") or "caerus_orion"),
+            starting_state_hash=plan.starting_state_hash,
+            paper_drill_epoch=str(plan_drill_epoch(plan) or ""),
+            time_in_force=str(order["time_in_force"]),
+        )
+        prepared = prepare_order_intent(wal_root, intent)
+        durable = prepared.intent
+        broker_submission_allowed = prepared.broker_submission_allowed
+    else:
+        # A predeployment v1 intent may omit lineage fields added later.  Its
+        # content hash was already validated when loaded; reuse that immutable
+        # object for lookup-only recovery instead of attempting to rewrite it.
+        durable = durable_intent
+        broker_submission_allowed = False
+    if not broker_submission_allowed:
         try:
             recovered = _broker_lookup(broker, durable.client_order_id)
         except Exception as exc:
@@ -496,19 +908,43 @@ def _submit_one(
                 detail="restart lookup found no broker order; automatic resubmission forbidden",
             )
             return None, f"submission_unknown:{durable.client_order_id}:not_found"
-        broker_id = str(recovered.get("id") or recovered.get("order_id") or "").strip()
-        if not broker_id:
-            return None, f"submission_unknown:{durable.client_order_id}:missing_broker_id"
+        try:
+            recovered_evidence = _validated_broker_evidence(
+                wal_root=wal_root,
+                intent=durable,
+                observed=recovered,
+            )
+        except WalPersistenceError as exc:
+            _append_resolution(
+                wal_root,
+                intent=durable,
+                state=ResolutionState.SUBMISSION_UNKNOWN,
+                detail=f"restart lookup evidence invalid: {exc}",
+            )
+            return (
+                None,
+                f"submission_unknown:{durable.client_order_id}:invalid_broker_evidence",
+            )
+        _append_broker_observation(
+            wal_root,
+            intent=durable,
+            evidence=recovered_evidence,
+        )
         _append_resolution(
             wal_root,
             intent=durable,
             state=ResolutionState.RECOVERED_BY_LOOKUP,
-            broker_order_id=broker_id,
+            broker_order_id=recovered_evidence.broker_order_id,
         )
         # Broker evidence may use enum-qualified strings or alternate quantity
         # keys.  It must never overwrite the immutable exact order identity and
         # economics carried by ``order``.
-        return {**dict(recovered), **dict(order), "recovered_by_client_order_id": True}, None
+        return _merge_broker_evidence_with_order(
+            recovered,
+            order,
+            broker_order_id=recovered_evidence.broker_order_id,
+            recovered=True,
+        ), None
 
     estimate = _notional(order)
     validate_live_pilot_submission_guardrails(
@@ -549,23 +985,50 @@ def _submit_one(
         if not isinstance(result, Mapping):
             raise RuntimeError("broker submission returned malformed data")
         broker_row = dict(result)
-        broker_id = str(broker_row.get("id") or broker_row.get("order_id") or "").strip()
-        if not broker_id:
-            raise RuntimeError("broker submission response lacks order id")
+        try:
+            submitted_evidence = _validated_broker_evidence(
+                wal_root=wal_root,
+                intent=durable,
+                observed=broker_row,
+            )
+        except WalPersistenceError as exc:
+            # The broker may already have mutated, but structurally impossible
+            # evidence (identity, quantity, or limit-price violation) must never
+            # be mislabeled as a local WAL write failure or permit the next leg.
+            return (
+                _merge_broker_evidence_with_order(broker_row, order),
+                "submission_unknown:"
+                f"{durable.client_order_id}:invalid_broker_evidence:{exc}",
+            )
         state = ResolutionState.REJECTED if _is_rejected(broker_row) else ResolutionState.SUBMITTED
+        _append_broker_observation(
+            wal_root,
+            intent=durable,
+            evidence=submitted_evidence,
+        )
         _append_resolution(
             wal_root,
             intent=durable,
             state=state,
-            broker_order_id=broker_id if state is ResolutionState.SUBMITTED else None,
+            broker_order_id=(
+                submitted_evidence.broker_order_id
+                if state is ResolutionState.SUBMITTED
+                else None
+            ),
             detail=str(broker_row.get("status") or ""),
         )
-        return {**broker_row, **dict(order)}, None
+        return _merge_broker_evidence_with_order(
+            broker_row,
+            order,
+            broker_order_id=submitted_evidence.broker_order_id,
+        ), None
     except WalPersistenceError:
         # Broker may already have mutated. A missing durable resolution is always
         # ambiguous and forbids any additional order submission.
         evidence = (
-            {**broker_row, **dict(order)} if broker_row is not None else None
+            _merge_broker_evidence_with_order(broker_row, order)
+            if broker_row is not None
+            else None
         )
         return evidence, f"submission_unknown:{durable.client_order_id}:wal_resolution_failed"
     except Exception as exc:
@@ -577,22 +1040,46 @@ def _submit_one(
         else:
             detail = f"submit error={exc}; lookup did not find order"
         if recovered is not None:
-            broker_id = str(recovered.get("id") or recovered.get("order_id") or "").strip()
-            if broker_id:
+            try:
+                recovered_evidence = _validated_broker_evidence(
+                    wal_root=wal_root,
+                    intent=durable,
+                    observed=recovered,
+                )
+            except WalPersistenceError as evidence_exc:
+                detail = (
+                    f"submit error={exc}; lookup evidence invalid={evidence_exc}"
+                )
+            else:
                 try:
+                    _append_broker_observation(
+                        wal_root,
+                        intent=durable,
+                        evidence=recovered_evidence,
+                    )
                     _append_resolution(
                         wal_root,
                         intent=durable,
                         state=ResolutionState.RECOVERED_BY_LOOKUP,
-                        broker_order_id=broker_id,
+                        broker_order_id=recovered_evidence.broker_order_id,
                         detail=f"recovered after submit exception: {exc}",
                     )
                 except WalPersistenceError:
                     return (
-                        {**dict(recovered), **dict(order), "recovered_by_client_order_id": True},
+                        _merge_broker_evidence_with_order(
+                            recovered,
+                            order,
+                            broker_order_id=recovered_evidence.broker_order_id,
+                            recovered=True,
+                        ),
                         f"submission_unknown:{durable.client_order_id}:wal_resolution_failed",
                     )
-                return {**dict(recovered), **dict(order), "recovered_by_client_order_id": True}, None
+                return _merge_broker_evidence_with_order(
+                    recovered,
+                    order,
+                    broker_order_id=recovered_evidence.broker_order_id,
+                    recovered=True,
+                ), None
         try:
             _append_resolution(
                 wal_root,
@@ -623,6 +1110,160 @@ def _refresh_terminal(
         if isinstance(refreshed, Mapping):
             current.update(dict(refreshed))
     return current
+
+
+def _state_is_explained_by_fills(
+    *,
+    plan: ExactExecutionPlan,
+    observed_rows: Sequence[Mapping[str, Any]],
+    final_positions: Sequence[Mapping[str, Any]],
+    final_cash: float,
+) -> bool:
+    orders_by_client = {
+        str(order["client_order_id"]): order for order in plan.orders
+    }
+    expected_quantities = {
+        str(row["symbol"]): float(row["quantity"])
+        for row in plan.starting_positions
+    }
+    expected_cash = float(plan.starting_cash)
+    seen: set[str] = set()
+    for observed in observed_rows:
+        client_order_id = str(observed.get("client_order_id") or "").strip()
+        order = orders_by_client.get(client_order_id)
+        if not client_order_id or client_order_id in seen or order is None:
+            return False
+        seen.add(client_order_id)
+        filled_quantity = _filled_quantity(observed)
+        if filled_quantity <= 1e-12:
+            continue
+        fill_price = _finite(
+            observed.get("filled_avg_price") or observed.get("fill_price")
+        )
+        if fill_price is None or fill_price <= 0:
+            return False
+        symbol = str(order["symbol"])
+        if str(order["side"]) == "SELL":
+            expected_quantities[symbol] = (
+                expected_quantities.get(symbol, 0.0) - filled_quantity
+            )
+            expected_cash += filled_quantity * fill_price
+        else:
+            expected_quantities[symbol] = (
+                expected_quantities.get(symbol, 0.0) + filled_quantity
+            )
+            expected_cash -= filled_quantity * fill_price
+    expected_quantities = {
+        symbol: quantity
+        for symbol, quantity in expected_quantities.items()
+        if quantity > 1e-8
+    }
+    actual_quantities = {
+        str(row["symbol"]): float(row["quantity"])
+        for row in final_positions
+    }
+    if set(expected_quantities) != set(actual_quantities):
+        return False
+    if any(
+        abs(expected_quantities[symbol] - actual_quantities[symbol]) > 1e-8
+        for symbol in expected_quantities
+    ):
+        return False
+    cash_tolerance = _finite(
+        plan.constraints.get("cash_reconciliation_tolerance_usd")
+    )
+    if cash_tolerance is None or cash_tolerance < 0:
+        cash_tolerance = 0.01
+    return abs(expected_cash - float(final_cash)) <= cash_tolerance + 1e-9
+
+
+def _persist_economic_reconciliation(
+    *,
+    plan: ExactExecutionPlan,
+    wal_root: Path | str,
+    durable_intents: Sequence[OrderIntent],
+    observed_rows: Sequence[Mapping[str, Any]],
+    final_positions: Sequence[Mapping[str, Any]],
+    final_cash: float,
+    reconciliation_status: str,
+) -> None:
+    """Append one consistent account-state proof to every current intent."""
+
+    if reconciliation_status not in {
+        "CLEAN",
+        "TERMINAL_FAILURE_STATE_RECONCILED",
+    }:
+        raise WalPersistenceError("unsupported economic reconciliation status")
+    rows_by_client = {
+        str(row.get("client_order_id") or "").strip(): row
+        for row in observed_rows
+        if str(row.get("client_order_id") or "").strip()
+    }
+    if len(rows_by_client) != len(observed_rows):
+        raise WalPersistenceError("economic reconciliation broker evidence is duplicated")
+    broker_fills: list[dict[str, Any]] = []
+    for intent in durable_intents:
+        observed = rows_by_client.get(intent.client_order_id)
+        if observed is None:
+            raise WalPersistenceError(
+                "economic reconciliation lacks broker evidence for durable intent"
+            )
+        evidence = _validated_broker_evidence(
+            wal_root=wal_root,
+            intent=intent,
+            observed=observed,
+        )
+        if not evidence.terminal:
+            raise WalPersistenceError(
+                "economic reconciliation contains a nonterminal broker order"
+            )
+        broker_fills.append(canonical_broker_fill_evidence(intent, evidence))
+    if not _state_is_explained_by_fills(
+        plan=plan,
+        observed_rows=observed_rows,
+        final_positions=final_positions,
+        final_cash=final_cash,
+    ):
+        raise WalPersistenceError(
+            "economic reconciliation state is not explained by terminal fills"
+        )
+    final_state_hash = compute_starting_state_hash(final_positions, final_cash)
+    reconciled_at = _now()
+    detail = json.dumps(
+        {
+            "schema_version": (
+                "caerus.submission_wal_economic_reconciliation.v1"
+            ),
+            "plan_id": plan.plan_id,
+            "plan_hash": plan.content_hash,
+            "starting_state_hash": plan.starting_state_hash,
+            "final_state_hash": final_state_hash,
+            "reconciled_at": reconciled_at,
+            "paper_drill_epoch": str(plan_drill_epoch(plan) or ""),
+            "final_positions": [dict(row) for row in final_positions],
+            "final_cash": float(final_cash),
+            "broker_fills": sorted(
+                broker_fills,
+                key=lambda row: str(row["client_order_id"]),
+            ),
+            "reconciliation_status": reconciliation_status,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    for intent in durable_intents:
+        observed = rows_by_client[intent.client_order_id]
+        broker_order_id = str(
+            observed.get("id") or observed.get("order_id") or ""
+        ).strip()
+        _append_resolution(
+            wal_root,
+            intent=intent,
+            state=ResolutionState.ECONOMICALLY_RECONCILED,
+            broker_order_id=broker_order_id,
+            detail=detail,
+        )
 
 
 def _suppression_reason(
@@ -727,52 +1368,14 @@ def _execute_exact_plan_locked(
     """Validate and execute exactly one v3 plan, or fail closed without mutation."""
     plan = exact_execution_plan_from_dict(plan_payload, expected_account_scope="PAPER")
     epoch = plan_drill_epoch(plan)
-    base_wal_root = Path(wal_root)
+    # Normalize once and use the canonical path for every claim, scan, and
+    # write.  Otherwise aliases such as ``~/wal`` and ``/home/user/wal`` can
+    # bind the same account/date claim while writing into different trees.
+    base_wal_root = Path(wal_root).expanduser().resolve()
     wal_root = scoped_wal_root(base_wal_root, epoch)
     authority_root = _account_authority_root(env)
     if not bool(getattr(broker, "paper", False)):
         raise AuthorityContractError("exact v3 execution is PAPER-only")
-
-    # Epoch isolation never hides submission uncertainty.  A new epoch may
-    # proceed only when every intent in every other same-date namespace has a
-    # terminal durable resolution.  The current epoch is handled by the normal
-    # idempotent lookup-recovery path below.
-    if epoch:
-        try:
-            foreign_unresolved: list[str] = []
-            for candidate in base_wal_root.glob(
-                f"**/{plan.trade_date}/intents/*.json"
-            ):
-                candidate_root = candidate.parents[2]
-                if candidate_root.resolve() == Path(wal_root).resolve():
-                    continue
-                intent = OrderIntent.from_dict(
-                    json.loads(candidate.read_text(encoding="utf-8"))
-                )
-                if unresolved_intent_requires_lookup(
-                    candidate_root,
-                    trade_date=plan.trade_date,
-                    client_order_id=intent.client_order_id,
-                ):
-                    foreign_unresolved.append(intent.client_order_id)
-            if foreign_unresolved:
-                return _outcome(
-                    plan,
-                    terminal=TerminalOutcome.SYSTEM_FAILURE,
-                    status="BLOCKED",
-                    reason="prior_epoch_submission_unresolved",
-                    reconciliation="FAILED_PRE_SUBMIT",
-                    failure_class=FailureClass.STATE_FAILURE,
-                )
-        except Exception as exc:
-            return _outcome(
-                plan,
-                terminal=TerminalOutcome.SYSTEM_FAILURE,
-                status="BLOCKED",
-                reason=f"prior_epoch_wal_integrity_failed:{exc}",
-                reconciliation="FAILED_PRE_SUBMIT",
-                failure_class=FailureClass.STATE_FAILURE,
-            )
 
     max_age_raw = env.get("CAERUS_EXACT_MAX_PLAN_AGE_SECONDS", "900")
     try:
@@ -820,6 +1423,11 @@ def _execute_exact_plan_locked(
             failure_class=FailureClass.AUTHORIZATION_FAILURE,
         )
     orders_by_client = {str(order["client_order_id"]): order for order in plan.orders}
+    durable_intents_by_client = {
+        intent.client_order_id: intent for intent in durable_intents
+    }
+    durable_client_ids = {intent.client_order_id for intent in durable_intents}
+    new_intent_client_ids = set(orders_by_client) - durable_client_ids
     if durable_intents:
         if any(intent.client_order_id not in orders_by_client for intent in durable_intents):
             return _outcome(
@@ -896,26 +1504,33 @@ def _execute_exact_plan_locked(
                     reconciliation="SUBMISSION_UNKNOWN",
                     failure_class=FailureClass.BROKER_FAILURE,
                 )
+            try:
+                observed_evidence = _validated_broker_evidence(
+                    wal_root=wal_root,
+                    intent=intent,
+                    observed=observed,
+                )
+            except WalPersistenceError as exc:
+                return _outcome(
+                    plan,
+                    terminal=TerminalOutcome.SUBMISSION_UNKNOWN,
+                    status="SUBMISSION_UNKNOWN",
+                    reason=(
+                        "recovery_order_evidence_invalid:"
+                        f"{intent.client_order_id}:{exc}"
+                    ),
+                    submitted=recovered_evidence,
+                    filled=[row for row in recovered_evidence if _has_fill(row)],
+                    reconciliation="SUBMISSION_UNKNOWN",
+                    failure_class=FailureClass.STATE_FAILURE,
+                )
             recovered_row = {
                 **dict(observed),
                 **dict(order),
                 "recovered_by_client_order_id": True,
             }
             recovered_evidence.append(recovered_row)
-            broker_id = str(
-                observed.get("id") or observed.get("order_id") or ""
-            ).strip()
-            if not broker_id:
-                return _outcome(
-                    plan,
-                    terminal=TerminalOutcome.SUBMISSION_UNKNOWN,
-                    status="SUBMISSION_UNKNOWN",
-                    reason=f"recovery_order_missing_broker_id:{intent.client_order_id}",
-                    submitted=recovered_evidence,
-                    filled=[row for row in recovered_evidence if _has_fill(row)],
-                    reconciliation="SUBMISSION_UNKNOWN",
-                    failure_class=FailureClass.BROKER_FAILURE,
-                )
+            recovered_row["id"] = observed_evidence.broker_order_id
     try:
         positions, cash, current_account = _snapshot(broker)
     except Exception as exc:
@@ -932,6 +1547,7 @@ def _execute_exact_plan_locked(
             )
         raise
     current_account_id_hash = _broker_account_id_hash(current_account)
+    current_state_hash = compute_starting_state_hash(positions, cash)
     if not current_account_id_hash:
         return _outcome(
             plan,
@@ -957,6 +1573,65 @@ def _execute_exact_plan_locked(
             final_cash=cash,
             reconciliation="FAILED_PRE_SUBMIT",
             failure_class=FailureClass.AUTHORIZATION_FAILURE,
+        )
+    try:
+        _ensure_wal_base_claim(
+            authority_root,
+            trade_date=plan.trade_date,
+            account_id_hash=plan.account_id_hash,
+            base_wal_root=base_wal_root,
+            create=False,
+        )
+        _validate_plan_claim_epoch_order(authority_root, plan=plan)
+    except PlanClaimError as exc:
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="BLOCKED",
+            reason=str(exc),
+            submitted=recovered_evidence,
+            filled=[row for row in recovered_evidence if _has_fill(row)],
+            final_positions=positions,
+            final_cash=cash,
+            reconciliation="FAILED_PRE_SUBMIT",
+            failure_class=FailureClass.STATE_FAILURE,
+        )
+    # Namespace isolation never hides economic submission uncertainty. A prior
+    # filled plan clears only after its WAL carries an ordered, hash-bound
+    # economic reconciliation whose tail equals this plan's sealed starting
+    # state. During current-namespace recovery, the live snapshot may already
+    # include this plan's own fills; those are proved separately below.
+    try:
+        foreign_unresolved = unresolved_foreign_intent_client_ids(
+            base_wal_root,
+            current_wal_root=wal_root,
+            trade_date=plan.trade_date,
+            lookup_by_client_order_id=getattr(
+                broker, "find_order_by_client_id", None
+            ),
+            current_state_hash=plan.starting_state_hash,
+        )
+        if foreign_unresolved:
+            return _outcome(
+                plan,
+                terminal=TerminalOutcome.SYSTEM_FAILURE,
+                status="BLOCKED",
+                reason="prior_epoch_submission_unresolved",
+                final_positions=positions,
+                final_cash=cash,
+                reconciliation="FAILED_PRE_SUBMIT",
+                failure_class=FailureClass.STATE_FAILURE,
+            )
+    except Exception as exc:
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="BLOCKED",
+            reason=f"prior_epoch_wal_integrity_failed:{exc}",
+            final_positions=positions,
+            final_cash=cash,
+            reconciliation="FAILED_PRE_SUBMIT",
+            failure_class=FailureClass.STATE_FAILURE,
         )
     # Validate an existing canonical account/date claim before mutable broker
     # state can obscure the real authority conflict. A fresh valid plan has no
@@ -987,10 +1662,29 @@ def _execute_exact_plan_locked(
     for intent, recovered_row in zip(
         durable_intents, recovered_evidence, strict=True
     ):
+        if dry_run:
+            continue
+        existing_events = read_resolutions(
+            wal_root,
+            trade_date=intent.trade_date,
+            client_order_id=intent.client_order_id,
+        )
+        if economic_reconciliation_proof(intent, existing_events) is not None:
+            continue
         broker_id = str(
             recovered_row.get("id") or recovered_row.get("order_id") or ""
         ).strip()
         try:
+            recovered_observation = _validated_broker_evidence(
+                wal_root=wal_root,
+                intent=intent,
+                observed=recovered_row,
+            )
+            _append_broker_observation(
+                wal_root,
+                intent=intent,
+                evidence=recovered_observation,
+            )
             _append_resolution(
                 wal_root,
                 intent=intent,
@@ -1021,7 +1715,7 @@ def _execute_exact_plan_locked(
         current_account.get("portfolio_value") or current_account.get("equity")
     )
     runtime_cap, _runtime_cap_source = resolve_dynamic_cap(current_nav, env)
-    aggregate_buy_notional = sum(
+    aggregate_new_buy_notional = sum(
         float(_notional(order) or 0.0)
         for order in plan.buy_orders
         if not intent_path(
@@ -1030,6 +1724,40 @@ def _execute_exact_plan_locked(
             client_order_id=str(order["client_order_id"]),
         ).exists()
     )
+    recovered_actual_buy_notional = 0.0
+    for observed in recovered_evidence:
+        order = orders_by_client.get(
+            str(observed.get("client_order_id") or "").strip()
+        )
+        if order is None or str(order.get("side") or "").upper() != "BUY":
+            continue
+        quantity = _filled_quantity(observed)
+        fill_price = _finite(
+            observed.get("filled_avg_price") or observed.get("fill_price")
+        )
+        if quantity > 1e-12 and fill_price is not None and fill_price > 0:
+            recovered_actual_buy_notional += quantity * fill_price
+    has_new_intents = bool(new_intent_client_ids)
+    # A later runtime cap must account for BUYs already filled by this plan
+    # whenever any new intent remains.  A fully durable lookup-only recovery is
+    # exempt from a cap tightened after execution because it cannot mutate the
+    # broker again.
+    runtime_cap_client_ids = (
+        set(orders_by_client) if has_new_intents else set()
+    )
+    aggregate_runtime_buy_commitment = (
+        recovered_actual_buy_notional + aggregate_new_buy_notional
+    )
+    new_order_contract_error: str | None = None
+    if has_new_intents:
+        if str(
+            plan.constraints.get("new_order_execution_style") or ""
+        ).strip().lower() != "protective_day_limit":
+            new_order_contract_error = "exact_new_order_execution_style_invalid"
+        elif _finite(
+            plan.constraints.get("max_adverse_fill_slippage_bps")
+        ) is None:
+            new_order_contract_error = "exact_fill_slippage_authority_invalid"
     if not recovering:
         actual_state_hash = compute_starting_state_hash(positions, cash)
         if actual_state_hash != plan.starting_state_hash:
@@ -1047,55 +1775,11 @@ def _execute_exact_plan_locked(
         # A retry may continue only from the broker state mechanically explained
         # by the stable WAL orders. Resolve every prior intent before creating a
         # new one; unexplained cash/position drift blocks the remainder.
-        expected_quantities = {
-            str(row["symbol"]): float(row["quantity"])
-            for row in plan.starting_positions
-        }
-        expected_cash = float(plan.starting_cash)
-        for observed_row in recovered_evidence:
-            order = orders_by_client[str(observed_row["client_order_id"])]
-            filled_quantity = _filled_quantity(observed_row)
-            if filled_quantity > 0:
-                fill_price = _finite(
-                    observed_row.get("filled_avg_price")
-                    or observed_row.get("fill_price")
-                )
-                if fill_price is None or fill_price <= 0:
-                    return _outcome(
-                        plan,
-                        terminal=TerminalOutcome.SUBMISSION_UNKNOWN,
-                        status="SUBMISSION_UNKNOWN",
-                        reason=f"recovery_fill_economics_missing:{order['client_order_id']}",
-                        submitted=recovered_evidence,
-                        filled=[row for row in recovered_evidence if _has_fill(row)],
-                        final_positions=positions,
-                        final_cash=cash,
-                        reconciliation="SUBMISSION_UNKNOWN",
-                        failure_class=FailureClass.BROKER_FAILURE,
-                    )
-                symbol = str(order["symbol"])
-                if str(order["side"]) == "SELL":
-                    expected_quantities[symbol] = expected_quantities.get(symbol, 0.0) - filled_quantity
-                    expected_cash += filled_quantity * fill_price
-                else:
-                    expected_quantities[symbol] = expected_quantities.get(symbol, 0.0) + filled_quantity
-                    expected_cash -= filled_quantity * fill_price
-        expected_quantities = {
-            symbol: quantity
-            for symbol, quantity in expected_quantities.items()
-            if quantity > 1e-8
-        }
-        actual_quantities = {
-            str(row["symbol"]): float(row["quantity"])
-            for row in positions
-        }
-        cash_tolerance = float(
-            _finite(plan.constraints.get("cash_reconciliation_tolerance_usd"))
-            or 0.01
-        )
-        if (
-            expected_quantities != actual_quantities
-            or abs(expected_cash - cash) > cash_tolerance + 1e-9
+        if not _state_is_explained_by_fills(
+            plan=plan,
+            observed_rows=recovered_evidence,
+            final_positions=positions,
+            final_cash=cash,
         ):
             return _outcome(
                 plan,
@@ -1109,26 +1793,6 @@ def _execute_exact_plan_locked(
                 reconciliation="FAILED_PRE_SUBMIT",
                 failure_class=FailureClass.STATE_FAILURE,
             )
-        if expired_recovery and any(
-            not intent_path(
-                wal_root,
-                trade_date=plan.trade_date,
-                client_order_id=str(order["client_order_id"]),
-            ).exists()
-            for order in plan.orders
-        ):
-            return _outcome(
-                plan,
-                terminal=TerminalOutcome.SYSTEM_FAILURE,
-                status="BLOCKED",
-                reason="stale_recovery_resolved_existing_intents_new_submissions_forbidden",
-                submitted=recovered_evidence,
-                filled=[row for row in recovered_evidence if _has_fill(row)],
-                final_positions=positions,
-                final_cash=cash,
-                reconciliation="FAILED_PRE_SUBMIT",
-                failure_class=FailureClass.AUTHORIZATION_FAILURE,
-            )
 
         # Recovery must resolve every prior stable-ID order before any new WAL
         # intent can be created.  Preserve partial fills as economic evidence,
@@ -1137,24 +1801,52 @@ def _execute_exact_plan_locked(
         # completely filled.
         recovered_fills = [row for row in recovered_evidence if _has_fill(row)]
         recovered_rejections = [row for row in recovered_evidence if _is_rejected(row)]
-        if recovered_rejections:
-            rejected_row = recovered_rejections[0]
-            rejected_order = orders_by_client[str(rejected_row["client_order_id"])]
+        recovered_risk_violation = _fill_risk_violation(
+            plan=plan,
+            observed_rows=recovered_evidence,
+            runtime_cap=runtime_cap,
+            runtime_cap_client_ids=runtime_cap_client_ids,
+            allow_missing_slippage_authority=(
+                "max_adverse_fill_slippage_bps" not in plan.constraints
+            ),
+        )
+        if recovered_risk_violation is not None:
+            proof_suffix = ""
+            if not dry_run and all(
+                _is_filled(row) or _is_rejected(row)
+                for row in recovered_evidence
+            ):
+                try:
+                    _persist_economic_reconciliation(
+                        plan=plan,
+                        wal_root=wal_root,
+                        durable_intents=durable_intents,
+                        observed_rows=recovered_evidence,
+                        final_positions=positions,
+                        final_cash=cash,
+                        reconciliation_status=(
+                            "TERMINAL_FAILURE_STATE_RECONCILED"
+                        ),
+                    )
+                except Exception as exc:
+                    proof_suffix = f":economic_proof_failed:{exc}"
             return _outcome(
                 plan,
                 terminal=TerminalOutcome.SYSTEM_FAILURE,
-                status="ORDER_REJECTED",
-                reason=f"exact_order_rejected:{rejected_order['order_id']}",
+                status="FAILED_RECONCILIATION",
+                reason=f"{recovered_risk_violation}{proof_suffix}",
                 submitted=recovered_evidence,
                 filled=recovered_fills,
                 rejected=recovered_rejections,
                 final_positions=positions,
                 final_cash=cash,
                 reconciliation="FAILED_RECONCILIATION",
-                failure_class=FailureClass.BROKER_FAILURE,
+                failure_class=FailureClass.RISK_FAILURE,
             )
         unresolved_recovered = [
-            row for row in recovered_evidence if not _is_filled(row)
+            row
+            for row in recovered_evidence
+            if not _is_filled(row) and not _is_rejected(row)
         ]
         if unresolved_recovered:
             unresolved_row = unresolved_recovered[0]
@@ -1171,15 +1863,192 @@ def _execute_exact_plan_locked(
                 reconciliation="UNRESOLVED",
                 failure_class=FailureClass.RECONCILIATION_FAILURE,
             )
+        if recovered_rejections:
+            rejected_row = recovered_rejections[0]
+            rejected_order = orders_by_client[str(rejected_row["client_order_id"])]
+            if not dry_run:
+                try:
+                    _persist_economic_reconciliation(
+                        plan=plan,
+                        wal_root=wal_root,
+                        durable_intents=durable_intents,
+                        observed_rows=recovered_evidence,
+                        final_positions=positions,
+                        final_cash=cash,
+                        reconciliation_status=(
+                            "TERMINAL_FAILURE_STATE_RECONCILED"
+                        ),
+                    )
+                except WalPersistenceError as exc:
+                    return _outcome(
+                        plan,
+                        terminal=TerminalOutcome.SYSTEM_FAILURE,
+                        status="FAILED_RECONCILIATION",
+                        reason=(
+                            "terminal_failure_reconciliation_wal_failed:"
+                            f"{exc}"
+                        ),
+                        submitted=recovered_evidence,
+                        filled=recovered_fills,
+                        rejected=recovered_rejections,
+                        final_positions=positions,
+                        final_cash=cash,
+                        reconciliation="FAILED_RECONCILIATION",
+                        failure_class=FailureClass.STATE_FAILURE,
+                    )
+            return _outcome(
+                plan,
+                terminal=TerminalOutcome.SYSTEM_FAILURE,
+                status="ORDER_REJECTED",
+                reason=f"exact_order_rejected:{rejected_order['order_id']}",
+                submitted=recovered_evidence,
+                filled=recovered_fills,
+                rejected=recovered_rejections,
+                final_positions=positions,
+                final_cash=cash,
+                reconciliation="FAILED_RECONCILIATION",
+                failure_class=FailureClass.BROKER_FAILURE,
+            )
+        if not dry_run and expired_recovery and any(
+            not intent_path(
+                wal_root,
+                trade_date=plan.trade_date,
+                client_order_id=str(order["client_order_id"]),
+            ).exists()
+            for order in plan.orders
+        ):
+            try:
+                _persist_economic_reconciliation(
+                    plan=plan,
+                    wal_root=wal_root,
+                    durable_intents=durable_intents,
+                    observed_rows=recovered_evidence,
+                    final_positions=positions,
+                    final_cash=cash,
+                    reconciliation_status=(
+                        "TERMINAL_FAILURE_STATE_RECONCILED"
+                    ),
+                )
+            except WalPersistenceError as exc:
+                reason = f"terminal_failure_reconciliation_wal_failed:{exc}"
+            else:
+                reason = (
+                    "stale_recovery_resolved_existing_intents_"
+                    "new_submissions_forbidden"
+                )
+            return _outcome(
+                plan,
+                terminal=TerminalOutcome.SYSTEM_FAILURE,
+                status="FAILED_RECONCILIATION",
+                reason=reason,
+                submitted=recovered_evidence,
+                filled=recovered_fills,
+                final_positions=positions,
+                final_cash=cash,
+                reconciliation="FAILED_RECONCILIATION",
+                failure_class=FailureClass.AUTHORIZATION_FAILURE,
+            )
 
-    has_new_intents = any(
-        not intent_path(
-            wal_root,
-            trade_date=plan.trade_date,
-            client_order_id=str(order["client_order_id"]),
-        ).exists()
-        for order in plan.orders
-    )
+    if new_order_contract_error is not None:
+        prior_mutation = bool(recovered_evidence)
+        proof_suffix = ""
+        if not dry_run and prior_mutation and all(
+            _is_filled(row) or _is_rejected(row)
+            for row in recovered_evidence
+        ):
+            try:
+                _persist_economic_reconciliation(
+                    plan=plan,
+                    wal_root=wal_root,
+                    durable_intents=durable_intents,
+                    observed_rows=recovered_evidence,
+                    final_positions=positions,
+                    final_cash=cash,
+                    reconciliation_status="TERMINAL_FAILURE_STATE_RECONCILED",
+                )
+            except Exception as exc:
+                proof_suffix = f":economic_proof_failed:{exc}"
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="FAILED_RECONCILIATION" if prior_mutation else "BLOCKED",
+            reason=f"{new_order_contract_error}{proof_suffix}",
+            submitted=recovered_evidence if recovering else (),
+            filled=(
+                [row for row in recovered_evidence if _has_fill(row)]
+                if recovering
+                else ()
+            ),
+            final_positions=positions,
+            final_cash=cash,
+            reconciliation=(
+                "FAILED_RECONCILIATION"
+                if prior_mutation
+                else "FAILED_PRE_SUBMIT"
+            ),
+            failure_class=FailureClass.RISK_FAILURE,
+        )
+
+    if (
+        has_new_intents
+        and not dry_run
+        and plan.constraints.get(
+            "new_order_submission_allowed_at_authorization"
+        )
+        is False
+    ):
+        prior_mutation = bool(recovered_evidence)
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="FAILED_RECONCILIATION" if prior_mutation else "BLOCKED",
+            reason="exact_plan_new_order_submission_authority_forbidden",
+            submitted=recovered_evidence if recovering else (),
+            filled=(
+                [row for row in recovered_evidence if _has_fill(row)]
+                if recovering
+                else ()
+            ),
+            final_positions=positions,
+            final_cash=cash,
+            reconciliation=(
+                "FAILED_RECONCILIATION" if prior_mutation else "FAILED_PRE_SUBMIT"
+            ),
+            failure_class=(
+                FailureClass.EXECUTION_FAILURE
+                if prior_mutation
+                else FailureClass.AUTHORIZATION_FAILURE
+            ),
+        )
+    if has_new_intents and not dry_run:
+        price_fresh, price_reason = _open_decision_prices_fresh_at(
+            plan,
+            now_et=now_et,
+        )
+        if not price_fresh:
+            prior_mutation = bool(recovered_evidence)
+            return _outcome(
+                plan,
+                terminal=TerminalOutcome.SYSTEM_FAILURE,
+                status=(
+                    "FAILED_RECONCILIATION" if prior_mutation else "BLOCKED"
+                ),
+                reason=f"exact_execution_price_freshness_failed:{price_reason}",
+                submitted=recovered_evidence if recovering else (),
+                filled=(
+                    [row for row in recovered_evidence if _has_fill(row)]
+                    if recovering
+                    else ()
+                ),
+                final_positions=positions,
+                final_cash=cash,
+                reconciliation=(
+                    "FAILED_RECONCILIATION"
+                    if prior_mutation
+                    else "FAILED_PRE_SUBMIT"
+                ),
+                failure_class=FailureClass.AUTHORIZATION_FAILURE,
+            )
     if has_new_intents and not dry_run and not _exact_market_is_open(
         trade_date=plan.trade_date,
         now_et=now_et,
@@ -1208,13 +2077,35 @@ def _execute_exact_plan_locked(
             ),
         )
     if has_new_intents and (
-        runtime_cap is None or aggregate_buy_notional > float(runtime_cap) + 1e-9
+        runtime_cap is None
+        or aggregate_runtime_buy_commitment > float(runtime_cap) + 1e-9
     ):
+        prior_mutation = bool(recovered_evidence)
+        proof_suffix = ""
+        if not dry_run and prior_mutation and all(
+            _is_filled(row) or _is_rejected(row)
+            for row in recovered_evidence
+        ):
+            try:
+                _persist_economic_reconciliation(
+                    plan=plan,
+                    wal_root=wal_root,
+                    durable_intents=durable_intents,
+                    observed_rows=recovered_evidence,
+                    final_positions=positions,
+                    final_cash=cash,
+                    reconciliation_status="TERMINAL_FAILURE_STATE_RECONCILED",
+                )
+            except Exception as exc:
+                proof_suffix = f":economic_proof_failed:{exc}"
         return _outcome(
             plan,
             terminal=TerminalOutcome.SYSTEM_FAILURE,
-            status="BLOCKED",
-            reason="runtime_dynamic_cap_below_authorized_buy_notional",
+            status="FAILED_RECONCILIATION" if prior_mutation else "BLOCKED",
+            reason=(
+                "runtime_dynamic_cap_below_authorized_buy_notional"
+                f"{proof_suffix}"
+            ),
             submitted=recovered_evidence if recovering else (),
             filled=(
                 [row for row in recovered_evidence if _has_fill(row)]
@@ -1223,7 +2114,11 @@ def _execute_exact_plan_locked(
             ),
             final_positions=positions,
             final_cash=cash,
-            reconciliation="FAILED_PRE_SUBMIT",
+            reconciliation=(
+                "FAILED_RECONCILIATION"
+                if prior_mutation
+                else "FAILED_PRE_SUBMIT"
+            ),
             failure_class=FailureClass.RISK_FAILURE,
         )
 
@@ -1319,35 +2214,47 @@ def _execute_exact_plan_locked(
                 failure_class=FailureClass.EXECUTION_FAILURE,
             )
 
-    if has_new_intents:
-        open_orders = broker.list_orders(status="open", limit=100)
-        if not isinstance(open_orders, list):
-            raise RuntimeError("broker open-order response is not a list")
-        planned_clients = {str(order["client_order_id"]) for order in plan.orders}
-        planned_symbols = {str(order["symbol"]) for order in plan.orders}
-        conflicts = [
-            row
-            for row in open_orders
-            if isinstance(row, Mapping)
-            and str(row.get("symbol") or "").strip().upper() in planned_symbols
-            and str(row.get("client_order_id") or "") not in planned_clients
-        ]
-        if conflicts:
-            return _outcome(
-                plan,
-                terminal=TerminalOutcome.SYSTEM_FAILURE,
-                status="BLOCKED",
-                reason="conflicting_open_order",
-                submitted=recovered_evidence,
-                filled=[row for row in recovered_evidence if _has_fill(row)],
-                final_positions=positions,
-                final_cash=cash,
-                reconciliation="FAILED_PRE_SUBMIT",
-                failure_class=FailureClass.STATE_FAILURE,
-            )
+    open_order_clear, open_order_reason = _broker_open_order_state(broker)
+    if not open_order_clear and open_order_reason != "unresolved_order":
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="BLOCKED",
+            reason=f"broker_open_order_{open_order_reason}",
+            submitted=recovered_evidence,
+            filled=[row for row in recovered_evidence if _has_fill(row)],
+            final_positions=positions,
+            final_cash=cash,
+            reconciliation="FAILED_PRE_SUBMIT",
+            failure_class=FailureClass.STATE_FAILURE,
+        )
+    if not open_order_clear:
+        # Any broker-open order can change cash, inventory, or buying power
+        # after the sealed starting snapshot. Symbol overlap is not required
+        # for that economic uncertainty, and a zero-order plan must not certify
+        # no-trade while an unrelated order remains live.
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="BLOCKED",
+            reason="unresolved_broker_open_order",
+            submitted=recovered_evidence,
+            filled=[row for row in recovered_evidence if _has_fill(row)],
+            final_positions=positions,
+            final_cash=cash,
+            reconciliation="FAILED_PRE_SUBMIT",
+            failure_class=FailureClass.STATE_FAILURE,
+        )
 
     if not dry_run:
         try:
+            _ensure_wal_base_claim(
+                authority_root,
+                trade_date=plan.trade_date,
+                account_id_hash=plan.account_id_hash,
+                base_wal_root=base_wal_root,
+                create=True,
+            )
             _ensure_plan_claim(
                 authority_root,
                 plan=plan,
@@ -1422,6 +2329,68 @@ def _execute_exact_plan_locked(
                 trade_date=plan.trade_date,
                 client_order_id=str(order["client_order_id"]),
             ).exists()
+            if not order_has_wal:
+                price_fresh, price_reason = _open_decision_prices_fresh_at(
+                    plan,
+                    now_et=now_et,
+                )
+                if not price_fresh:
+                    failure_positions, failure_cash = _best_effort_snapshot(
+                        broker
+                    )
+                    mutated = bool(submitted or recovered_evidence)
+                    return _outcome(
+                        plan,
+                        terminal=TerminalOutcome.SYSTEM_FAILURE,
+                        status=(
+                            "FAILED_RECONCILIATION" if mutated else "BLOCKED"
+                        ),
+                        reason=(
+                            "exact_execution_price_freshness_failed:"
+                            f"{price_reason}"
+                        ),
+                        submitted=submitted,
+                        filled=filled,
+                        rejected=rejected,
+                        final_positions=failure_positions,
+                        final_cash=failure_cash,
+                        reconciliation=(
+                            "FAILED_RECONCILIATION"
+                            if mutated
+                            else "FAILED_PRE_SUBMIT"
+                        ),
+                        failure_class=FailureClass.AUTHORIZATION_FAILURE,
+                    )
+                open_order_clear, open_order_reason = _broker_open_order_state(
+                    broker
+                )
+                if not open_order_clear:
+                    failure_positions, failure_cash = _best_effort_snapshot(
+                        broker
+                    )
+                    mutated = bool(submitted or recovered_evidence)
+                    return _outcome(
+                        plan,
+                        terminal=TerminalOutcome.SYSTEM_FAILURE,
+                        status=(
+                            "FAILED_RECONCILIATION" if mutated else "BLOCKED"
+                        ),
+                        reason=(
+                            "broker_open_order_"
+                            f"{open_order_reason}:mid_batch_submission_halted"
+                        ),
+                        submitted=submitted,
+                        filled=filled,
+                        rejected=rejected,
+                        final_positions=failure_positions,
+                        final_cash=failure_cash,
+                        reconciliation=(
+                            "FAILED_RECONCILIATION"
+                            if mutated
+                            else "FAILED_PRE_SUBMIT"
+                        ),
+                        failure_class=FailureClass.STATE_FAILURE,
+                    )
             if not order_has_wal and not _exact_market_is_open(
                 trade_date=plan.trade_date, now_et=now_et
             ):
@@ -1442,6 +2411,63 @@ def _execute_exact_plan_locked(
                     ),
                     failure_class=FailureClass.EXECUTION_FAILURE,
                 )
+            if not order_has_wal:
+                # Open-order truth alone cannot detect an external order that
+                # fills and disappears between snapshots. Re-read cash and
+                # positions at the final mutation boundary and require the
+                # state to equal the sealed start mechanically advanced only
+                # by fills already confirmed for this exact plan.
+                try:
+                    boundary_positions, boundary_cash, boundary_account = _snapshot(
+                        broker
+                    )
+                except Exception as exc:
+                    failure_positions, failure_cash = _best_effort_snapshot(
+                        broker
+                    )
+                    mutated = bool(submitted or recovered_evidence)
+                    return _outcome(
+                        plan,
+                        terminal=TerminalOutcome.SYSTEM_FAILURE,
+                        status=("FAILED_RECONCILIATION" if mutated else "BLOCKED"),
+                        reason=f"submission_boundary_broker_snapshot_failed:{exc}",
+                        submitted=submitted,
+                        filled=filled,
+                        rejected=rejected,
+                        final_positions=failure_positions,
+                        final_cash=failure_cash,
+                        reconciliation=(
+                            "FAILED_RECONCILIATION" if mutated else "FAILED_PRE_SUBMIT"
+                        ),
+                        failure_class=FailureClass.STATE_FAILURE,
+                    )
+                boundary_account_hash = _broker_account_id_hash(boundary_account)
+                boundary_state_valid = (
+                    boundary_account_hash == plan.account_id_hash
+                    and _state_is_explained_by_fills(
+                        plan=plan,
+                        observed_rows=submitted,
+                        final_positions=boundary_positions,
+                        final_cash=boundary_cash,
+                    )
+                )
+                if not boundary_state_valid:
+                    mutated = bool(submitted or recovered_evidence)
+                    return _outcome(
+                        plan,
+                        terminal=TerminalOutcome.SYSTEM_FAILURE,
+                        status=("FAILED_RECONCILIATION" if mutated else "BLOCKED"),
+                        reason="submission_boundary_broker_state_changed",
+                        submitted=submitted,
+                        filled=filled,
+                        rejected=rejected,
+                        final_positions=boundary_positions,
+                        final_cash=boundary_cash,
+                        reconciliation=(
+                            "FAILED_RECONCILIATION" if mutated else "FAILED_PRE_SUBMIT"
+                        ),
+                        failure_class=FailureClass.STATE_FAILURE,
+                    )
             broker_row, ambiguity = _submit_one(
                 plan=plan,
                 order=order,
@@ -1449,6 +2475,9 @@ def _execute_exact_plan_locked(
                 env=env,
                 wal_root=wal_root,
                 attempt_id=attempt_id,
+                durable_intent=durable_intents_by_client.get(
+                    str(order["client_order_id"])
+                ),
             )
             if ambiguity:
                 failure_positions, failure_cash = _best_effort_snapshot(broker)
@@ -1477,8 +2506,6 @@ def _execute_exact_plan_locked(
                 refreshed = _refresh_terminal(
                     broker, broker_row, attempts=attempts, delay_seconds=delay
                 )
-                broker_row = {**refreshed, **dict(order)}
-                submitted[-1] = broker_row
             except Exception as exc:
                 failure_positions, failure_cash = _best_effort_snapshot(broker)
                 status_fills = list(filled)
@@ -1488,7 +2515,10 @@ def _execute_exact_plan_locked(
                     plan,
                     terminal=TerminalOutcome.SYSTEM_FAILURE,
                     status="FAILED_RECONCILIATION",
-                    reason=f"post_submit_broker_status_refresh_failed:{order['order_id']}:{exc}",
+                    reason=(
+                        "post_submit_broker_status_refresh_failed:"
+                        f"{order['order_id']}:{exc}"
+                    ),
                     submitted=submitted,
                     filled=status_fills,
                     rejected=rejected,
@@ -1497,11 +2527,168 @@ def _execute_exact_plan_locked(
                     reconciliation="FAILED_RECONCILIATION",
                     failure_class=FailureClass.BROKER_FAILURE,
                 )
+            try:
+                durable = OrderIntent.from_dict(
+                    json.loads(
+                        intent_path(
+                            wal_root,
+                            trade_date=plan.trade_date,
+                            client_order_id=str(order["client_order_id"]),
+                        ).read_text(encoding="utf-8")
+                    )
+                )
+                refreshed_evidence = _validated_broker_evidence(
+                    wal_root=wal_root,
+                    intent=durable,
+                    observed=refreshed,
+                )
+                _append_broker_observation(
+                    wal_root,
+                    intent=durable,
+                    evidence=refreshed_evidence,
+                )
+                broker_row = _merge_broker_evidence_with_order(
+                    refreshed,
+                    order,
+                    broker_order_id=refreshed_evidence.broker_order_id,
+                )
+                submitted[-1] = broker_row
+            except Exception as exc:
+                failure_positions, failure_cash = _best_effort_snapshot(broker)
+                status_fills = list(filled)
+                if _has_fill(submitted[-1]):
+                    status_fills.append(submitted[-1])
+                return _outcome(
+                    plan,
+                    terminal=TerminalOutcome.SUBMISSION_UNKNOWN,
+                    status="SUBMISSION_UNKNOWN",
+                    reason=(
+                        "post_submit_broker_evidence_invalid:"
+                        f"{order['order_id']}:{exc}"
+                    ),
+                    submitted=submitted,
+                    filled=status_fills,
+                    rejected=rejected,
+                    final_positions=failure_positions,
+                    final_cash=failure_cash,
+                    reconciliation="SUBMISSION_UNKNOWN",
+                    failure_class=FailureClass.STATE_FAILURE,
+                )
             if _has_fill(broker_row):
                 filled.append(broker_row)
+            fill_risk_violation = _fill_risk_violation(
+                plan=plan,
+                observed_rows=submitted,
+                runtime_cap=runtime_cap,
+                runtime_cap_client_ids=runtime_cap_client_ids,
+                allow_missing_slippage_authority=(
+                    order_has_wal
+                    and "max_adverse_fill_slippage_bps" not in plan.constraints
+                ),
+            )
+            if fill_risk_violation is not None:
+                failure_positions, failure_cash = _best_effort_snapshot(broker)
+                proof_suffix = ""
+                if (
+                    failure_cash is not None
+                    and all(
+                        _is_filled(row) or _is_rejected(row)
+                        for row in submitted
+                    )
+                ):
+                    try:
+                        current_intents = [
+                            OrderIntent.from_dict(
+                                json.loads(
+                                    intent_path(
+                                        wal_root,
+                                        trade_date=plan.trade_date,
+                                        client_order_id=str(
+                                            row["client_order_id"]
+                                        ),
+                                    ).read_text(encoding="utf-8")
+                                )
+                            )
+                            for row in submitted
+                        ]
+                        _persist_economic_reconciliation(
+                            plan=plan,
+                            wal_root=wal_root,
+                            durable_intents=current_intents,
+                            observed_rows=submitted,
+                            final_positions=failure_positions,
+                            final_cash=failure_cash,
+                            reconciliation_status=(
+                                "TERMINAL_FAILURE_STATE_RECONCILED"
+                            ),
+                        )
+                    except Exception as exc:
+                        proof_suffix = f":economic_proof_failed:{exc}"
+                return _outcome(
+                    plan,
+                    terminal=TerminalOutcome.SYSTEM_FAILURE,
+                    status="FAILED_RECONCILIATION",
+                    reason=f"{fill_risk_violation}{proof_suffix}",
+                    submitted=submitted,
+                    filled=filled,
+                    rejected=rejected,
+                    final_positions=failure_positions,
+                    final_cash=failure_cash,
+                    reconciliation="FAILED_RECONCILIATION",
+                    failure_class=FailureClass.RISK_FAILURE,
+                )
             if _is_rejected(broker_row):
                 rejected.append(broker_row)
                 failure_positions, failure_cash = _best_effort_snapshot(broker)
+                terminal_proof_error: str | None = None
+                if failure_cash is not None:
+                    try:
+                        current_intents = [
+                            OrderIntent.from_dict(
+                                json.loads(
+                                    intent_path(
+                                        wal_root,
+                                        trade_date=plan.trade_date,
+                                        client_order_id=str(
+                                            row["client_order_id"]
+                                        ),
+                                    ).read_text(encoding="utf-8")
+                                )
+                            )
+                            for row in submitted
+                        ]
+                        _persist_economic_reconciliation(
+                            plan=plan,
+                            wal_root=wal_root,
+                            durable_intents=current_intents,
+                            observed_rows=submitted,
+                            final_positions=failure_positions,
+                            final_cash=failure_cash,
+                            reconciliation_status=(
+                                "TERMINAL_FAILURE_STATE_RECONCILED"
+                            ),
+                        )
+                    except Exception as exc:
+                        terminal_proof_error = str(exc)
+                else:
+                    terminal_proof_error = "broker snapshot unavailable"
+                if terminal_proof_error is not None:
+                    return _outcome(
+                        plan,
+                        terminal=TerminalOutcome.SYSTEM_FAILURE,
+                        status="FAILED_RECONCILIATION",
+                        reason=(
+                            "terminal_failure_reconciliation_wal_failed:"
+                            f"{terminal_proof_error}"
+                        ),
+                        submitted=submitted,
+                        filled=filled,
+                        rejected=rejected,
+                        final_positions=failure_positions,
+                        final_cash=failure_cash,
+                        reconciliation="FAILED_RECONCILIATION",
+                        failure_class=FailureClass.STATE_FAILURE,
+                    )
                 return _outcome(
                     plan,
                     terminal=TerminalOutcome.SYSTEM_FAILURE,
@@ -1585,6 +2772,29 @@ def _execute_exact_plan_locked(
     cash_tolerance = _finite(plan.constraints.get("cash_reconciliation_tolerance_usd"))
     if cash_tolerance is None or cash_tolerance < 0:
         cash_tolerance = 0.01
+    final_fill_risk_violation = _fill_risk_violation(
+        plan=plan,
+        observed_rows=filled,
+        runtime_cap=runtime_cap,
+        runtime_cap_client_ids=runtime_cap_client_ids,
+        allow_missing_slippage_authority=(
+            "max_adverse_fill_slippage_bps" not in plan.constraints
+        ),
+    )
+    if final_fill_risk_violation is not None:
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="FAILED_RECONCILIATION",
+            reason=final_fill_risk_violation,
+            submitted=submitted,
+            filled=filled,
+            rejected=rejected,
+            final_positions=final_positions,
+            final_cash=final_cash,
+            reconciliation="FAILED_RECONCILIATION",
+            failure_class=FailureClass.RISK_FAILURE,
+        )
     if (
         not fill_economics_complete
         or expected_positions_hash != actual_positions_hash
@@ -1602,6 +2812,42 @@ def _execute_exact_plan_locked(
             final_cash=final_cash,
             reconciliation="FAILED_RECONCILIATION",
             failure_class=FailureClass.RECONCILIATION_FAILURE,
+        )
+    try:
+        reconciled_intents = [
+            OrderIntent.from_dict(
+                json.loads(
+                    intent_path(
+                        wal_root,
+                        trade_date=plan.trade_date,
+                        client_order_id=str(order["client_order_id"]),
+                    ).read_text(encoding="utf-8")
+                )
+            )
+            for order in plan.orders
+        ]
+        _persist_economic_reconciliation(
+            plan=plan,
+            wal_root=wal_root,
+            durable_intents=reconciled_intents,
+            observed_rows=submitted,
+            final_positions=final_positions,
+            final_cash=final_cash,
+            reconciliation_status="CLEAN",
+        )
+    except Exception as exc:
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="FAILED_RECONCILIATION",
+            reason=f"economic_reconciliation_wal_persistence_failed:{exc}",
+            submitted=submitted,
+            filled=filled,
+            rejected=rejected,
+            final_positions=final_positions,
+            final_cash=final_cash,
+            reconciliation="FAILED_RECONCILIATION",
+            failure_class=FailureClass.STATE_FAILURE,
         )
     return _outcome(
         plan,

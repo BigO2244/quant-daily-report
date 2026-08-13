@@ -826,6 +826,59 @@ def test_build_rebalance_trades_non_fractional_drops_sub_share_delta_after_round
     assert trades.empty
 
 
+def test_exact_whole_share_target_does_not_sell_due_to_float_flooring():
+    holdings = pd.DataFrame(
+        [{"ticker": "AAPL", "sleeve": "core", "shares": 87.0}]
+    )
+    prices = pd.Series({"AAPL": 22.0})
+    cfg = broker.PaperConfig(
+        initial_equity=6600.0,
+        benchmark_ticker="SPY",
+        slippage_bps=0.0,
+        allow_fractional=False,
+        min_trade_dollars=1.0,
+        rebalance_deadband_pct=0.0,
+        max_turnover_pct=100.0,
+        max_position_change_pct=100.0,
+        max_position_pct=100.0,
+        max_trades_per_day=100,
+    )
+
+    exact, _ = broker.build_rebalance_trades(
+        holdings=holdings,
+        targets=pd.DataFrame(
+            [{"ticker": "AAPL", "target_weight": 0.29, "sleeve": "core"}]
+        ),
+        prices=prices,
+        total_equity=6600.0,
+        starting_cash=4686.0,
+        target_cash_weight=0.0,
+        cfg=cfg,
+    )
+    genuinely_below, _ = broker.build_rebalance_trades(
+        holdings=holdings,
+        targets=pd.DataFrame(
+            [
+                {
+                    "ticker": "AAPL",
+                    "target_weight": (86.999999 * 22.0) / 6600.0,
+                    "sleeve": "core",
+                }
+            ]
+        ),
+        prices=prices,
+        total_equity=6600.0,
+        starting_cash=4686.0,
+        target_cash_weight=0.0,
+        cfg=cfg,
+    )
+
+    assert exact.empty
+    assert len(genuinely_below) == 1
+    assert genuinely_below.iloc[0]["side"] == "SELL"
+    assert genuinely_below.iloc[0]["shares"] == 1.0
+
+
 def test_build_rebalance_trades_drops_below_min_trade_dollars():
     holdings = pd.DataFrame(columns=["ticker", "sleeve", "shares"])
     targets = pd.DataFrame([{"ticker": "AAPL", "target_weight": 1.0, "sleeve": "core"}])

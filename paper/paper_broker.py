@@ -677,6 +677,15 @@ def apply_slippage(price: float, side: str, slippage_bps: float) -> Tuple[float,
     return slipped, cost
 
 
+def _snap_near_integer(value: float) -> float:
+    """Snap only floating-point representations of an exact integer."""
+
+    numeric = float(value)
+    nearest = float(round(numeric))
+    tolerance = max(1e-9, 8.0 * math.ulp(numeric))
+    return nearest if abs(numeric - nearest) <= tolerance else numeric
+
+
 def build_rebalance_trades(
     holdings: pd.DataFrame,
     targets: pd.DataFrame,
@@ -687,6 +696,7 @@ def build_rebalance_trades(
     cfg: PaperConfig,
 ) -> Tuple[pd.DataFrame, Dict[str, object]]:
     def _round_toward_zero(shares: float) -> float:
+        shares = _snap_near_integer(shares)
         if shares > 0:
             return float(math.floor(shares))
         if shares < 0:
@@ -3612,11 +3622,13 @@ def _rebuild_post_sell_buy_trades(
             target_dollars = target_weight * equity_value * cash_buffer
             target_shares = target_dollars / price if price > 0 else 0.0
             if not cfg.allow_fractional:
-                target_shares = float(math.floor(max(0.0, target_shares)))
+                target_shares = float(
+                    math.floor(_snap_near_integer(max(0.0, target_shares)))
+                )
         current_shares = float(holdings_map.get(ticker, 0.0))
         desired_shares = max(0.0, float(target_shares) - current_shares)
         if not cfg.allow_fractional:
-            desired_shares = float(math.floor(desired_shares))
+            desired_shares = float(math.floor(_snap_near_integer(desired_shares)))
         if desired_shares <= 1e-12:
             continue
         if not cfg.allow_fractional and desired_shares < 1.0:

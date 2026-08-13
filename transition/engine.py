@@ -182,6 +182,10 @@ def _norm(symbol: object) -> str:
 
 
 def _round_toward_zero(shares: float) -> float:
+    nearest = float(round(shares))
+    tolerance = max(1e-9, 8.0 * math.ulp(float(shares)))
+    if abs(float(shares) - nearest) <= tolerance:
+        shares = nearest
     if shares > 0:
         return float(math.floor(shares))
     if shares < 0:
@@ -204,7 +208,12 @@ def _target_shares(target_dollars: float, price: float, fractional: bool) -> flo
         return 0.0
     shares = target_dollars / price
     if not fractional:
-        shares = float(math.floor(max(0.0, shares)))
+        normalized = max(0.0, shares)
+        nearest = float(round(normalized))
+        tolerance = max(1e-9, 8.0 * math.ulp(float(normalized)))
+        if abs(normalized - nearest) <= tolerance:
+            normalized = nearest
+        shares = float(math.floor(normalized))
     return float(shares)
 
 

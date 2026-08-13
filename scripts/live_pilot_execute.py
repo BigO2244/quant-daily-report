@@ -571,9 +571,11 @@ def _broker_snapshot(
     *,
     fail_on_open_order_lookup: bool = False,
 ) -> dict[str, Any]:
+    capture_started_at = _now_utc()
     account = broker.get_account() if hasattr(broker, "get_account") else {}
     positions = broker.get_positions() if hasattr(broker, "get_positions") else []
     open_orders = _list_open_orders(broker)
+    capture_completed_at = _now_utc()
     lookup_failure = next(
         (
             order
@@ -588,7 +590,9 @@ def _broker_snapshot(
             f"{lookup_failure.get('error') or 'unknown broker lookup error'}"
         )
     return {
-        "captured_at": _now_utc(),
+        "captured_at": capture_completed_at,
+        "capture_started_at": capture_started_at,
+        "capture_completed_at": capture_completed_at,
         "account": _public_account(account),
         "positions": _json_safe(positions or []),
         "open_orders": _json_safe(open_orders),
@@ -727,7 +731,8 @@ def _target_rows_from_plan(plan: Mapping[str, Any], *, equity: float) -> tuple[p
         if price is None or price <= 0.0:
             continue
         weight = _finite_float(raw.get("target_weight"))
-        if weight is None or weight <= 0.0:
+        explicit_zero_weight = weight is not None and abs(weight) <= 1e-12
+        if weight is None or weight < 0.0:
             notional = _finite_float(raw.get("notional"))
             qty = _finite_float(raw.get("shares") or raw.get("qty") or raw.get("quantity"))
             if notional is None and qty is not None:
@@ -735,6 +740,8 @@ def _target_rows_from_plan(plan: Mapping[str, Any], *, equity: float) -> tuple[p
             if notional is None or notional <= 0.0:
                 continue
             weight = (notional / equity_value) if equity_value > 0.0 else notional
+        elif explicit_zero_weight:
+            weight = 0.0
         targets.append({"ticker": symbol, "sleeve": str(raw.get("sleeve") or "live_pilot"), "target_weight": float(weight)})
         price_by_symbol[symbol] = float(price)
     frame = pd.DataFrame(targets, columns=["ticker", "sleeve", "target_weight"])

@@ -188,7 +188,7 @@ def market_session_status(
         )
         if is_trading_day(now_day) and now_et < today_open_et:
             next_open_et = today_open_et
-        elif is_trading_day(now_day) and today_open_et <= now_et <= today_close_et:
+        elif is_trading_day(now_day) and today_open_et <= now_et < today_close_et:
             next_open_et = now_et
         else:
             next_open_day = next_trading_day(now_day)
@@ -241,7 +241,7 @@ def market_session_status(
             session_close_et,
             next_open_et,
         )
-    if now_et > session_close_et:
+    if now_et >= session_close_et:
         return MarketSessionStatus(
             True,
             False,

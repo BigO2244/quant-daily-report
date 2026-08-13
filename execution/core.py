@@ -21,6 +21,14 @@ from paper.paper_broker import (
 )
 
 
+_BROKER_AUTHORITATIVE_PRICE_BASES = frozenset(
+    {
+        "timestamped_alpaca_latest_trade_at_authorization",
+        "alpaca_iex_regular_session_final_minute_bar_close",
+    }
+)
+
+
 @dataclass(frozen=True)
 class CapitalPolicy:
     """Capital configuration, not mode-specific branching.
@@ -206,11 +214,43 @@ def compute_transition_trades(
             if isinstance(request.prices, pd.Series)
             else pd.Series(dtype=float)
         )
-        for row in approved_rows:
-            symbol = str(row.get("symbol") or row.get("ticker") or "").upper()
-            price = _safe_float(row.get("price") or row.get("entry_price"), 0.0)
-            if symbol and price > 0.0:
-                approved_prices.loc[symbol] = price
+        broker_authoritative_prices = (
+            str(request.price_basis or "").strip()
+            in _BROKER_AUTHORITATIVE_PRICE_BASES
+        )
+        required_price_symbols = {
+            str(row.get("symbol") or row.get("ticker") or "").strip().upper()
+            for row in approved_rows
+        }
+        if request.holdings is not None and not request.holdings.empty:
+            required_price_symbols.update(
+                str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+                for _, row in request.holdings.iterrows()
+            )
+        required_price_symbols.discard("")
+        if broker_authoritative_prices:
+            invalid = sorted(
+                symbol
+                for symbol in required_price_symbols
+                if symbol not in approved_prices.index
+                or not math.isfinite(_safe_float(approved_prices.get(symbol), 0.0))
+                or _safe_float(approved_prices.get(symbol), 0.0) <= 0.0
+            )
+            if invalid:
+                raise ValueError(
+                    "broker-authoritative exact pricing is missing or invalid for: "
+                    + ",".join(invalid)
+                )
+        else:
+            # Legacy/non-authorizer callers may still carry package marks. The
+            # exact PAPER authorizer never reaches this fallback: once it seals
+            # broker-authoritative price evidence, package prices are lineage
+            # only and cannot overwrite the Decision marks.
+            for row in approved_rows:
+                symbol = str(row.get("symbol") or row.get("ticker") or "").upper()
+                price = _safe_float(row.get("price") or row.get("entry_price"), 0.0)
+                if symbol and price > 0.0:
+                    approved_prices.loc[symbol] = price
         policy_payload = package.constraints.get("target_attainment_policy")
         if policy_payload:
             if str(config.mode or "").strip().lower() != "paper":
@@ -266,6 +306,8 @@ def compute_transition_trades(
             "risk_package_id": package.risk_package_id,
             "risk_hash": package.risk_hash,
             "target_cash_weight": float(package.approved_cash_weight),
+            "price_basis": str(request.price_basis or ""),
+            "broker_authoritative_prices": broker_authoritative_prices,
         }
     if request.precomputed_trade_plan_used or request.precomputed_trades:
         raw_trades = _precomputed_trades_frame(request.precomputed_trades)

@@ -206,7 +206,14 @@ def _normalize_orders(
                 "extended_hours": extended_hours,
             }
         )
-        for price_key in ("price", "expected_price", "limit_price", "stop_price", "notional"):
+        for price_key in (
+            "price",
+            "expected_price",
+            "limit_price",
+            "cap_enforcement_price",
+            "stop_price",
+            "notional",
+        ):
             if row.get(price_key) is not None:
                 row[price_key] = _finite(row[price_key], f"{side}.{symbol}.{price_key}", minimum=0.0)
         if row.get("stop_price") is not None:
@@ -219,13 +226,23 @@ def _normalize_orders(
         if sleeve not in {"orion", "caerus_orion"}:
             raise AuthorityContractError("exact PAPER orders must belong to Orion")
         row["sleeve"] = "caerus_orion"
-        price = float(
-            row.get("cap_enforcement_price")
-            or row.get("limit_price")
-            or row.get("expected_price")
-            or row.get("price")
-            or 0.0
-        )
+        limit_price = row.get("limit_price")
+        cap_enforcement_price = row.get("cap_enforcement_price")
+        if order_type == "limit":
+            price = float(limit_price or 0.0)
+            if cap_enforcement_price is not None and abs(
+                float(cap_enforcement_price) - price
+            ) > 1e-9:
+                raise AuthorityContractError(
+                    f"{side}.{symbol} cap_enforcement_price must equal limit_price"
+                )
+        else:
+            price = float(
+                cap_enforcement_price
+                or row.get("expected_price")
+                or row.get("price")
+                or 0.0
+            )
         computed_notional = quantity * price
         declared_notional = float(row.get("notional") or computed_notional)
         if (
@@ -281,19 +298,36 @@ def _order_seed_rows(
             raise AuthorityContractError(
                 "extended-hours exact orders must be DAY limit orders"
             )
-        for price_key in ("price", "expected_price", "limit_price", "stop_price", "notional"):
+        for price_key in (
+            "price",
+            "expected_price",
+            "limit_price",
+            "cap_enforcement_price",
+            "stop_price",
+            "notional",
+        ):
             if row.get(price_key) is not None:
                 row[price_key] = _finite(
                     row[price_key], f"{required_side}.{symbol}.{price_key}", minimum=0.0
                 )
         row["sleeve"] = "caerus_orion"
-        price = float(
-            row.get("cap_enforcement_price")
-            or row.get("limit_price")
-            or row.get("expected_price")
-            or row.get("price")
-            or 0.0
-        )
+        limit_price = row.get("limit_price")
+        cap_enforcement_price = row.get("cap_enforcement_price")
+        if row["order_type"] == "limit":
+            price = float(limit_price or 0.0)
+            if cap_enforcement_price is not None and abs(
+                float(cap_enforcement_price) - price
+            ) > 1e-9:
+                raise AuthorityContractError(
+                    f"{required_side}.{symbol} cap_enforcement_price must equal limit_price"
+                )
+        else:
+            price = float(
+                cap_enforcement_price
+                or row.get("expected_price")
+                or row.get("price")
+                or 0.0
+            )
         computed_notional = float(row["quantity"]) * price
         declared_notional = float(row.get("notional") or computed_notional)
         if price <= 0 or abs(declared_notional - computed_notional) > 0.01:
@@ -402,6 +436,7 @@ def build_exact_execution_plan(
     authorization_state: Mapping[str, Any] | str,
     strategy_id: str = "caerus_orion",
     account_scope: str = "PAPER",
+    allow_legacy_missing_fill_risk_authority: bool = False,
 ) -> ExactExecutionPlan:
     as_of = _iso(as_of, "as_of")
     created_at = _iso(created_at, "created_at")
@@ -529,6 +564,80 @@ def build_exact_execution_plan(
         raise AuthorityContractError("exact constraints require max_orders and capital_cap_usd") from exc
     if max_orders < 0 or len(sells) + len(buys) > max_orders:
         raise AuthorityContractError("exact order count exceeds constraints.max_orders")
+    if sells or buys:
+        try:
+            max_adverse_fill_slippage_bps = _finite(
+                constraint_values["max_adverse_fill_slippage_bps"],
+                "constraints.max_adverse_fill_slippage_bps",
+                minimum=0.0,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            if not allow_legacy_missing_fill_risk_authority:
+                raise AuthorityContractError(
+                    "exact orders require constraints.max_adverse_fill_slippage_bps"
+                ) from exc
+            max_adverse_fill_slippage_bps = None
+        if max_adverse_fill_slippage_bps is not None:
+            if max_adverse_fill_slippage_bps > 100.0:
+                raise AuthorityContractError(
+                    "exact adverse fill slippage tolerance exceeds 100 basis points"
+                )
+            constraint_values["max_adverse_fill_slippage_bps"] = (
+                max_adverse_fill_slippage_bps
+            )
+    else:
+        max_adverse_fill_slippage_bps = None
+    execution_style = str(
+        constraint_values.get("new_order_execution_style") or ""
+    ).strip().lower()
+    if execution_style == "protective_day_limit" and (sells or buys):
+        if (
+            max_adverse_fill_slippage_bps is None
+            and not allow_legacy_missing_fill_risk_authority
+        ):
+            raise AuthorityContractError(
+                "protective DAY-limit orders require adverse-fill authority"
+            )
+        collar_fraction = (
+            None
+            if max_adverse_fill_slippage_bps is None
+            else max_adverse_fill_slippage_bps / 10000.0
+        )
+        for row in (*sells, *buys):
+            side = str(row["side"])
+            symbol = str(row["symbol"])
+            expected_price = float(
+                row.get("expected_price") or row.get("price") or 0.0
+            )
+            limit_price = float(row.get("limit_price") or 0.0)
+            cap_enforcement_price = float(
+                row.get("cap_enforcement_price") or 0.0
+            )
+            if (
+                row.get("order_type") != "limit"
+                or row.get("time_in_force") != "day"
+                or row.get("extended_hours") is not False
+                or expected_price <= 0
+                or limit_price <= 0
+                or abs(cap_enforcement_price - limit_price) > 1e-9
+            ):
+                raise AuthorityContractError(
+                    f"{side}.{symbol} violates protective DAY-limit execution style"
+                )
+            if collar_fraction is None:
+                collar_valid = True
+            elif side == "BUY":
+                collar_valid = limit_price <= (
+                    expected_price * (1.0 + collar_fraction) + 1e-9
+                )
+            else:
+                collar_valid = limit_price + 1e-9 >= (
+                    expected_price * (1.0 - collar_fraction)
+                )
+            if not collar_valid:
+                raise AuthorityContractError(
+                    f"{side}.{symbol} protective limit exceeds adverse-fill collar"
+                )
     aggregate_buy_notional = sum(float(row["notional"]) for row in buys)
     if capital_cap <= 0 or aggregate_buy_notional > capital_cap + 1e-9:
         raise AuthorityContractError("exact buy notional exceeds constraints.capital_cap_usd")
@@ -648,6 +757,11 @@ def exact_execution_plan_from_dict(
         authorization_state=payload.get("authorization_state") or {},
         strategy_id=str(payload.get("strategy_id") or ""),
         account_scope=str(payload.get("account_scope") or ""),
+        allow_legacy_missing_fill_risk_authority=(
+            bool(supplied_order_ids)
+            and "max_adverse_fill_slippage_bps"
+            not in (payload.get("constraints") or {})
+        ),
     )
     if str(payload.get("plan_id") or "") != rebuilt.plan_id:
         raise AuthorityContractError("exact execution plan_id mismatch")

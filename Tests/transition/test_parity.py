@@ -245,3 +245,26 @@ def test_sell_intent_parity_with_build_rebalance_trades() -> None:
         eng_shares, eng_notional = engine_sells[symbol]
         assert eng_shares == pytest.approx(ref_shares, abs=1e-6), symbol
         assert eng_notional == pytest.approx(ref_notional, abs=1e-6), symbol
+
+
+def test_transition_exact_whole_share_target_is_stable_at_integer_boundary() -> None:
+    plan = compute_transition(
+        current_holdings=Holdings((Position("AAPL", 87.0, 22.0),)),
+        target_holdings=TargetPortfolio(
+            (TargetPosition("AAPL", 0.29, 22.0),),
+            cash_buffer=1.0,
+        ),
+        account_snapshot=AccountSnapshot(
+            cash=4686.0,
+            buying_power=4686.0,
+            equity=6600.0,
+            as_of=_AS_OF,
+        ),
+        capital_policy=_engine_capital_policy(cap=None),
+        order_policy=OrderPolicy(fractional=False, min_trade_usd=1.0),
+        mode_constraints=ModeConstraints(sells_supported=True, max_orders=None),
+    )
+
+    assert plan.sell_orders_intended == ()
+    assert plan.buy_orders_intended == ()
+    assert plan.holdings_to_keep == ("AAPL",)

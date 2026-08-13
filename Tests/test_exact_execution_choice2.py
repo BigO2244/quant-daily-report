@@ -17,6 +17,7 @@ from authority.contracts import AuthorityContractError
 from authority.exact_plan import build_exact_execution_plan, exact_execution_plan_from_dict
 from core.failure_semantics import TerminalOutcome
 from core.orchestrator_state import load_orchestrator_state
+import execution.exact_executor as exact_executor_module
 from execution.exact_executor import execute_exact_plan as _execute_exact_plan
 from scripts.live_pilot_execute import run_live_pilot as _run_live_pilot
 from core.regime_state_store import (
@@ -32,7 +33,15 @@ from scripts.authorize_exact_execution_plan import (
 
 
 PAPER_HOST = "https://paper-api.alpaca.markets"
-TEST_NOW_ET = dt.datetime(2026, 8, 12, 13, 35, tzinfo=ZoneInfo("America/New_York"))
+TEST_NOW_ET = dt.datetime(
+    2026,
+    8,
+    12,
+    9,
+    35,
+    2,
+    tzinfo=ZoneInfo("America/New_York"),
+)
 
 
 def execute_exact_plan(**kwargs):
@@ -95,6 +104,15 @@ class TrackingPaperBroker:
             for symbol in symbols
         }
 
+    def get_market_session_calendar(self, trade_date):
+        assert trade_date == "2026-08-12"
+        return {
+            "calendar": "TEST_XNYS",
+            "trade_date": trade_date,
+            "session_open_et": "2026-08-12T09:30:00-04:00",
+            "session_close_et": "2026-08-12T16:00:00-04:00",
+        }
+
     def list_orders(self, status="open", limit=100, **kwargs):
         del limit, kwargs
         rows = list(self.orders.values())
@@ -118,6 +136,7 @@ class TrackingPaperBroker:
             "client_order_id": client_id,
             "symbol": symbol,
             "side": side,
+            "qty": str(quantity),
             "status": "filled",
             "filled_qty": str(quantity),
             "filled_avg_price": str(notional / quantity),
@@ -236,8 +255,20 @@ def _plan(*, no_trade: bool = False):
         starting_cash=900.0,
         account_id_hash=hashlib.sha256(b"paper-account").hexdigest(),
         risk_state={"status": "PASS"},
-        sell_orders=[] if no_trade else [{"symbol": "OLD", "side": "SELL", "quantity": 1, "expected_price": 100, "notional": 100}],
-        buy_orders=[] if no_trade else [{"symbol": "AAPL", "side": "BUY", "quantity": 2, "expected_price": 50, "notional": 100}],
+        sell_orders=[] if no_trade else [{
+            "symbol": "OLD", "side": "SELL", "quantity": 1,
+            "order_type": "limit", "time_in_force": "day",
+            "extended_hours": False, "expected_price": 100,
+            "limit_price": 100, "cap_enforcement_price": 100,
+            "notional": 100,
+        }],
+        buy_orders=[] if no_trade else [{
+            "symbol": "AAPL", "side": "BUY", "quantity": 2,
+            "order_type": "limit", "time_in_force": "day",
+            "extended_hours": False, "expected_price": 50,
+            "limit_price": 50, "cap_enforcement_price": 50,
+            "notional": 100,
+        }],
         expected_posttrade_positions=(
             [{"symbol": "OLD", "quantity": 1.0}]
             if no_trade
@@ -248,6 +279,8 @@ def _plan(*, no_trade: bool = False):
             "cash_reconciliation_tolerance_usd": 0.01,
             "max_orders": 2,
             "capital_cap_usd": 1000.0,
+            "max_adverse_fill_slippage_bps": 100.0,
+            "new_order_execution_style": "protective_day_limit",
         },
         authorization_state={
             "status": "AUTHORIZED",
@@ -272,7 +305,46 @@ def _handoff(exact):
     }
 
 
+def _legacy_pre_fill_risk_plan():
+    payload = _plan().to_dict()
+    constraints = dict(payload["constraints"])
+    constraints.pop("max_adverse_fill_slippage_bps")
+    return _rebuild_exact(
+        payload,
+        constraints=constraints,
+        _allow_legacy_missing_fill_risk_authority=True,
+    )
+
+
+def _legacy_market_plan():
+    payload = _plan().to_dict()
+    constraints = dict(payload["constraints"])
+    constraints.pop("max_adverse_fill_slippage_bps")
+    constraints.pop("new_order_execution_style")
+
+    def market_rows(rows):
+        result = []
+        for raw in rows:
+            row = dict(raw)
+            row["order_type"] = "market"
+            row.pop("limit_price", None)
+            row.pop("cap_enforcement_price", None)
+            result.append(row)
+        return result
+
+    return _rebuild_exact(
+        payload,
+        sell_orders=market_rows(payload["sell_orders"]),
+        buy_orders=market_rows(payload["buy_orders"]),
+        constraints=constraints,
+        _allow_legacy_missing_fill_risk_authority=True,
+    )
+
+
 def _rebuild_exact(payload: dict, **overrides):
+    allow_legacy_missing_fill_risk_authority = bool(
+        overrides.pop("_allow_legacy_missing_fill_risk_authority", False)
+    )
     values = {
         key: payload[key]
         for key in (
@@ -286,7 +358,28 @@ def _rebuild_exact(payload: dict, **overrides):
         )
     }
     values.update(overrides)
-    return build_exact_execution_plan(**values)
+    protective_style = str(
+        values["constraints"].get("new_order_execution_style") or ""
+    ).strip().lower() == "protective_day_limit"
+    for order_key in ("sell_orders", "buy_orders"):
+        protective_rows = []
+        for raw in values[order_key]:
+            row = dict(raw)
+            if protective_style:
+                reference = row.get("expected_price") or row.get("price")
+                row.setdefault("order_type", "limit")
+                row.setdefault("time_in_force", "day")
+                row.setdefault("extended_hours", False)
+                row.setdefault("limit_price", reference)
+                row.setdefault("cap_enforcement_price", row.get("limit_price"))
+            protective_rows.append(row)
+        values[order_key] = protective_rows
+    return build_exact_execution_plan(
+        **values,
+        allow_legacy_missing_fill_risk_authority=(
+            allow_legacy_missing_fill_risk_authority
+        ),
+    )
 
 
 def _write_orion_sleeve_authority(tmp_path: Path) -> tuple[str, str]:
@@ -386,6 +479,114 @@ def _write_authority_chain(
     return execution.to_dict(), paths
 
 
+def _governed_authorizer_fixture(
+    tmp_path: Path,
+    *,
+    target_rows: list[dict],
+) -> tuple[dict, Path, Path]:
+    source = tmp_path / "governed-target-plan.json"
+    source.write_text("{}\n", encoding="utf-8")
+    sleeve_path, sleeve_hash = _write_orion_sleeve_authority(tmp_path)
+    approved_package, authority_paths = _write_authority_chain(
+        tmp_path,
+        target_rows=target_rows,
+        sleeve_hash=sleeve_hash,
+    )
+    plan = {
+        "trade_date": "2026-08-12",
+        "execution_lane": "paper",
+        "approved_sleeve": "caerus_orion",
+        "allow_fractional": False,
+        "target_portfolio": target_rows,
+        "approved_execution_package": approved_package,
+        "authority_package_paths": authority_paths,
+        "cash_target_weight": 0.0,
+        "risk_controls": {"regime": "NORMAL"},
+        "source_precompute_payload": "precompute.json",
+        "source_signals": "signals.json",
+        "source_sleeve_evaluations": sleeve_path,
+        "source_sleeve_evaluations_sha256": sleeve_hash,
+    }
+    return plan, source, tmp_path / "regime-state"
+
+
+class SessionFinalBarPaperBroker(TrackingPaperBroker):
+    def __init__(
+        self,
+        *,
+        final_bar_mode: str = "valid",
+        calendar_mode: str = "valid",
+    ) -> None:
+        super().__init__()
+        self.final_bar_mode = final_bar_mode
+        self.calendar_mode = calendar_mode
+        self.latest_trade_calls = 0
+        self.session_calendar_calls = 0
+        self.session_final_bar_calls = 0
+
+    def get_latest_trades(self, symbols):
+        self.latest_trade_calls += 1
+        return super().get_latest_trades(symbols)
+
+    def get_market_session_calendar(self, trade_date):
+        self.session_calendar_calls += 1
+        assert trade_date == "2026-08-12"
+        row = {
+            "trade_date": trade_date,
+            "session_open_et": "2026-08-12T09:30:00-04:00",
+            "session_close_et": "2026-08-12T16:00:00-04:00",
+        }
+        if self.calendar_mode == "empty":
+            return {}
+        if self.calendar_mode == "mismatch":
+            row["session_close_et"] = "2026-08-12T15:59:00-04:00"
+        return row
+
+    def get_session_final_bars(
+        self,
+        symbols,
+        *,
+        session_open_et,
+        session_close_et,
+    ):
+        self.session_final_bar_calls += 1
+        assert session_open_et.isoformat() == "2026-08-12T09:30:00-04:00"
+        assert session_close_et.isoformat() == "2026-08-12T16:00:00-04:00"
+        bar_start = session_close_et - dt.timedelta(minutes=1)
+        rows = {}
+        for symbol in symbols:
+            price = 100.0 if str(symbol) == "OLD" else 50.0
+            rows[str(symbol)] = {
+                "symbol": str(symbol),
+                "price": price,
+                "close": price,
+                "bar_start": bar_start.isoformat(),
+                "bar_end_exclusive": session_close_et.isoformat(),
+                "open": price,
+                "high": price,
+                "low": price,
+                "volume": 1000.0,
+                "trade_count": 100.0,
+                "vwap": price,
+                "timeframe": "1Min",
+                "feed": "IEX",
+                "adjustment": "raw",
+                "currency": "USD",
+            }
+        if symbols:
+            victim = str(sorted(symbols)[0])
+            if self.final_bar_mode == "missing":
+                rows.pop(victim)
+            elif self.final_bar_mode == "wrong_timestamp":
+                rows[victim]["bar_start"] = (
+                    session_close_et - dt.timedelta(minutes=2)
+                ).isoformat()
+            elif self.final_bar_mode == "nonfinite":
+                rows[victim]["price"] = float("nan")
+                rows[victim]["close"] = float("nan")
+        return rows
+
+
 def test_exact_contract_is_deterministic_and_rejects_tampering():
     plan = _plan()
     assert exact_execution_plan_from_dict(plan.to_dict()).content_hash == plan.content_hash
@@ -436,6 +637,40 @@ def test_exact_contract_rejects_cap_authority_and_economic_lies():
         _rebuild_exact(payload, buy_orders=understated)
     with pytest.raises(AuthorityContractError, match="order count"):
         _rebuild_exact(payload, constraints={**payload["constraints"], "max_orders": 1})
+    missing_slippage_authority = dict(payload["constraints"])
+    missing_slippage_authority.pop("max_adverse_fill_slippage_bps")
+    with pytest.raises(AuthorityContractError, match="max_adverse_fill_slippage_bps"):
+        _rebuild_exact(payload, constraints=missing_slippage_authority)
+    with pytest.raises(AuthorityContractError, match="exceeds 100 basis points"):
+        _rebuild_exact(
+            payload,
+            constraints={
+                **payload["constraints"],
+                "max_adverse_fill_slippage_bps": 100.01,
+            },
+        )
+    mismatched_cap_price = copy.deepcopy(payload["buy_orders"])
+    mismatched_cap_price[0].update(
+        {
+            "expected_price": 50,
+            "limit_price": 600,
+            "cap_enforcement_price": 50,
+            "notional": 100,
+        }
+    )
+    with pytest.raises(AuthorityContractError, match="must equal limit_price"):
+        _rebuild_exact(payload, buy_orders=mismatched_cap_price)
+    overwide_collar = copy.deepcopy(payload["buy_orders"])
+    overwide_collar[0].update(
+        {
+            "expected_price": 50,
+            "limit_price": 50.51,
+            "cap_enforcement_price": 50.51,
+            "notional": 101.02,
+        }
+    )
+    with pytest.raises(AuthorityContractError, match="adverse-fill collar"):
+        _rebuild_exact(payload, buy_orders=overwide_collar)
     with pytest.raises(AuthorityContractError, match="exceeds 50 basis points"):
         _rebuild_exact(
             payload,
@@ -566,6 +801,122 @@ def test_exact_executor_reconciles_market_order_cash_at_actual_fill_prices(
     assert result.final_cash != pytest.approx(plan.expected_posttrade_cash)
 
 
+class AdverseFillPaperBroker(TrackingPaperBroker):
+    def __init__(self, *, sell_price: float = 100.0, buy_price: float = 50.0):
+        super().__init__()
+        self.sell_price = float(sell_price)
+        self.buy_price = float(buy_price)
+
+    def submit_market_order(self, **kwargs):
+        self.submit_calls += 1
+        symbol = str(kwargs["symbol"])
+        side = str(kwargs["side"]).upper()
+        quantity = float(kwargs["qty"])
+        price = self.sell_price if side == "SELL" else self.buy_price
+        notional = quantity * price
+        client_id = str(kwargs["client_order_id"])
+        row = {
+            "id": f"broker-{self.submit_calls}",
+            "client_order_id": client_id,
+            "symbol": symbol,
+            "side": side,
+            "qty": str(quantity),
+            "status": "filled",
+            "filled_qty": str(quantity),
+            "filled_avg_price": str(price),
+        }
+        self.orders[client_id] = row
+        if side == "SELL":
+            self.positions = [
+                item for item in self.positions if item["symbol"] != symbol
+            ]
+            self.cash += notional
+        else:
+            self.positions.append(
+                {
+                    "symbol": symbol,
+                    "qty": str(quantity),
+                    "market_value": str(notional),
+                }
+            )
+            self.cash -= notional
+        return copy.deepcopy(row)
+
+
+def _collared_plan(*, capital_cap_usd: float = 1000.0):
+    payload = _plan().to_dict()
+    return _rebuild_exact(
+        payload,
+        sell_orders=[
+            {
+                "symbol": "OLD",
+                "side": "SELL",
+                "quantity": 1,
+                "expected_price": 100,
+                "limit_price": 99,
+                "cap_enforcement_price": 99,
+                "notional": 99,
+            }
+        ],
+        buy_orders=[
+            {
+                "symbol": "AAPL",
+                "side": "BUY",
+                "quantity": 2,
+                "expected_price": 50,
+                "limit_price": 50.5,
+                "cap_enforcement_price": 50.5,
+                "notional": 101,
+            }
+        ],
+        expected_posttrade_cash=898,
+        constraints={
+            **payload["constraints"],
+            "capital_cap_usd": capital_cap_usd,
+        },
+    )
+
+
+def test_market_fill_at_adverse_boundary_reconciles(tmp_path: Path):
+    broker = AdverseFillPaperBroker(sell_price=99.0, buy_price=50.5)
+    result = execute_exact_plan(
+        plan_payload=_collared_plan().to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="adverse-fill-at-boundary",
+        dry_run=False,
+    )
+
+    assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert result.status == "RECONCILED_SUCCESS"
+    assert broker.submit_calls == 2
+
+
+def test_sell_fill_below_protective_limit_stops_buy_phase(tmp_path: Path):
+    broker = AdverseFillPaperBroker(sell_price=98.99)
+    result = execute_exact_plan(
+        plan_payload=_collared_plan().to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="adverse-sell-fill-over-boundary",
+        dry_run=False,
+    )
+
+    assert result.status == "SUBMISSION_UNKNOWN"
+    assert result.failure_class.value == "BROKER_FAILURE"
+    assert ":invalid_broker_evidence:" in result.reason_code
+    assert "broker fill price violates durable limit order" in result.reason_code
+    assert broker.submit_calls == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+
+
+def test_protective_buy_limit_cannot_be_authorized_above_sealed_cap():
+    with pytest.raises(AuthorityContractError, match="buy notional exceeds"):
+        _collared_plan(capital_cap_usd=100.0)
+
+
 def test_exact_executor_blocks_identical_state_from_different_paper_account(
     tmp_path: Path,
 ):
@@ -682,6 +1033,277 @@ def test_completed_wal_recovery_after_close_is_lookup_only_and_reconciles(
     assert all(row["recovered_by_client_order_id"] for row in recovered.orders_submitted)
 
 
+def test_immediate_order_id_only_response_refreshes_by_canonical_broker_id(
+    tmp_path: Path,
+):
+    class OrderIdOnlyAcceptedBroker(TrackingPaperBroker):
+        def submit_limit_order(self, **kwargs):
+            self.submit_calls += 1
+            broker_id = f"broker-{self.submit_calls}"
+            client_id = str(kwargs["client_order_id"])
+            row = {
+                "order_id": broker_id,
+                "client_order_id": client_id,
+                "symbol": str(kwargs["symbol"]),
+                "side": str(kwargs["side"]).upper(),
+                "qty": str(float(kwargs["qty"])),
+                "status": "accepted",
+                "filled_qty": "0",
+                "limit_price": str(float(kwargs["limit_price"])),
+            }
+            self.orders[client_id] = row
+            return copy.deepcopy(row)
+
+        def get_order(self, order_id):
+            row = next(
+                item for item in self.orders.values()
+                if item["order_id"] == order_id
+            )
+            if row["status"] != "filled":
+                quantity = float(row["qty"])
+                price = float(row["limit_price"])
+                notional = quantity * price
+                row["status"] = "filled"
+                row["filled_qty"] = str(quantity)
+                row["filled_avg_price"] = str(price)
+                if row["side"] == "SELL":
+                    self.positions = [
+                        item for item in self.positions
+                        if item["symbol"] != row["symbol"]
+                    ]
+                    self.cash += notional
+                else:
+                    self.positions.append(
+                        {
+                            "symbol": row["symbol"],
+                            "qty": str(quantity),
+                            "market_value": str(notional),
+                        }
+                    )
+                    self.cash -= notional
+            return copy.deepcopy(row)
+
+    broker = OrderIdOnlyAcceptedBroker()
+    result = execute_exact_plan(
+        plan_payload=_plan().to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="order-id-only-response",
+        dry_run=False,
+    )
+
+    assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert broker.submit_calls == 2
+    assert [row["id"] for row in result.orders_submitted] == [
+        "broker-1",
+        "broker-2",
+    ]
+
+
+def _seed_legacy_durable_orders(
+    *,
+    plan,
+    broker: TrackingPaperBroker,
+    wal_root: Path,
+    count: int,
+) -> None:
+    from core.submission_wal import OrderIntent, prepare_order_intent
+
+    for order in plan.orders[:count]:
+        if order["order_type"] == "limit":
+            broker.submit_limit_order(
+                symbol=order["symbol"],
+                qty=order["quantity"],
+                side=order["side"],
+                client_order_id=order["client_order_id"],
+                tif=order["time_in_force"],
+                limit_price=order.get("limit_price"),
+                extended_hours=order["extended_hours"],
+            )
+        else:
+            broker.submit_market_order(
+                symbol=order["symbol"],
+                qty=order["quantity"],
+                side=order["side"],
+                client_order_id=order["client_order_id"],
+                tif=order["time_in_force"],
+                estimated_notional=order["notional"],
+            )
+        prepare_order_intent(
+            wal_root,
+            OrderIntent(
+                trade_date=plan.trade_date,
+                plan_id=plan.plan_id,
+                plan_hash=plan.content_hash,
+                attempt_id="legacy-predeploy",
+                order_id=order["order_id"],
+                client_order_id=order["client_order_id"],
+                symbol=order["symbol"],
+                side=order["side"],
+                quantity=order["quantity"],
+                order_type=order["order_type"],
+                created_at="2026-08-12T13:35:01Z",
+                limit_price=order.get("limit_price"),
+                expected_price=order["expected_price"],
+                notional=order["notional"],
+                time_in_force=order["time_in_force"],
+                extended_hours=order["extended_hours"],
+                sleeve="caerus_orion",
+            ),
+        )
+
+
+def test_legacy_plan_without_fill_risk_authority_cannot_create_a_new_intent(
+    tmp_path: Path,
+):
+    plan = _legacy_pre_fill_risk_plan()
+    assert exact_execution_plan_from_dict(plan.to_dict()).content_hash == plan.content_hash
+    broker = TrackingPaperBroker()
+
+    result = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="legacy-fresh-blocked",
+        dry_run=False,
+    )
+
+    assert result.status == "BLOCKED"
+    assert result.reason_code == "exact_fill_slippage_authority_invalid"
+    assert broker.submit_calls == 0
+    assert not list((tmp_path / "wal").rglob("*/intents/*.json"))
+
+
+def test_legacy_plan_with_all_durable_intents_recovers_lookup_only(
+    tmp_path: Path,
+):
+    plan = _legacy_pre_fill_risk_plan()
+    broker = TrackingPaperBroker()
+    wal_root = tmp_path / "wal"
+    _seed_legacy_durable_orders(
+        plan=plan,
+        broker=broker,
+        wal_root=wal_root,
+        count=len(plan.orders),
+    )
+    calls = broker.submit_calls
+
+    result = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=wal_root,
+        attempt_id="legacy-lookup-only",
+        dry_run=False,
+    )
+
+    assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert broker.submit_calls == calls
+    assert all(row["recovered_by_client_order_id"] for row in result.orders_submitted)
+
+
+def test_predeploy_market_plan_with_all_durable_intents_recovers_lookup_only(
+    tmp_path: Path,
+):
+    plan = _legacy_market_plan()
+    assert "new_order_execution_style" not in plan.constraints
+    assert "max_adverse_fill_slippage_bps" not in plan.constraints
+    assert {order["order_type"] for order in plan.orders} == {"market"}
+    broker = TrackingPaperBroker()
+    wal_root = tmp_path / "wal"
+    _seed_legacy_durable_orders(
+        plan=plan,
+        broker=broker,
+        wal_root=wal_root,
+        count=len(plan.orders),
+    )
+    calls = broker.submit_calls
+
+    result = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=wal_root,
+        attempt_id="predeploy-market-lookup-only",
+        dry_run=False,
+    )
+
+    assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert broker.submit_calls == calls
+    assert all(row["recovered_by_client_order_id"] for row in result.orders_submitted)
+
+
+def test_legacy_partial_recovery_resolves_prior_fill_but_never_submits_remainder(
+    tmp_path: Path,
+):
+    plan = _legacy_pre_fill_risk_plan()
+    broker = TrackingPaperBroker()
+    wal_root = tmp_path / "wal"
+    _seed_legacy_durable_orders(
+        plan=plan,
+        broker=broker,
+        wal_root=wal_root,
+        count=1,
+    )
+    calls = broker.submit_calls
+
+    result = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=wal_root,
+        attempt_id="legacy-partial-blocked",
+        dry_run=False,
+    )
+
+    assert result.status == "FAILED_RECONCILIATION"
+    assert result.reason_code == "exact_fill_slippage_authority_invalid"
+    assert len(result.orders_submitted) == len(result.orders_filled) == 1
+    assert broker.submit_calls == calls == 1
+    assert len(list(wal_root.rglob("*/intents/*.json"))) == 1
+
+
+def test_legacy_partial_recovery_dry_run_does_not_mutate_wal(
+    tmp_path: Path,
+):
+    plan = _legacy_pre_fill_risk_plan()
+    broker = TrackingPaperBroker()
+    wal_root = tmp_path / "wal"
+    _seed_legacy_durable_orders(
+        plan=plan,
+        broker=broker,
+        wal_root=wal_root,
+        count=1,
+    )
+    before = {
+        path.relative_to(wal_root).as_posix(): path.read_bytes()
+        for path in wal_root.rglob("*")
+        if path.is_file()
+    }
+    calls = broker.submit_calls
+
+    result = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=wal_root,
+        attempt_id="legacy-partial-dry-run",
+        dry_run=True,
+    )
+
+    after = {
+        path.relative_to(wal_root).as_posix(): path.read_bytes()
+        for path in wal_root.rglob("*")
+        if path.is_file()
+    }
+    assert result.status == "FAILED_RECONCILIATION"
+    assert result.reason_code == "exact_fill_slippage_authority_invalid"
+    assert broker.submit_calls == calls == 1
+    assert after == before
+
+
 def test_restart_after_accepted_response_loss_recovers_without_duplicate(tmp_path: Path):
     broker = TrackingPaperBroker(crash_after_accept=True)
     plan = _plan()
@@ -717,6 +1339,96 @@ def test_completed_wal_recovery_ignores_later_cap_tightening_and_never_duplicate
     assert len(recovered.orders_submitted) == 2
     assert all(row["recovered_by_client_order_id"] for row in recovered.orders_submitted)
     assert broker.submit_calls == calls
+
+
+def test_partial_buy_recovery_counts_prior_fill_against_tightened_runtime_cap(
+    tmp_path: Path,
+):
+    class MidBatchOpenOrderBroker(TrackingPaperBroker):
+        def __init__(self):
+            super().__init__()
+            self.block_after_first_submission = True
+
+        def list_orders(self, status="open", limit=100, **kwargs):
+            del limit, kwargs
+            if status != "open" or not self.block_after_first_submission:
+                return []
+            if self.submit_calls < 1:
+                return []
+            return [
+                {
+                    "id": "external-mid-batch",
+                    "client_order_id": "external-mid-batch",
+                    "symbol": "QQQ",
+                    "side": "BUY",
+                    "status": "accepted",
+                    "filled_qty": "0",
+                }
+            ]
+
+    base = _plan().to_dict()
+    plan = _rebuild_exact(
+        base,
+        run_id="partial-buy-runtime-cap",
+        sell_orders=[],
+        buy_orders=[
+            {
+                "symbol": "AAPL",
+                "side": "BUY",
+                "quantity": 6,
+                "expected_price": 50,
+                "notional": 300,
+            },
+            {
+                "symbol": "MSFT",
+                "side": "BUY",
+                "quantity": 6,
+                "expected_price": 50,
+                "notional": 300,
+            },
+        ],
+        expected_posttrade_positions=[
+            {"symbol": "AAPL", "quantity": 6.0},
+            {"symbol": "MSFT", "quantity": 6.0},
+            {"symbol": "OLD", "quantity": 1.0},
+        ],
+        expected_posttrade_cash=300.0,
+    )
+    broker = MidBatchOpenOrderBroker()
+    wal_root = tmp_path / "wal"
+    first = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_env(),
+        wal_root=wal_root,
+        attempt_id="partial-buy-first",
+        dry_run=False,
+    )
+    assert first.status == "FAILED_RECONCILIATION"
+    assert broker.submit_calls == 1
+
+    broker.block_after_first_submission = False
+    recovered = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env={**_env(), "CAERUS_LIVE_PILOT_CAPITAL_CAP": "500"},
+        wal_root=wal_root,
+        attempt_id="partial-buy-tightened-cap",
+        dry_run=False,
+    )
+
+    assert recovered.status == "FAILED_RECONCILIATION"
+    assert recovered.reason_code == (
+        "runtime_dynamic_cap_below_authorized_buy_notional"
+    )
+    assert len(recovered.orders_submitted) == len(recovered.orders_filled) == 1
+    assert broker.submit_calls == 1
+    assert len(list(wal_root.rglob("*/intents/*.json"))) == 1
+    resolution_states = {
+        json.loads(path.read_text(encoding="utf-8"))["state"]
+        for path in wal_root.rglob("*/resolutions/*/*.json")
+    }
+    assert "ECONOMICALLY_RECONCILED" in resolution_states
 
 
 def test_partial_wal_recovery_after_close_is_truthful_and_never_duplicates(
@@ -844,6 +1556,474 @@ def test_distinct_paper_drill_epochs_have_isolated_wal_and_claims(tmp_path: Path
     assert (tmp_path / "wal/epochs/2026-08-12T1030ET/2026-08-12/intents").is_dir()
 
 
+def test_filled_prior_epoch_blocks_later_epoch_on_lagging_account_snapshot(
+    tmp_path: Path,
+):
+    broker = TrackingPaperBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    first_result = execute_exact_plan(
+        plan_payload=first.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="filled-1030",
+        dry_run=False,
+    )
+    assert first_result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert broker.submit_calls == 2
+
+    # Simulate an account endpoint lagging backward even though stable-ID order
+    # lookup already reports both prior orders filled. A plan built from this
+    # stale snapshot would repeat the same economic transition under new IDs.
+    broker.positions = [
+        {"symbol": "OLD", "qty": "1", "market_value": "100"}
+    ]
+    broker.cash = 900.0
+    second = _epoch_plan(
+        _rebuild_exact(first.to_dict(), run_id="lagging-snapshot-1130"),
+        "2026-08-12T1130ET",
+    )
+    blocked = execute_exact_plan(
+        plan_payload=second.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="lagging-snapshot-1130",
+        dry_run=False,
+    )
+
+    assert blocked.reason_code == "prior_epoch_submission_unresolved"
+    assert broker.submit_calls == 2
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 2
+
+
+def test_three_successive_epochs_validate_ordered_reconciled_state_chain(
+    tmp_path: Path,
+):
+    broker = TrackingPaperBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    assert execute_exact_plan(
+        plan_payload=first.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="chain-1030",
+        dry_run=False,
+    ).terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+
+    second = _rebuild_exact(
+        first.to_dict(),
+        run_id="chain-1130",
+        starting_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        starting_cash=900.0,
+        sell_orders=[
+            {
+                "symbol": "AAPL",
+                "side": "SELL",
+                "quantity": 2,
+                "expected_price": 50,
+                "notional": 100,
+            }
+        ],
+        buy_orders=[
+            {
+                "symbol": "MSFT",
+                "side": "BUY",
+                "quantity": 2,
+                "expected_price": 50,
+                "notional": 100,
+            }
+        ],
+        expected_posttrade_positions=[{"symbol": "MSFT", "quantity": 2.0}],
+        expected_posttrade_cash=900.0,
+        constraints={
+            **first.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1130ET",
+            "paper_drill_live_eligible": False,
+        },
+    )
+    assert execute_exact_plan(
+        plan_payload=second.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="chain-1130",
+        dry_run=False,
+    ).terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+
+    third = _rebuild_exact(
+        second.to_dict(),
+        run_id="chain-1230",
+        starting_positions=[{"symbol": "MSFT", "quantity": 2.0}],
+        starting_cash=900.0,
+        sell_orders=[],
+        buy_orders=[],
+        expected_posttrade_positions=[{"symbol": "MSFT", "quantity": 2.0}],
+        expected_posttrade_cash=900.0,
+        constraints={
+            **second.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1230ET",
+            "paper_drill_live_eligible": False,
+        },
+    )
+    third_result = execute_exact_plan(
+        plan_payload=third.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="chain-1230",
+        dry_run=False,
+    )
+
+    assert third_result.terminal_outcome is TerminalOutcome.AUTHORIZED_NO_TRADE
+    assert broker.submit_calls == 4
+
+
+def test_latest_epoch_success_replay_uses_current_wal_without_resubmission(
+    tmp_path: Path,
+):
+    broker = TrackingPaperBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    assert execute_exact_plan(
+        plan_payload=first.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="replay-chain-1030",
+        dry_run=False,
+    ).terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    second = _rebuild_exact(
+        first.to_dict(),
+        run_id="replay-chain-1130",
+        starting_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        starting_cash=900.0,
+        sell_orders=[
+            {
+                "symbol": "AAPL",
+                "side": "SELL",
+                "quantity": 2,
+                "expected_price": 50,
+                "notional": 100,
+            }
+        ],
+        buy_orders=[
+            {
+                "symbol": "MSFT",
+                "side": "BUY",
+                "quantity": 2,
+                "expected_price": 50,
+                "notional": 100,
+            }
+        ],
+        expected_posttrade_positions=[{"symbol": "MSFT", "quantity": 2.0}],
+        expected_posttrade_cash=900.0,
+        constraints={
+            **first.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1130ET",
+            "paper_drill_live_eligible": False,
+        },
+    )
+    first_second = execute_exact_plan(
+        plan_payload=second.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="replay-chain-1130-first",
+        dry_run=False,
+    )
+    assert first_second.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert broker.submit_calls == 4
+
+    replay = execute_exact_plan(
+        plan_payload=second.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="replay-chain-1130-recovery",
+        dry_run=False,
+    )
+
+    assert replay.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert len(replay.orders_submitted) == 2
+    assert all(
+        row.get("recovered_by_client_order_id") is True
+        for row in replay.orders_submitted
+    )
+    assert broker.submit_calls == 4
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 4
+
+
+def test_recovery_dry_run_is_wal_nonmutating_and_does_not_poison_next_epoch(
+    tmp_path: Path,
+):
+    broker = TrackingPaperBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    assert execute_exact_plan(
+        plan_payload=first.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="dry-replay-1030",
+        dry_run=False,
+    ).terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    resolution_paths = sorted(
+        (tmp_path / "wal").rglob("*/resolutions/*/*.json")
+    )
+    before = {path: path.read_bytes() for path in resolution_paths}
+
+    dry = execute_exact_plan(
+        plan_payload=first.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="dry-replay-1030-validation",
+        dry_run=True,
+    )
+    assert dry.status == "DRY_RUN"
+    after_paths = sorted((tmp_path / "wal").rglob("*/resolutions/*/*.json"))
+    assert after_paths == resolution_paths
+    assert {path: path.read_bytes() for path in after_paths} == before
+
+    next_epoch = _rebuild_exact(
+        first.to_dict(),
+        run_id="dry-replay-1130",
+        starting_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        starting_cash=900.0,
+        sell_orders=[],
+        buy_orders=[],
+        expected_posttrade_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        expected_posttrade_cash=900.0,
+        constraints={
+            **first.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1130ET",
+            "paper_drill_live_eligible": False,
+        },
+    )
+    result = execute_exact_plan(
+        plan_payload=next_epoch.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="dry-replay-1130",
+        dry_run=False,
+    )
+    assert result.terminal_outcome is TerminalOutcome.AUTHORIZED_NO_TRADE
+    assert broker.submit_calls == 2
+
+
+def test_out_of_order_paper_drill_epoch_is_blocked_before_wal_or_submission(
+    tmp_path: Path,
+):
+    broker = TrackingPaperBroker()
+    later = _epoch_plan(_plan(), "2026-08-12T1130ET")
+    assert execute_exact_plan(
+        plan_payload=later.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="epoch-order-1130",
+        dry_run=False,
+    ).terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    earlier = _rebuild_exact(
+        later.to_dict(),
+        run_id="epoch-order-1030",
+        starting_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        starting_cash=900.0,
+        sell_orders=[],
+        buy_orders=[],
+        expected_posttrade_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        expected_posttrade_cash=900.0,
+        constraints={
+            **later.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1030ET",
+            "paper_drill_live_eligible": False,
+        },
+    )
+    blocked = execute_exact_plan(
+        plan_payload=earlier.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="epoch-order-1030",
+        dry_run=False,
+    )
+    assert blocked.reason_code == "paper drill epoch order is not monotonic"
+    assert "not monotonic" in blocked.reason_code
+    assert broker.submit_calls == 2
+    assert not (
+        tmp_path
+        / "wal/epochs/2026-08-12T1030ET/2026-08-12/intents"
+    ).exists()
+
+
+def test_later_no_trade_claim_blocks_earlier_trade_epoch(tmp_path: Path):
+    broker = TrackingPaperBroker()
+    later_no_trade = _epoch_plan(
+        _plan(no_trade=True),
+        "2026-08-12T1130ET",
+    )
+    first = execute_exact_plan(
+        plan_payload=later_no_trade.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="claim-order-no-trade-1130",
+        dry_run=False,
+    )
+    assert first.terminal_outcome is TerminalOutcome.AUTHORIZED_NO_TRADE
+    assert broker.submit_calls == 0
+
+    earlier_trade = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    blocked = execute_exact_plan(
+        plan_payload=earlier_trade.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="claim-order-trade-1030",
+        dry_run=False,
+    )
+    assert blocked.status == "BLOCKED"
+    assert blocked.reason_code == "paper drill epoch order is not monotonic"
+    assert broker.submit_calls == 0
+    assert not (
+        tmp_path
+        / "wal/epochs/2026-08-12T1030ET/2026-08-12/intents"
+    ).exists()
+
+
+def test_current_epoch_recovery_explains_own_fill_after_prior_epoch(
+    tmp_path: Path,
+):
+    class OneAmbiguousSecondEpochSellBroker(TrackingPaperBroker):
+        def __init__(self):
+            super().__init__()
+            self.fail_next_lookup = False
+
+        def submit_market_order(self, **kwargs):
+            row = super().submit_market_order(**kwargs)
+            if (
+                str(kwargs["symbol"]).upper() == "AAPL"
+                and str(kwargs["side"]).upper() == "SELL"
+                and not self.fail_next_lookup
+            ):
+                self.fail_next_lookup = True
+                raise TimeoutError("response lost after broker acceptance")
+            return row
+
+        def find_order_by_client_id(self, client_id):
+            if self.fail_next_lookup:
+                self.fail_next_lookup = False
+                raise TimeoutError("stable lookup temporarily unavailable")
+            return super().find_order_by_client_id(client_id)
+
+    broker = OneAmbiguousSecondEpochSellBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    assert execute_exact_plan(
+        plan_payload=first.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="own-fill-1030",
+        dry_run=False,
+    ).terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    second = _rebuild_exact(
+        first.to_dict(),
+        run_id="own-fill-1130",
+        starting_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        starting_cash=900.0,
+        sell_orders=[
+            {
+                "symbol": "AAPL",
+                "side": "SELL",
+                "quantity": 2,
+                "expected_price": 50,
+                "notional": 100,
+            }
+        ],
+        buy_orders=[
+            {
+                "symbol": "MSFT",
+                "side": "BUY",
+                "quantity": 2,
+                "expected_price": 50,
+                "notional": 100,
+            }
+        ],
+        expected_posttrade_positions=[{"symbol": "MSFT", "quantity": 2.0}],
+        expected_posttrade_cash=900.0,
+        constraints={
+            **first.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1130ET",
+            "paper_drill_live_eligible": False,
+        },
+    )
+    ambiguous = execute_exact_plan(
+        plan_payload=second.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="own-fill-1130-ambiguous",
+        dry_run=False,
+    )
+    assert ambiguous.terminal_outcome is TerminalOutcome.SUBMISSION_UNKNOWN
+    assert broker.submit_calls == 3
+
+    recovered = execute_exact_plan(
+        plan_payload=second.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="own-fill-1130-recovery",
+        dry_run=False,
+    )
+
+    assert recovered.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert [row["side"] for row in recovered.orders_submitted] == ["SELL", "BUY"]
+    assert recovered.orders_submitted[0]["recovered_by_client_order_id"] is True
+    assert broker.submit_calls == 4
+
+
+def test_distinct_epoch_cannot_change_account_date_wal_base(tmp_path: Path):
+    broker = TrackingPaperBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    assert execute_exact_plan(
+        plan_payload=first.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal-a",
+        attempt_id="wal-base-1030",
+        dry_run=False,
+    ).terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    second = _rebuild_exact(
+        first.to_dict(),
+        run_id="wal-base-1130",
+        starting_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        starting_cash=900.0,
+        sell_orders=[],
+        buy_orders=[],
+        expected_posttrade_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        expected_posttrade_cash=900.0,
+        constraints={
+            **first.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1130ET",
+            "paper_drill_live_eligible": False,
+        },
+    )
+
+    blocked = execute_exact_plan(
+        plan_payload=second.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal-b",
+        attempt_id="wal-base-1130",
+        dry_run=False,
+    )
+
+    assert blocked.reason_code == "submission_wal_base_conflicts_with_account_date"
+    assert broker.submit_calls == 2
+    assert not (tmp_path / "wal-b").exists()
+
+
 def test_reusing_epoch_with_different_plan_is_blocked(tmp_path: Path):
     broker = TrackingPaperBroker()
     first = _epoch_plan(_plan(), "2026-08-12T1030ET")
@@ -883,6 +2063,291 @@ def test_unresolved_prior_epoch_blocks_new_epoch(tmp_path: Path):
     )
     assert blocked.reason_code == "prior_epoch_submission_unresolved"
     assert broker.submit_calls == calls
+
+
+@pytest.mark.parametrize(
+    "second_epoch",
+    ["2026-08-12T1130ET", None],
+    ids=["epoch-to-epoch", "epoch-to-legacy"],
+)
+def test_prior_accepted_order_blocks_unrelated_later_namespace(
+    tmp_path: Path,
+    second_epoch: str | None,
+):
+    class AcceptedOrderBroker(TrackingPaperBroker):
+        def submit_market_order(self, **kwargs):
+            self.submit_calls += 1
+            row = {
+                "id": f"broker-{self.submit_calls}",
+                "client_order_id": str(kwargs["client_order_id"]),
+                "symbol": str(kwargs["symbol"]),
+                "side": str(kwargs["side"]).upper(),
+                "qty": str(kwargs["qty"]),
+                "status": "accepted",
+                "filled_qty": "0",
+            }
+            self.orders[str(row["client_order_id"])] = row
+            return copy.deepcopy(row)
+
+    broker = AcceptedOrderBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    accepted = execute_exact_plan(
+        plan_payload=first.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="accepted-1030",
+        dry_run=False,
+    )
+    assert accepted.status == "SUBMITTED_UNFILLED"
+    assert broker.submit_calls == 1
+
+    constraints = dict(first.to_dict()["constraints"])
+    if second_epoch is None:
+        constraints.pop("paper_drill_epoch", None)
+        constraints.pop("paper_drill_live_eligible", None)
+    else:
+        constraints.update(
+            {
+                "paper_drill_epoch": second_epoch,
+                "paper_drill_live_eligible": False,
+            }
+        )
+    second = _rebuild_exact(
+        first.to_dict(),
+        run_id=f"authority-{second_epoch or 'legacy'}",
+        sell_orders=[],
+        buy_orders=[
+            {
+                "symbol": "MSFT",
+                "side": "BUY",
+                "quantity": 1,
+                "expected_price": 50,
+                "notional": 50,
+            }
+        ],
+        starting_positions=[{"symbol": "OLD", "quantity": 1.0}],
+        starting_cash=900.0,
+        expected_posttrade_positions=[
+            {"symbol": "MSFT", "quantity": 1.0},
+            {"symbol": "OLD", "quantity": 1.0},
+        ],
+        expected_posttrade_cash=850.0,
+        constraints=constraints,
+    )
+    blocked = execute_exact_plan(
+        plan_payload=second.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id=f"after-accepted-{second_epoch or 'legacy'}",
+        dry_run=False,
+    )
+
+    if second_epoch is None:
+        assert blocked.reason_code == "paper drill epoch order is not monotonic"
+    else:
+        assert blocked.reason_code == "prior_epoch_submission_unresolved"
+    assert broker.submit_calls == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+
+
+def test_authorizer_precheck_blocks_foreign_accepted_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    import scripts.authorize_exact_execution_plan as authorizer
+    from core.submission_wal import (
+        OrderIntent,
+        ResolutionState,
+        append_resolution,
+        new_resolution,
+        prepare_order_intent,
+    )
+
+    output = tmp_path / "paper_lane" / "plans" / "exact.latest.json"
+    base_wal = tmp_path / "paper_lane" / "submission_wal"
+    prior_wal = base_wal / "epochs" / "2026-08-12T1030ET"
+    intent = OrderIntent(
+        trade_date="2026-08-12",
+        plan_id="plan:prior-1030",
+        plan_hash="a" * 64,
+        attempt_id="attempt-prior-1030",
+        order_id="order:prior:accepted",
+        client_order_id="cx-prior-accepted",
+        symbol="AAPL",
+        side="BUY",
+        quantity=1,
+        order_type="market",
+        created_at="2026-08-12T14:30:00Z",
+        expected_price=50,
+        notional=50,
+    )
+    prepared = prepare_order_intent(prior_wal, intent)
+    append_resolution(
+        prior_wal,
+        new_resolution(
+            resolution_id="resolution-prior-submitted",
+            intent=prepared.intent,
+            state=ResolutionState.SUBMITTED,
+            broker_order_id="broker-prior-accepted",
+        ),
+    )
+    broker = TrackingPaperBroker()
+    broker.orders[intent.client_order_id] = {
+        "id": "broker-prior-accepted",
+        "client_order_id": intent.client_order_id,
+        "symbol": "AAPL",
+        "side": "BUY",
+        "status": "accepted",
+        "filled_qty": "0",
+    }
+    monkeypatch.setattr(authorizer.AlpacaBroker, "from_env", lambda: broker)
+    source = tmp_path / "plan.json"
+    source.write_text(
+        json.dumps({"trade_date": "2026-08-12"}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert authorizer.main(
+        [
+            "--plan",
+            str(source),
+            "--run-id",
+            "blocked-by-prior-accepted",
+            "--output",
+            str(output),
+        ]
+    ) == 1
+    emitted = json.loads(capsys.readouterr().out)
+    assert emitted["reason_code"] == "paper_drill_prior_submission_unresolved"
+    assert emitted["orders_submitted"] == 0
+    assert broker.submit_calls == 0
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("no_trade", [False, True], ids=["trade", "no-trade"])
+def test_any_unrelated_broker_open_order_blocks_exact_plan(
+    tmp_path: Path,
+    no_trade: bool,
+):
+    class UnrelatedOpenOrderBroker(TrackingPaperBroker):
+        def list_orders(self, status="open", limit=100, **kwargs):
+            del limit, kwargs
+            if status != "open":
+                return []
+            return [
+                {
+                    "id": "external-open-order",
+                    "client_order_id": "external-unrelated-order",
+                    "symbol": "MSFT",
+                    "side": "BUY",
+                    "status": "accepted",
+                    "filled_qty": "0",
+                }
+            ]
+
+    broker = UnrelatedOpenOrderBroker()
+    blocked = execute_exact_plan(
+        plan_payload=_plan(no_trade=no_trade).to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id=f"unrelated-open-{no_trade}",
+        dry_run=False,
+    )
+
+    assert blocked.reason_code == "unresolved_broker_open_order"
+    assert blocked.reconciliation_status == "FAILED_PRE_SUBMIT"
+    assert broker.submit_calls == 0
+    assert not list((tmp_path / "wal").rglob("*/intents/*.json"))
+
+
+def test_open_order_appearing_mid_batch_blocks_every_later_intent(
+    tmp_path: Path,
+):
+    class MidBatchExternalOrderBroker(TrackingPaperBroker):
+        def __init__(self):
+            super().__init__()
+            self.open_order_checks = 0
+
+        def list_orders(self, status="open", limit=100, **kwargs):
+            del limit, kwargs
+            if status != "open":
+                return []
+            self.open_order_checks += 1
+            if self.submit_calls == 0:
+                return []
+            return [
+                {
+                    "id": "external-open-mid-batch",
+                    "client_order_id": "external-unrelated-mid-batch",
+                    "symbol": "MSFT",
+                    "side": "BUY",
+                    "status": "accepted",
+                    "filled_qty": "0",
+                }
+            ]
+
+    broker = MidBatchExternalOrderBroker()
+    result = execute_exact_plan(
+        plan_payload=_plan().to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="external-open-mid-batch",
+        dry_run=False,
+    )
+
+    assert result.status == "FAILED_RECONCILIATION"
+    assert result.reason_code == (
+        "broker_open_order_unresolved_order:mid_batch_submission_halted"
+    )
+    assert broker.submit_calls == 1
+    assert broker.open_order_checks >= 3
+    assert len(result.orders_submitted) == len(result.orders_filled) == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+
+
+def test_external_fill_disappearing_from_open_orders_blocks_before_new_wal(
+    tmp_path: Path,
+):
+    class ExternalTerminalFillBroker(TrackingPaperBroker):
+        def __init__(self):
+            super().__init__()
+            self.open_order_checks = 0
+
+        def list_orders(self, status="open", limit=100, **kwargs):
+            del limit, kwargs
+            if status != "open":
+                return []
+            self.open_order_checks += 1
+            if self.open_order_checks == 2:
+                # An unrelated order fills between the initial account snapshot
+                # and the per-order open-order check, then vanishes from the
+                # open-order endpoint before it can be observed there.
+                self.cash -= 100.0
+                self.positions.append(
+                    {"symbol": "MSFT", "qty": "1", "market_value": "100"}
+                )
+            return []
+
+    broker = ExternalTerminalFillBroker()
+    blocked = execute_exact_plan(
+        plan_payload=_plan().to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="external-terminal-fill-boundary",
+        dry_run=False,
+    )
+
+    assert blocked.status == "BLOCKED"
+    assert blocked.reason_code == "submission_boundary_broker_state_changed"
+    assert broker.submit_calls == 0
+    assert broker.open_order_checks >= 2
+    assert not list((tmp_path / "wal").rglob("*/intents/*.json"))
 
 
 def test_concurrent_different_same_date_plans_have_one_os_locked_winner(
@@ -1011,7 +2476,10 @@ def test_concurrent_different_plans_cannot_escape_via_distinct_wal_roots(
         row for row in results
         if row.terminal_outcome is TerminalOutcome.SYSTEM_FAILURE
     )
-    assert blocked.reason_code == "plan_claim_conflicts_with_authorized_plan"
+    assert blocked.reason_code in {
+        "plan_claim_conflicts_with_authorized_plan",
+        "submission_wal_base_conflicts_with_account_date",
+    }
     assert broker.submit_calls == 2
     claims = list((tmp_path / "account_authority").rglob("plan_claim.json"))
     assert len(claims) == 1
@@ -1064,6 +2532,7 @@ class PartialSellBroker(TrackingPaperBroker):
             "client_order_id": client_id,
             "symbol": str(kwargs["symbol"]),
             "side": "SELL",
+            "qty": str(quantity),
             "status": "partially_filled",
             "filled_qty": str(partial_quantity),
             "filled_avg_price": str(price),
@@ -1093,6 +2562,208 @@ class PartialSellBroker(TrackingPaperBroker):
             sell["status"] = "canceled"
         else:
             raise AssertionError(f"unsupported transition {status}")
+
+
+@pytest.mark.parametrize(
+    ("filled_qty", "filled_avg_price"),
+    [
+        ("0", "100"),
+        ("0.4", "100"),
+        ("1", ""),
+    ],
+    ids=["zero-fill", "partial-fill", "missing-fill-price"],
+)
+def test_contradictory_filled_sell_never_advances_to_buy(
+    tmp_path: Path,
+    filled_qty: str,
+    filled_avg_price: str,
+):
+    class ContradictoryFilledSellBroker(TrackingPaperBroker):
+        def submit_market_order(self, **kwargs):
+            if str(kwargs["side"]).upper() != "SELL":
+                raise AssertionError("BUY must never be reached")
+            self.submit_calls += 1
+            row = {
+                "id": f"broker-{self.submit_calls}",
+                "client_order_id": str(kwargs["client_order_id"]),
+                "symbol": str(kwargs["symbol"]),
+                "side": "SELL",
+                "qty": str(kwargs["qty"]),
+                "status": "filled",
+                "filled_qty": filled_qty,
+                "filled_avg_price": filled_avg_price,
+            }
+            self.orders[str(row["client_order_id"])] = copy.deepcopy(row)
+            return row
+
+    broker = ContradictoryFilledSellBroker()
+    result = execute_exact_plan(
+        plan_payload=_plan().to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="contradictory-filled-sell",
+        dry_run=False,
+    )
+
+    assert result.terminal_outcome is TerminalOutcome.SUBMISSION_UNKNOWN
+    assert result.status == "SUBMISSION_UNKNOWN"
+    assert broker.submit_calls == 1
+    assert not any(row.get("side") == "BUY" for row in broker.orders.values())
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+
+
+def test_broker_observation_persistence_failure_stops_after_first_submission(
+    tmp_path: Path,
+    monkeypatch,
+):
+    broker = TrackingPaperBroker()
+
+    def fail_observation(*_args, **_kwargs):
+        raise exact_executor_module.WalPersistenceError("simulated fsync failure")
+
+    monkeypatch.setattr(
+        exact_executor_module,
+        "_append_broker_observation",
+        fail_observation,
+    )
+    result = execute_exact_plan(
+        plan_payload=_plan().to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="broker-observation-fsync-failure",
+        dry_run=False,
+    )
+
+    assert result.terminal_outcome is TerminalOutcome.SUBMISSION_UNKNOWN
+    assert result.status == "SUBMISSION_UNKNOWN"
+    assert broker.submit_calls == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+    assert not list((tmp_path / "wal").rglob("*/resolutions/*/*.json"))
+
+
+def test_prior_partial_fill_blocks_unrelated_later_epoch(tmp_path: Path):
+    broker = PartialSellBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    partial = execute_exact_plan(
+        plan_payload=first.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="partial-1030",
+        dry_run=False,
+    )
+    assert partial.status == "SUBMITTED_UNFILLED"
+    assert broker.submit_calls == 1
+
+    second = _rebuild_exact(
+        first.to_dict(),
+        run_id="authority-after-partial-1130",
+        sell_orders=[],
+        buy_orders=[
+            {
+                "symbol": "MSFT",
+                "side": "BUY",
+                "quantity": 1,
+                "expected_price": 50,
+                "notional": 50,
+            }
+        ],
+        starting_positions=[{"symbol": "OLD", "quantity": 0.6}],
+        starting_cash=940.0,
+        expected_posttrade_positions=[
+            {"symbol": "MSFT", "quantity": 1.0},
+            {"symbol": "OLD", "quantity": 0.6},
+        ],
+        expected_posttrade_cash=890.0,
+        constraints={
+            **first.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1130ET",
+            "paper_drill_live_eligible": False,
+        },
+    )
+    blocked = execute_exact_plan(
+        plan_payload=second.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="after-partial-1130",
+        dry_run=False,
+    )
+
+    assert blocked.reason_code == "prior_epoch_submission_unresolved"
+    assert broker.submit_calls == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+
+
+def test_durable_partial_fill_cannot_be_erased_by_lookup_and_lagging_snapshot(
+    tmp_path: Path,
+):
+    broker = PartialSellBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    partial = execute_exact_plan(
+        plan_payload=first.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="durable-partial-1030",
+        dry_run=False,
+    )
+    assert partial.status == "SUBMITTED_UNFILLED"
+    assert broker.submit_calls == 1
+
+    sell = next(row for row in broker.orders.values() if row["side"] == "SELL")
+    sell["status"] = "canceled"
+    sell["filled_qty"] = "0"
+    sell["filled_avg_price"] = None
+    # Simulate both order-history and account endpoints lagging/regressing.  The
+    # append-only WAL must retain the previously observed 0.4-share fill.
+    broker.positions = [
+        {"symbol": "OLD", "qty": "1", "market_value": "100"}
+    ]
+    broker.cash = 900.0
+
+    second = _rebuild_exact(
+        first.to_dict(),
+        run_id="durable-partial-1130",
+        sell_orders=[],
+        buy_orders=[
+            {
+                "symbol": "MSFT",
+                "side": "BUY",
+                "quantity": 1,
+                "expected_price": 50,
+                "notional": 50,
+            }
+        ],
+        starting_positions=[{"symbol": "OLD", "quantity": 1.0}],
+        starting_cash=900.0,
+        expected_posttrade_positions=[
+            {"symbol": "MSFT", "quantity": 1.0},
+            {"symbol": "OLD", "quantity": 1.0},
+        ],
+        expected_posttrade_cash=850.0,
+        constraints={
+            **first.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1130ET",
+            "paper_drill_live_eligible": False,
+        },
+    )
+    blocked = execute_exact_plan(
+        plan_payload=second.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="durable-partial-1130",
+        dry_run=False,
+    )
+
+    assert blocked.status == "BLOCKED"
+    assert blocked.reason_code.startswith("prior_epoch_wal_integrity_failed:")
+    assert "filled quantity regressed" in blocked.reason_code
+    assert broker.submit_calls == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
 def test_partial_sell_open_then_filled_recovers_stable_id_before_buy(
@@ -1163,6 +2834,32 @@ def test_partial_sell_then_canceled_preserves_fill_and_never_buys(tmp_path: Path
     )
     assert broker.submit_calls == 1
     assert "AAPL" not in {row["symbol"] for row in broker.orders.values()}
+
+    next_epoch = _rebuild_exact(
+        plan.to_dict(),
+        run_id="after-terminal-partial-1130",
+        starting_positions=[{"symbol": "OLD", "quantity": 0.6}],
+        starting_cash=940.0,
+        sell_orders=[],
+        buy_orders=[],
+        expected_posttrade_positions=[{"symbol": "OLD", "quantity": 0.6}],
+        expected_posttrade_cash=940.0,
+        constraints={
+            **plan.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1130ET",
+            "paper_drill_live_eligible": False,
+        },
+    )
+    next_result = execute_exact_plan(
+        plan_payload=next_epoch.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="after-terminal-partial-1130",
+        dry_run=False,
+    )
+    assert next_result.terminal_outcome is TerminalOutcome.AUTHORIZED_NO_TRADE
+    assert broker.submit_calls == 1
 
 
 def test_alpaca_enum_qualified_terminal_status_is_recognized(tmp_path: Path):
@@ -1307,7 +3004,7 @@ def test_post_fill_snapshot_timeout_preserves_all_submitted_evidence(tmp_path: P
 
         def get_account(self):
             self.account_reads += 1
-            if self.account_reads >= 2:
+            if self.account_reads >= 4:
                 raise TimeoutError("posttrade account read timed out")
             return super().get_account()
 
@@ -1342,7 +3039,8 @@ def test_recovery_blocks_unexplained_external_state_drift_before_new_order(tmp_p
             client_order_id=sell["client_order_id"], symbol=sell["symbol"],
             side=sell["side"], quantity=sell["quantity"], order_type=sell["order_type"],
             created_at="2026-08-12T13:35:01Z", expected_price=sell["expected_price"],
-            notional=sell["notional"], sleeve="caerus_orion", time_in_force="day",
+            limit_price=sell["limit_price"], notional=sell["notional"],
+            sleeve="caerus_orion", time_in_force="day",
         ),
     )
     broker.cash += 7.0  # unexplained external mutation
@@ -1622,52 +3320,42 @@ def test_no_trade_fails_when_pre_snapshot_residual_exceeds_its_bps_budget(
     assert "STARTING_SNAPSHOT_NAV_IDENTITY_MISMATCH" in attribution["reason_codes"]
 
 
-def test_exact_extended_hours_limit_round_trip_is_sealed_and_reconciled(tmp_path: Path):
-    broker = TrackingPaperBroker()
+def test_protective_exact_style_rejects_extended_hours_orders():
     base = _plan().to_dict()
-    exact = _rebuild_exact(
-        base,
-        sell_orders=[
-            {
-                "symbol": "OLD",
-                "side": "SELL",
-                "quantity": 1,
-                "order_type": "limit",
-                "time_in_force": "day",
-                "extended_hours": True,
-                "limit_price": 99,
-                "expected_price": 99,
-                "notional": 99,
-            }
-        ],
-        buy_orders=[
-            {
-                "symbol": "AAPL",
-                "side": "BUY",
-                "quantity": 2,
-                "order_type": "limit",
-                "time_in_force": "day",
-                "extended_hours": True,
-                "limit_price": 51,
-                "expected_price": 51,
-                "notional": 102,
-            }
-        ],
-        expected_posttrade_cash=897,
-    )
-
-    result = execute_exact_plan(
-        plan_payload=exact.to_dict(),
-        broker=broker,
-        env=_execution_env(tmp_path),
-        wal_root=tmp_path / "wal",
-        attempt_id="extended-hours-round-trip",
-        dry_run=False,
-    )
-
-    assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
-    assert len(broker.limit_submissions) == 2
-    assert all(row["extended_hours"] is True for row in broker.limit_submissions)
+    with pytest.raises(
+        AuthorityContractError,
+        match="violates protective DAY-limit execution style",
+    ):
+        _rebuild_exact(
+            base,
+            sell_orders=[
+                {
+                    "symbol": "OLD",
+                    "side": "SELL",
+                    "quantity": 1,
+                    "order_type": "limit",
+                    "time_in_force": "day",
+                    "extended_hours": True,
+                    "limit_price": 99,
+                    "expected_price": 99,
+                    "notional": 99,
+                }
+            ],
+            buy_orders=[
+                {
+                    "symbol": "AAPL",
+                    "side": "BUY",
+                    "quantity": 2,
+                    "order_type": "limit",
+                    "time_in_force": "day",
+                    "extended_hours": True,
+                    "limit_price": 51,
+                    "expected_price": 51,
+                    "notional": 102,
+                }
+            ],
+            expected_posttrade_cash=897,
+        )
 
 
 def test_orchestrator_state_prewrite_failure_blocks_before_broker_mutation(
@@ -1930,7 +3618,10 @@ def test_fresh_broker_decision_seals_transition_before_executor(tmp_path: Path):
     source = tmp_path / "target-plan.json"
     source.write_text("{}\n", encoding="utf-8")
     sleeve_path, sleeve_hash = _write_orion_sleeve_authority(tmp_path)
-    target_rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 50.0}]
+    # The package mark is lineage from precompute, not an execution-time price.
+    # Make it materially different from the broker quote so this test proves the
+    # final Decision and allocation use the same fresh, broker-authoritative mark.
+    target_rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
     approved_package, authority_paths = _write_authority_chain(
         tmp_path, target_rows=target_rows, sleeve_hash=sleeve_hash
     )
@@ -1965,12 +3656,751 @@ def test_fresh_broker_decision_seals_transition_before_executor(tmp_path: Path):
     assert authorized["precompute_execution_authority"] is False
     assert [row["side"] for row in exact.orders] == ["SELL", "BUY"]
     assert [row["symbol"] for row in exact.orders] == ["OLD", "AAPL"]
+    buy = exact.buy_orders[0]
+    assert buy["quantity"] == 2.0
+    assert buy["expected_price"] == 50.0
+    assert buy["order_type"] == "limit"
+    assert buy["time_in_force"] == "day"
+    assert buy["limit_price"] == 50.5
+    assert buy["notional"] == 101.0
+    sell = exact.sell_orders[0]
+    assert sell["limit_price"] == 99.0
+    assert sell["notional"] == 99.0
+    assert exact.expected_posttrade_cash == 898.0
+    quote_by_symbol = {
+        row["symbol"]: row
+        for row in exact.market_state["quote_evidence"]["quotes"]
+    }
+    assert quote_by_symbol["AAPL"]["price"] == 50.0
+    assert exact.risk_state["trade_meta"]["broker_authoritative_prices"] is True
     assert exact.constraints["sleeve_attribution_interval"] == (
         "execution_pre_to_post_broker_nav"
     )
     assert exact.constraints["sleeve_attribution_mark_timing_tolerance_bps"] == 25.0
     assert exact.constraints["paper_drill_epoch"] == "2026-08-12T1230ET"
     assert exact.constraints["paper_drill_live_eligible"] is False
+    assert exact.constraints["max_adverse_fill_slippage_bps"] == 100.0
+    assert exact.constraints["new_order_execution_style"] == (
+        "protective_day_limit"
+    )
+
+
+def test_fresh_broker_decision_preserves_explicit_zero_weight_exit(
+    tmp_path: Path,
+):
+    broker = TrackingPaperBroker()
+    rows = [{"symbol": "OLD", "target_weight": 0.0, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    authorized = authorize_exact_execution_plan(
+        plan=plan,
+        broker=broker,
+        env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+        run_id="authority-zero-weight-exit",
+        plan_path=source,
+        created_at="2026-08-12T13:35:01+00:00",
+        regime_state_root=regime_state_root,
+    )
+    authorized = _finalize_direct_authorization(regime_state_root, authorized)
+    exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
+
+    assert authorized["status"] == "AUTHORIZED_EXACT_PLAN"
+    assert len(exact.orders) == 1
+    sell = exact.sell_orders[0]
+    assert sell["symbol"] == "OLD"
+    assert sell["side"] == "SELL"
+    assert sell["quantity"] == 1.0
+    assert sell["expected_price"] == 100.0
+    assert sell["order_type"] == "limit"
+    assert sell["time_in_force"] == "day"
+    assert sell["limit_price"] == 99.0
+    assert sell["notional"] == 99.0
+    assert exact.risk_state["trade_meta"]["broker_authoritative_prices"] is True
+
+
+def test_closed_session_final_bar_can_authorize_natural_no_trade(tmp_path: Path):
+    broker = SessionFinalBarPaperBroker()
+    rows = [{"symbol": "OLD", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    authorized = authorize_exact_execution_plan(
+        plan=plan,
+        broker=broker,
+        env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+        run_id="closed-session-natural-no-trade",
+        plan_path=source,
+        created_at="2026-08-12T20:15:00+00:00",
+        regime_state_root=regime_state_root,
+    )
+    authorized = _finalize_direct_authorization(regime_state_root, authorized)
+    exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
+    evidence = exact.market_state["quote_evidence"]
+
+    assert authorized["status"] == "AUTHORIZED_NO_TRADE"
+    assert authorized["reason_code"] == "market_closed_authorized_no_trade"
+    assert exact.orders == ()
+    assert exact.starting_positions == exact.expected_posttrade_positions
+    assert exact.starting_cash == exact.expected_posttrade_cash
+    assert exact.market_state["pricing_basis"] == (
+        "alpaca_iex_regular_session_final_minute_bar_close"
+    )
+    assert exact.market_state["price_as_of"] == "2026-08-12T16:00:00-04:00"
+    assert exact.portfolio_nav == 1000.0
+    assert evidence["market_closed_at_authorization"] is True
+    assert evidence["new_order_submission_allowed_at_authorization"] is False
+    assert evidence["session_reason"] == "AFTER_MARKET_CUTOFF"
+    assert evidence["quotes"][0]["bar_start"] == "2026-08-12T15:59:00-04:00"
+    assert exact.constraints["market_closed_at_authorization"] is True
+    assert exact.constraints["new_order_submission_allowed_at_authorization"] is False
+    assert exact.authorization_state["authorization_reason"] == (
+        "MARKET_CLOSED_AUTHORIZED_NO_TRADE"
+    )
+    nav_evidence = exact.risk_state["decision_nav_reconstruction"]
+    assert nav_evidence["authoritative_position_value"] == 100.0
+    assert nav_evidence["authoritative_account_nav"] == 1000.0
+    assert nav_evidence["broker_reported_to_authoritative_nav_delta"] == 0.0
+    assert broker.latest_trade_calls == 0
+    assert broker.session_calendar_calls == 1
+    assert broker.session_final_bar_calls == 1
+
+    result = run_live_pilot(
+        plan=authorized,
+        broker=broker,
+        env={
+            **_execution_env(tmp_path),
+            "CAERUS_REQUIRE_EXACT_EXECUTION_PLAN": "1",
+        },
+        run_id="closed-session-natural-no-trade-execution",
+        output_root=tmp_path / "outputs" / "paper_lane",
+        now_et=dt.datetime(
+            2026,
+            8,
+            12,
+            16,
+            15,
+            tzinfo=ZoneInfo("America/New_York"),
+        ),
+    )
+    run_root = Path(result["run_root"])
+    selection = json.loads(
+        (
+            tmp_path
+            / "outputs"
+            / "paper_lane"
+            / "execution_attempts"
+            / "2026-08-12"
+            / "selection.json"
+        ).read_text()
+    )
+
+    assert result["terminal_status"] == "AUTHORIZED_NO_TRADE"
+    assert result["canonical_economic_verification_status"] == "RECONCILED"
+    assert result["attempt_registry_status"] == "RESOLVED"
+    assert selection["status"] == "RESOLVED"
+    assert broker.submit_calls == 0
+    assert not list((tmp_path / "outputs" / "paper_lane" / "submission_wal").rglob("*.json"))
+    assert json.loads(
+        (run_root / "audit" / "execution_integrity.json").read_text()
+    )["status"] == "OK"
+
+
+def test_authorizer_rejects_unrelated_open_order_before_market_pricing(
+    tmp_path: Path,
+):
+    class OpenOrderDecisionBroker(SessionFinalBarPaperBroker):
+        def list_orders(self, status="open", limit=100, **kwargs):
+            del limit, kwargs
+            if status != "open":
+                return []
+            return [
+                {
+                    "id": "external-open-order",
+                    "client_order_id": "external-unrelated-order",
+                    "symbol": "MSFT",
+                    "side": "BUY",
+                    "status": "accepted",
+                }
+            ]
+
+    broker = OpenOrderDecisionBroker()
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    with pytest.raises(RuntimeError, match="unresolved open orders"):
+        authorize_exact_execution_plan(
+            plan=plan,
+            broker=broker,
+            env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+            run_id="authorizer-unrelated-open-order",
+            plan_path=source,
+            created_at="2026-08-12T13:35:01+00:00",
+            regime_state_root=regime_state_root,
+        )
+
+    assert broker.latest_trade_calls == 0
+    assert broker.session_final_bar_calls == 0
+    assert broker.submit_calls == 0
+
+
+def test_closed_session_all_cash_book_needs_no_market_mark(tmp_path: Path):
+    broker = SessionFinalBarPaperBroker()
+    broker.positions = []
+    broker.cash = 1000.0
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=[],
+    )
+
+    authorized = authorize_exact_execution_plan(
+        plan=plan,
+        broker=broker,
+        env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+        run_id="closed-session-all-cash",
+        plan_path=source,
+        created_at="2026-08-12T20:15:00+00:00",
+        regime_state_root=regime_state_root,
+    )
+    authorized = _finalize_direct_authorization(regime_state_root, authorized)
+    exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
+    evidence = exact.market_state["quote_evidence"]
+
+    assert authorized["status"] == "AUTHORIZED_NO_TRADE"
+    assert exact.orders == ()
+    assert exact.starting_positions == ()
+    assert exact.expected_posttrade_positions == ()
+    assert exact.starting_cash == exact.expected_posttrade_cash == 1000.0
+    assert exact.portfolio_nav == 1000.0
+    assert evidence["requested_symbols"] == ()
+    assert evidence["returned_symbols"] == ()
+    assert evidence["quotes"] == ()
+    assert evidence["nav_reconstruction"]["authoritative_position_value"] == 0.0
+    assert broker.submit_calls == 0
+
+
+def test_closed_session_material_drift_is_sealed_but_never_submittable(
+    tmp_path: Path,
+):
+    broker = SessionFinalBarPaperBroker()
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    authorized = authorize_exact_execution_plan(
+        plan=plan,
+        broker=broker,
+        env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+        run_id="closed-session-material-drift",
+        plan_path=source,
+        created_at="2026-08-12T20:15:00+00:00",
+        regime_state_root=regime_state_root,
+    )
+    authorized = _finalize_direct_authorization(regime_state_root, authorized)
+    exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
+
+    assert authorized["status"] == "AUTHORIZED_EXACT_PLAN"
+    assert authorized["reason_code"] == (
+        "market_closed_exact_plan_sealed_no_submission_authority"
+    )
+    assert [(row["symbol"], row["side"]) for row in exact.orders] == [
+        ("OLD", "SELL"),
+        ("AAPL", "BUY"),
+    ]
+    assert exact.constraints["new_order_submission_allowed_at_authorization"] is False
+    assert exact.market_state["price_as_of"] == "2026-08-12T16:00:00-04:00"
+    assert exact.market_state["pricing_basis"] == (
+        "alpaca_iex_regular_session_final_minute_bar_close"
+    )
+    assert exact.portfolio_nav == 1000.0
+    assert exact.risk_state["decision_nav_reconstruction"][
+        "authoritative_account_nav"
+    ] == 1000.0
+    assert exact.authorization_state["authorization_reason"] == (
+        "MARKET_CLOSED_EXACT_PLAN_SEALED_NO_NEW_ORDER_AUTHORITY"
+    )
+
+    outcome = execute_exact_plan(
+        plan_payload=exact.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="closed-session-material-drift-execution",
+        dry_run=False,
+        # Prove the immutable closed-session authority blocks submission even
+        # independently of the executor's own wall-clock market-hours guard.
+        now_et=TEST_NOW_ET,
+    )
+
+    assert outcome.status == "BLOCKED"
+    assert outcome.reason_code == "exact_plan_new_order_submission_authority_forbidden"
+    assert outcome.reconciliation_status == "FAILED_PRE_SUBMIT"
+    assert broker.submit_calls == 0
+    assert not list((tmp_path / "wal").rglob("*.json"))
+
+
+@pytest.mark.parametrize("final_bar_mode", ["missing", "wrong_timestamp", "nonfinite"])
+def test_closed_session_final_bar_validation_fails_closed(
+    tmp_path: Path,
+    final_bar_mode: str,
+):
+    broker = SessionFinalBarPaperBroker(final_bar_mode=final_bar_mode)
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    with pytest.raises(RuntimeError, match="session-final bar"):
+        authorize_exact_execution_plan(
+            plan=plan,
+            broker=broker,
+            env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+            run_id=f"closed-session-invalid-{final_bar_mode}",
+            plan_path=source,
+            created_at="2026-08-12T20:15:00+00:00",
+            regime_state_root=regime_state_root,
+        )
+
+    assert broker.submit_calls == 0
+    assert broker.latest_trade_calls == 0
+    assert broker.session_calendar_calls == 1
+    assert broker.session_final_bar_calls == 1
+
+
+@pytest.mark.parametrize("calendar_mode", ["empty", "mismatch"])
+def test_closed_session_broker_calendar_must_match_governed_session(
+    tmp_path: Path,
+    calendar_mode: str,
+):
+    broker = SessionFinalBarPaperBroker(calendar_mode=calendar_mode)
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    with pytest.raises(RuntimeError, match=r"broker market[- ]calendar"):
+        authorize_exact_execution_plan(
+            plan=plan,
+            broker=broker,
+            env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+            run_id=f"closed-session-calendar-{calendar_mode}",
+            plan_path=source,
+            created_at="2026-08-12T20:15:00+00:00",
+            regime_state_root=regime_state_root,
+        )
+
+    assert broker.submit_calls == 0
+    assert broker.latest_trade_calls == 0
+    assert broker.session_calendar_calls == 1
+    assert broker.session_final_bar_calls == 0
+
+
+def test_immediately_pre_close_stale_latest_trade_cannot_use_final_bar_branch(
+    tmp_path: Path,
+):
+    broker = SessionFinalBarPaperBroker()
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    with pytest.raises(RuntimeError, match="latest trade"):
+        authorize_exact_execution_plan(
+            plan=plan,
+            broker=broker,
+            env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+            run_id="immediately-pre-close-stale-latest",
+            plan_path=source,
+            created_at="2026-08-12T19:59:59+00:00",
+            regime_state_root=regime_state_root,
+        )
+
+    assert broker.latest_trade_calls == 1
+    assert broker.session_calendar_calls == 1
+    assert broker.session_final_bar_calls == 0
+    assert broker.submit_calls == 0
+
+
+def test_open_session_authorization_cannot_cross_the_official_close(
+    tmp_path: Path,
+):
+    class LastSecondBroker(SessionFinalBarPaperBroker):
+        def get_latest_trades(self, symbols):
+            self.latest_trade_calls += 1
+            return {
+                str(symbol): {
+                    "symbol": str(symbol),
+                    "price": "100" if str(symbol) == "OLD" else "50",
+                    "timestamp": "2026-08-12T19:59:58+00:00",
+                    "feed": "TEST",
+                }
+                for symbol in symbols
+            }
+
+    broker = LastSecondBroker()
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    with pytest.raises(RuntimeError, match="market session changed"):
+        authorize_exact_execution_plan(
+            plan=plan,
+            broker=broker,
+            env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+            run_id="authorization-crossed-close",
+            plan_path=source,
+            created_at="2026-08-12T19:59:59+00:00",
+            authorization_completed_at="2026-08-12T20:00:00+00:00",
+            regime_state_root=regime_state_root,
+        )
+
+    assert broker.latest_trade_calls == 1
+    assert broker.session_final_bar_calls == 0
+    assert broker.submit_calls == 0
+
+
+def test_open_session_quote_freshness_is_rechecked_at_authorization_seal(
+    tmp_path: Path,
+):
+    broker = SessionFinalBarPaperBroker()
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    with pytest.raises(RuntimeError, match="stale before authorization seal"):
+        authorize_exact_execution_plan(
+            plan=plan,
+            broker=broker,
+            env={
+                **_env(),
+                "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000",
+                "CAERUS_AUTHORIZATION_QUOTE_MAX_AGE_SECONDS": "120",
+            },
+            run_id="open-quote-stale-at-seal",
+            plan_path=source,
+            created_at="2026-08-12T13:35:01+00:00",
+            authorization_completed_at="2026-08-12T13:38:01+00:00",
+            regime_state_root=regime_state_root,
+        )
+
+    assert broker.latest_trade_calls == 1
+    assert broker.session_final_bar_calls == 0
+    assert broker.submit_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("completed_at", "should_pass"),
+    [
+        ("2026-08-12T13:37:00+00:00", True),
+        ("2026-08-12T13:37:00.001000+00:00", False),
+    ],
+    ids=["exactly-120-seconds", "120-seconds-plus-1ms"],
+)
+def test_open_session_quote_seal_freshness_boundary(
+    tmp_path: Path,
+    completed_at: str,
+    should_pass: bool,
+):
+    broker = SessionFinalBarPaperBroker()
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+    kwargs = {
+        "plan": plan,
+        "broker": broker,
+        "env": {
+            **_env(),
+            "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000",
+            "CAERUS_AUTHORIZATION_QUOTE_MAX_AGE_SECONDS": "120",
+        },
+        "run_id": f"open-quote-boundary-{should_pass}",
+        "plan_path": source,
+        "created_at": "2026-08-12T13:35:01+00:00",
+        "authorization_completed_at": completed_at,
+        "regime_state_root": regime_state_root,
+    }
+
+    if not should_pass:
+        with pytest.raises(RuntimeError, match="stale before authorization seal"):
+            authorize_exact_execution_plan(**kwargs)
+        assert broker.submit_calls == 0
+        return
+
+    authorized = authorize_exact_execution_plan(**kwargs)
+    authorized = _finalize_direct_authorization(regime_state_root, authorized)
+    exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
+    ages = {
+        row["age_at_authorization_seal_seconds"]
+        for row in exact.market_state["quote_evidence"]["quotes"]
+    }
+    assert ages == {120.0}
+    assert exact.market_state["quote_evidence"][
+        "freshness_revalidated_at_seal"
+    ] is True
+    assert broker.submit_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("execution_time", "should_submit"),
+    [
+        (dt.datetime(2026, 8, 12, 9, 37, 0, tzinfo=ZoneInfo("America/New_York")), True),
+        (
+            dt.datetime(
+                2026,
+                8,
+                12,
+                9,
+                37,
+                0,
+                1000,
+                tzinfo=ZoneInfo("America/New_York"),
+            ),
+            False,
+        ),
+    ],
+    ids=["executor-exactly-120-seconds", "executor-120-seconds-plus-1ms"],
+)
+def test_executor_revalidates_open_quote_freshness_before_first_wal(
+    tmp_path: Path,
+    execution_time: dt.datetime,
+    should_submit: bool,
+):
+    broker = SessionFinalBarPaperBroker()
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+    authorized = authorize_exact_execution_plan(
+        plan=plan,
+        broker=broker,
+        env={
+            **_env(),
+            "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000",
+            "CAERUS_AUTHORIZATION_QUOTE_MAX_AGE_SECONDS": "120",
+        },
+        run_id=f"executor-freshness-{should_submit}",
+        plan_path=source,
+        created_at="2026-08-12T13:35:01+00:00",
+        authorization_completed_at="2026-08-12T13:35:02+00:00",
+        regime_state_root=regime_state_root,
+    )
+    authorized = _finalize_direct_authorization(regime_state_root, authorized)
+    exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
+
+    result = execute_exact_plan(
+        plan_payload=exact.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id=f"executor-freshness-{should_submit}",
+        dry_run=False,
+        now_et=execution_time,
+    )
+
+    if should_submit:
+        assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+        assert broker.submit_calls == len(exact.orders)
+        return
+    assert result.status == "BLOCKED"
+    assert "quote_stale_at_submission_boundary" in result.reason_code
+    assert broker.submit_calls == 0
+    assert not list((tmp_path / "wal").rglob("*/intents/*.json"))
+
+
+def test_executor_revalidates_quote_freshness_before_each_new_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    broker = SessionFinalBarPaperBroker()
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+    authorized = authorize_exact_execution_plan(
+        plan=plan,
+        broker=broker,
+        env={
+            **_env(),
+            "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000",
+            "CAERUS_AUTHORIZATION_QUOTE_MAX_AGE_SECONDS": "120",
+        },
+        run_id="executor-mid-batch-freshness",
+        plan_path=source,
+        created_at="2026-08-12T13:35:01+00:00",
+        authorization_completed_at="2026-08-12T13:35:02+00:00",
+        regime_state_root=regime_state_root,
+    )
+    authorized = _finalize_direct_authorization(regime_state_root, authorized)
+    exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
+    clocks = iter(
+        [
+            dt.datetime(2026, 8, 12, 9, 35, 2, tzinfo=ZoneInfo("America/New_York")),
+            dt.datetime(2026, 8, 12, 9, 35, 2, tzinfo=ZoneInfo("America/New_York")),
+            dt.datetime(2026, 8, 12, 9, 38, 0, tzinfo=ZoneInfo("America/New_York")),
+        ]
+    )
+    monkeypatch.setattr(
+        "execution.exact_executor._execution_clock",
+        lambda _now_et: next(clocks),
+    )
+    monkeypatch.setattr(
+        "execution.exact_executor._exact_market_is_open",
+        lambda **_kwargs: True,
+    )
+
+    result = execute_exact_plan(
+        plan_payload=exact.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="executor-mid-batch-freshness",
+        dry_run=False,
+        now_et=TEST_NOW_ET,
+    )
+
+    assert result.status == "FAILED_RECONCILIATION"
+    assert "quote_stale_at_submission_boundary" in result.reason_code
+    assert broker.submit_calls == 1
+    assert len(result.orders_submitted) == len(result.orders_filled) == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+
+
+def test_executor_accepts_fresh_extra_quote_for_whole_share_no_action_target(
+    tmp_path: Path,
+):
+    broker = SessionFinalBarPaperBroker()
+    rows = [
+        {"symbol": "AAPL", "target_weight": 0.1, "price": 5.0},
+        {"symbol": "MSFT", "target_weight": 0.01, "price": 5.0},
+    ]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+    authorized = authorize_exact_execution_plan(
+        plan=plan,
+        broker=broker,
+        env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+        run_id="executor-extra-no-action-target",
+        plan_path=source,
+        created_at="2026-08-12T13:35:01+00:00",
+        regime_state_root=regime_state_root,
+    )
+    authorized = _finalize_direct_authorization(regime_state_root, authorized)
+    exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
+    assert {row["symbol"] for row in exact.market_state["quote_evidence"]["quotes"]} == {
+        "AAPL",
+        "MSFT",
+        "OLD",
+    }
+    assert "MSFT" not in {row["symbol"] for row in exact.orders}
+
+    result = execute_exact_plan(
+        plan_payload=exact.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="executor-extra-no-action-target",
+        dry_run=False,
+        now_et=TEST_NOW_ET,
+    )
+    assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert broker.submit_calls == len(exact.orders)
+
+
+def test_open_session_rejects_a_trade_timestamped_at_or_after_close(
+    tmp_path: Path,
+):
+    class PostCloseQuoteBroker(SessionFinalBarPaperBroker):
+        def get_latest_trades(self, symbols):
+            self.latest_trade_calls += 1
+            return {
+                str(symbol): {
+                    "symbol": str(symbol),
+                    "price": "100" if str(symbol) == "OLD" else "50",
+                    "timestamp": "2026-08-12T20:00:01+00:00",
+                    "feed": "TEST",
+                }
+                for symbol in symbols
+            }
+
+    broker = PostCloseQuoteBroker()
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    with pytest.raises(RuntimeError, match="latest trade"):
+        authorize_exact_execution_plan(
+            plan=plan,
+            broker=broker,
+            env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+            run_id="post-close-quote-rejected",
+            plan_path=source,
+            created_at="2026-08-12T19:59:59+00:00",
+            regime_state_root=regime_state_root,
+        )
+
+    assert broker.latest_trade_calls == 1
+    assert broker.session_final_bar_calls == 0
+    assert broker.submit_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("created_at", "reason"),
+    [
+        ("2026-08-12T12:00:00+00:00", "BEFORE_MARKET_OPEN"),
+        ("2026-08-13T20:15:00+00:00", "RUN_DATE_NOT_TODAY"),
+    ],
+)
+def test_non_session_authorization_cannot_use_closed_final_bar_branch(
+    tmp_path: Path,
+    created_at: str,
+    reason: str,
+):
+    broker = SessionFinalBarPaperBroker()
+    rows = [{"symbol": "AAPL", "target_weight": 0.1, "price": 5.0}]
+    plan, source, regime_state_root = _governed_authorizer_fixture(
+        tmp_path,
+        target_rows=rows,
+    )
+
+    with pytest.raises(RuntimeError, match=reason):
+        authorize_exact_execution_plan(
+            plan=plan,
+            broker=broker,
+            env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+            run_id=f"non-session-{reason.lower()}",
+            plan_path=source,
+            created_at=created_at,
+            regime_state_root=regime_state_root,
+        )
+
+    assert broker.latest_trade_calls == 0
+    assert broker.session_calendar_calls == 0
+    assert broker.session_final_bar_calls == 0
+    assert broker.submit_calls == 0
 
 
 def test_authorizer_accepts_real_governed_paper_target_attainment_package(tmp_path: Path):

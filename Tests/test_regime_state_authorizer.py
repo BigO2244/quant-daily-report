@@ -403,6 +403,13 @@ def test_failed_exact_publication_does_not_commit_normal_observation(
     output = tmp_path / "paper_lane" / "plans" / "exact.json"
     monkeypatch.setattr(authorizer.AlpacaBroker, "from_env", lambda: TrackingPaperBroker())
     monkeypatch.setattr(
+        authorizer, "_now", lambda: "2026-08-12T13:35:01+00:00"
+    )
+    monkeypatch.setattr(
+        "scripts.live_pilot_execute._now_utc",
+        lambda: "2026-08-12T13:35:01+00:00",
+    )
+    monkeypatch.setattr(
         authorizer,
         "safe_write_text",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("publication failed")),
@@ -443,6 +450,13 @@ def test_successful_exact_publication_commits_before_pointer(
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
     output = tmp_path / "paper_lane" / "plans" / "exact.json"
     monkeypatch.setattr(authorizer.AlpacaBroker, "from_env", lambda: TrackingPaperBroker())
+    monkeypatch.setattr(
+        authorizer, "_now", lambda: "2026-08-12T13:35:01+00:00"
+    )
+    monkeypatch.setattr(
+        "scripts.live_pilot_execute._now_utc",
+        lambda: "2026-08-12T13:35:01+00:00",
+    )
     for key, value in {
         **_env(),
         "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000",

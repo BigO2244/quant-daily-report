@@ -180,6 +180,7 @@ class _ReplayBroker:
             "client_order_id": client_id,
             "symbol": symbol,
             "side": side,
+            "qty": str(quantity),
             "status": "filled",
             "filled_qty": str(quantity),
             "filled_avg_price": str(price),
@@ -193,6 +194,18 @@ class _ReplayBroker:
             self.cash -= quantity * price
         self.positions = {symbol: qty for symbol, qty in self.positions.items() if qty > 1e-9}
         return copy.deepcopy(row)
+
+    def submit_limit_order(self, **kwargs):
+        quantity = float(kwargs["qty"])
+        limit_price = float(kwargs["limit_price"])
+        return self.submit_market_order(
+            symbol=kwargs["symbol"],
+            qty=quantity,
+            side=kwargs["side"],
+            client_order_id=kwargs["client_order_id"],
+            tif=kwargs.get("tif", "day"),
+            estimated_notional=quantity * limit_price,
+        )
 
 
 def _replay_env() -> dict[str, str]:
@@ -229,6 +242,16 @@ def _functional_exact_plan(*, replay: dict, broker: _ReplayBroker):
     ]
     sells = [row for row in orders if row["side"] == "SELL"]
     buys = [row for row in orders if row["side"] == "BUY"]
+    for row in orders:
+        row.update(
+            {
+                "order_type": "limit",
+                "time_in_force": "day",
+                "extended_hours": False,
+                "limit_price": row["expected_price"],
+                "cap_enforcement_price": row["expected_price"],
+            }
+        )
     expected = dict(broker.positions)
     expected_cash = broker.cash
     for row in [*sells, *buys]:
@@ -286,7 +309,13 @@ def _functional_exact_plan(*, replay: dict, broker: _ReplayBroker):
         buy_orders=buys,
         expected_posttrade_positions=expected_rows,
         expected_posttrade_cash=expected_cash,
-        constraints={"max_orders": 50, "capital_cap_usd": 10000.0, "cash_reconciliation_tolerance_usd": 0.01},
+        constraints={
+            "max_orders": 50,
+            "capital_cap_usd": 10000.0,
+            "cash_reconciliation_tolerance_usd": 0.01,
+            "max_adverse_fill_slippage_bps": 100.0,
+            "new_order_execution_style": "protective_day_limit",
+        },
         authorization_state={
             "status": "AUTHORIZED",
             "authority": "CAERUS_ORCHESTRATOR",

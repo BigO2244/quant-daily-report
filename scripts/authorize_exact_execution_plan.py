@@ -13,8 +13,10 @@ import dataclasses
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import sys
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -22,7 +24,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from authority.exact_plan import build_exact_execution_plan, exact_execution_plan_from_dict
+from authority.exact_plan import (
+    build_exact_execution_plan,
+    compute_starting_state_hash,
+    exact_execution_plan_from_dict,
+)
 from authority.pipeline import validate_persisted_authority_chain
 from brokers.alpaca_broker import AlpacaBroker
 from core.broker_retry_policy import is_retryable_broker_read_error
@@ -37,12 +43,16 @@ from core.regime_state_store import (
     persist_regime_authority,
     prepare_regime_authority,
 )
-from core.submission_wal import OrderIntent, unresolved_intent_requires_lookup
+from core.submission_wal import (
+    OrderIntent,
+    unresolved_foreign_intent_client_ids,
+)
 from execution.core import (
     apply_capital_budget_and_execution_filter,
     compute_transition_trades,
     live_pilot_execution_config,
 )
+from paper.trading_calendar import ET_TZ, market_session_status
 from paper.run_manager import safe_write_text
 from scripts.live_pilot_execute import (
     _broker_snapshot,
@@ -51,6 +61,79 @@ from scripts.live_pilot_execute import (
     _finite_float,
     _settled_cash_context,
 )
+
+
+_SESSION_FINAL_BAR_PRICE_BASIS = (
+    "alpaca_iex_regular_session_final_minute_bar_close"
+)
+_BROKER_AUTHORITATIVE_PRICE_BASES = {
+    "timestamped_alpaca_latest_trade_at_authorization",
+    _SESSION_FINAL_BAR_PRICE_BASIS,
+}
+MAX_ADVERSE_FILL_SLIPPAGE_BPS = 100.0
+
+
+def _protective_day_limit_orders(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Convert broker-ready rows to sealed worst-price DAY limit orders.
+
+    A market order can spend beyond an immutable capital cap before any
+    post-fill reconciliation can react.  The collar makes that risk
+    preventive: BUY prices round down and SELL prices round up so tick
+    normalization never widens the governed one-percent boundary.
+    """
+
+    result: list[dict[str, Any]] = []
+    collar_fraction = Decimal(str(MAX_ADVERSE_FILL_SLIPPAGE_BPS)) / Decimal(
+        "10000"
+    )
+    for raw in rows:
+        row = dict(raw)
+        side = str(row.get("side") or "").strip().upper()
+        quantity = _finite_float(
+            row.get("quantity", row.get("shares", row.get("qty")))
+        )
+        reference = _finite_float(
+            row.get("expected_price", row.get("price"))
+        )
+        if side not in {"BUY", "SELL"} or quantity is None or quantity <= 0:
+            raise RuntimeError("exact order cannot be price-collared")
+        if reference is None or reference <= 0:
+            raise RuntimeError("exact order lacks a positive collar reference price")
+        reference_decimal = Decimal(str(reference))
+        raw_collar = reference_decimal * (
+            Decimal("1") + collar_fraction
+            if side == "BUY"
+            else Decimal("1") - collar_fraction
+        )
+        tick = Decimal("0.01") if raw_collar >= Decimal("1") else Decimal("0.0001")
+        collar = raw_collar.quantize(
+            tick,
+            rounding=ROUND_DOWN if side == "BUY" else ROUND_UP,
+        )
+        if collar <= 0:
+            raise RuntimeError("exact order protective limit is non-positive")
+        collar_float = float(collar)
+        row.update(
+            {
+                "order_type": "limit",
+                # DAY limit is supported by Alpaca for both whole and
+                # fractional equity quantities. IOC availability is account-
+                # dependent and therefore cannot be assumed by authorization.
+                "time_in_force": "day",
+                "extended_hours": False,
+                "expected_price": float(reference),
+                "limit_price": collar_float,
+                "cap_enforcement_price": collar_float,
+                "notional": float(quantity) * collar_float,
+                "max_adverse_fill_slippage_bps": (
+                    MAX_ADVERSE_FILL_SLIPPAGE_BPS
+                ),
+            }
+        )
+        result.append(row)
+    return result
 
 
 def _now() -> str:
@@ -217,7 +300,13 @@ def _canonical_hash(payload: Mapping[str, Any]) -> str:
 
 
 def _fresh_market_prices(
-    *, broker: Any, symbols: list[str], as_of: str, env: Mapping[str, str]
+    *,
+    broker: Any,
+    symbols: list[str],
+    as_of: str,
+    env: Mapping[str, str],
+    session_open_et: dt.datetime,
+    session_close_et: dt.datetime,
 ) -> tuple[dict[str, float], dict[str, Any]]:
     getter = getattr(broker, "get_latest_trades", None)
     if not callable(getter):
@@ -241,6 +330,9 @@ def _fresh_market_prices(
         raw = rows.get(symbol)
         if not isinstance(raw, Mapping):
             raise RuntimeError(f"latest trade missing for {symbol}")
+        provider_symbol = str(raw.get("symbol") or "").strip().upper()
+        if provider_symbol != symbol:
+            raise RuntimeError(f"latest trade symbol mismatch for {symbol}")
         price = _finite_float(raw.get("price"))
         timestamp_raw = str(raw.get("timestamp") or "").strip()
         try:
@@ -250,7 +342,15 @@ def _fresh_market_prices(
         except ValueError as exc:
             raise RuntimeError(f"latest trade timestamp invalid for {symbol}") from exc
         age = (decision_time.astimezone(dt.timezone.utc) - timestamp.astimezone(dt.timezone.utc)).total_seconds()
-        if price is None or price <= 0 or age < -5.0 or age > max_age_seconds:
+        timestamp_et = timestamp.astimezone(ET_TZ)
+        if (
+            price is None
+            or price <= 0
+            or age < -5.0
+            or age > max_age_seconds
+            or timestamp_et < session_open_et
+            or timestamp_et >= session_close_et
+        ):
             raise RuntimeError(f"latest trade is missing, invalid, or stale for {symbol}")
         prices[symbol] = float(price)
         evidence_rows.append(
@@ -265,11 +365,415 @@ def _fresh_market_prices(
     evidence = {
         "schema_version": "caerus.authorization_market_state.v1",
         "captured_at": str(as_of),
+        "price_as_of": str(as_of),
+        "pricing_basis": "timestamped_alpaca_latest_trade_at_authorization",
+        "market_closed_at_authorization": False,
+        "new_order_submission_allowed_at_authorization": True,
+        "freshness_reference": "authorization_wall_clock",
         "max_age_seconds": max_age_seconds,
+        "session_open_et": session_open_et.isoformat(),
+        "session_close_et": session_close_et.isoformat(),
         "quotes": evidence_rows,
     }
     evidence["content_hash"] = _canonical_hash(evidence)
     return prices, evidence
+
+
+def _revalidate_open_market_prices_at_seal(
+    *,
+    market_state_evidence: Mapping[str, Any],
+    required_symbols: list[str],
+    seal_time: dt.datetime,
+    session_open_et: dt.datetime,
+    session_close_et: dt.datetime,
+) -> dict[str, Any]:
+    """Recheck quote freshness at the instant authority becomes immutable.
+
+    Quote freshness at capture is necessary but not sufficient: validation,
+    planning, or persistence work can stall while the market remains open.  A
+    plan may be sealed only if every governed quote is still within the same
+    strict age/skew/session bounds at the final authorization timestamp.
+    """
+
+    if (
+        str(market_state_evidence.get("pricing_basis") or "")
+        != "timestamped_alpaca_latest_trade_at_authorization"
+    ):
+        raise RuntimeError("open-session pricing evidence basis is invalid")
+    max_age_seconds = _finite_float(market_state_evidence.get("max_age_seconds"))
+    if max_age_seconds is None or max_age_seconds <= 0:
+        raise RuntimeError("open-session quote freshness evidence is invalid")
+    raw_quotes = market_state_evidence.get("quotes")
+    if not isinstance(raw_quotes, list):
+        raise RuntimeError("open-session quote evidence is malformed")
+    expected_symbols = {
+        str(symbol).strip().upper()
+        for symbol in required_symbols
+        if str(symbol).strip()
+    }
+    observed_symbols: set[str] = set()
+    sealed_quotes: list[dict[str, Any]] = []
+    for raw in raw_quotes:
+        if not isinstance(raw, Mapping):
+            raise RuntimeError("open-session quote evidence row is malformed")
+        symbol = str(raw.get("symbol") or "").strip().upper()
+        if not symbol or symbol in observed_symbols:
+            raise RuntimeError("open-session quote evidence symbols are invalid")
+        try:
+            timestamp = dt.datetime.fromisoformat(
+                str(raw.get("timestamp") or "").replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                f"open-session quote timestamp is invalid for {symbol}"
+            ) from exc
+        if timestamp.tzinfo is None:
+            raise RuntimeError(
+                f"open-session quote timestamp lacks timezone for {symbol}"
+            )
+        timestamp_et = timestamp.astimezone(ET_TZ)
+        age_at_seal = (
+            seal_time.astimezone(dt.timezone.utc)
+            - timestamp.astimezone(dt.timezone.utc)
+        ).total_seconds()
+        if (
+            age_at_seal < -5.0
+            or age_at_seal > max_age_seconds
+            or timestamp_et < session_open_et
+            or timestamp_et >= session_close_et
+        ):
+            raise RuntimeError(
+                f"latest trade became invalid or stale before authorization seal for {symbol}"
+            )
+        observed_symbols.add(symbol)
+        sealed_quotes.append(
+            {**dict(raw), "age_at_authorization_seal_seconds": age_at_seal}
+        )
+    if observed_symbols != expected_symbols:
+        raise RuntimeError(
+            "open-session quote evidence does not cover every Decision symbol"
+        )
+    result = dict(market_state_evidence)
+    result.pop("content_hash", None)
+    result["quotes"] = sealed_quotes
+    result["freshness_revalidated_at_seal"] = True
+    return result
+
+
+def _verified_market_session(
+    *,
+    broker: Any,
+    trade_date: str,
+    authorized_at: str,
+) -> tuple[Any, dt.datetime, dict[str, Any]]:
+    try:
+        decision_time = dt.datetime.fromisoformat(
+            str(authorized_at).replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise RuntimeError("authorization timestamp is invalid") from exc
+    if decision_time.tzinfo is None:
+        raise RuntimeError("authorization timestamp lacks timezone")
+    decision_et = decision_time.astimezone(ET_TZ)
+    status = market_session_status(trade_date, decision_et, "16:00")
+    if status.reason not in {"MARKET_OPEN", "AFTER_MARKET_CUTOFF"}:
+        raise RuntimeError(
+            f"exact authorization market session is unavailable: {status.reason}"
+        )
+    if status.session_open_et is None or status.session_close_et is None:
+        raise RuntimeError("exact authorization market session bounds are missing")
+
+    # Alpaca's date-specific session is required for every Decision, not just
+    # after close. This prevents an unrecognized early close from being treated
+    # as open by a stale local calendar. Any disagreement fails closed.
+    getter = getattr(broker, "get_market_session_calendar", None)
+    if not callable(getter):
+        raise RuntimeError(
+            "broker lacks authoritative market-calendar reads for exact Decision"
+        )
+    broker_session = getter(trade_date)
+    if not isinstance(broker_session, Mapping):
+        raise RuntimeError("broker market-calendar response is malformed")
+    try:
+        broker_open = dt.datetime.fromisoformat(
+            str(broker_session.get("session_open_et") or "").replace(
+                "Z", "+00:00"
+            )
+        )
+        broker_close = dt.datetime.fromisoformat(
+            str(broker_session.get("session_close_et") or "").replace(
+                "Z", "+00:00"
+            )
+        )
+    except ValueError as exc:
+        raise RuntimeError("broker market-calendar bounds are invalid") from exc
+    if broker_open.tzinfo is None or broker_close.tzinfo is None:
+        raise RuntimeError("broker market-calendar bounds lack timezone")
+    if (
+        str(broker_session.get("trade_date") or "") != trade_date
+        or broker_open.astimezone(ET_TZ) != status.session_open_et
+        or broker_close.astimezone(ET_TZ) != status.session_close_et
+    ):
+        raise RuntimeError(
+            "broker market calendar disagrees with the governed XNYS session"
+        )
+    broker_session_evidence = {
+        "source": str(broker_session.get("calendar") or "Alpaca"),
+        "trade_date": trade_date,
+        "session_open_et": broker_open.astimezone(ET_TZ).isoformat(),
+        "session_close_et": broker_close.astimezone(ET_TZ).isoformat(),
+        "cross_check": "MATCH",
+    }
+    return status, decision_et, broker_session_evidence
+
+
+def _session_final_bar_prices(
+    *,
+    broker: Any,
+    symbols: list[str],
+    authorized_at: str,
+    session_open_et: dt.datetime,
+    session_close_et: dt.datetime,
+) -> tuple[dict[str, float], dict[str, Any]]:
+    """Validate final regular-session minute-bar marks against the official close.
+
+    The ordinary 120-second wall-clock freshness rule remains unchanged while
+    the market is open. After the same day's close, only the provider-formed
+    close of the exact final regular-session minute is accepted. Extended-hours,
+    previous-session, missing, and earlier-minute bars remain invalid.
+    """
+
+    getter = getattr(broker, "get_session_final_bars", None)
+    if not callable(getter):
+        raise RuntimeError(
+            "broker lacks regular-session-final minute-bar reads for closed-session Decision"
+        )
+    unique = sorted(
+        {
+            str(symbol).strip().upper()
+            for symbol in symbols
+            if str(symbol).strip()
+        }
+    )
+    rows = getter(
+        unique,
+        session_open_et=session_open_et,
+        session_close_et=session_close_et,
+    )
+    if not isinstance(rows, Mapping):
+        raise RuntimeError("session-final-bar response is malformed")
+    returned_keys = {
+        str(symbol).strip().upper()
+        for symbol in rows
+        if str(symbol).strip()
+    }
+    if returned_keys != set(unique):
+        raise RuntimeError(
+            "session-final bar symbol set does not exactly match Decision symbols"
+        )
+    decision_time = dt.datetime.fromisoformat(
+        str(authorized_at).replace("Z", "+00:00")
+    )
+    if decision_time.tzinfo is None:
+        raise RuntimeError("closed-session Decision timestamp lacks timezone")
+    expected_bar_start = session_close_et - dt.timedelta(minutes=1)
+    if decision_time.astimezone(ET_TZ) < session_close_et:
+        raise RuntimeError("closed-session Decision precedes the official close")
+
+    prices: dict[str, float] = {}
+    evidence_rows: list[dict[str, Any]] = []
+    for symbol in unique:
+        raw = rows.get(symbol)
+        if not isinstance(raw, Mapping):
+            raise RuntimeError(f"session-final bar missing for {symbol}")
+        provider_symbol = str(raw.get("symbol") or "").strip().upper()
+        if provider_symbol != symbol:
+            raise RuntimeError(f"session-final bar symbol mismatch for {symbol}")
+        price = _finite_float(raw.get("close", raw.get("price")))
+        timestamp_raw = str(raw.get("bar_start") or "").strip()
+        try:
+            timestamp = dt.datetime.fromisoformat(
+                timestamp_raw.replace("Z", "+00:00")
+            )
+            if timestamp.tzinfo is None:
+                raise ValueError("timestamp lacks timezone")
+        except ValueError as exc:
+            raise RuntimeError(
+                f"session-final bar timestamp invalid for {symbol}"
+            ) from exc
+        timestamp_et = timestamp.astimezone(ET_TZ)
+        wall_age = (
+            decision_time.astimezone(dt.timezone.utc)
+            - session_close_et.astimezone(dt.timezone.utc)
+        ).total_seconds()
+        open_price = _finite_float(raw.get("open"))
+        high_price = _finite_float(raw.get("high"))
+        low_price = _finite_float(raw.get("low"))
+        volume = _finite_float(raw.get("volume"))
+        trade_count = _finite_float(raw.get("trade_count"))
+        vwap = _finite_float(raw.get("vwap"))
+        if (
+            price is None
+            or price <= 0.0
+            or open_price is None
+            or open_price <= 0.0
+            or high_price is None
+            or high_price <= 0.0
+            or low_price is None
+            or low_price <= 0.0
+            or high_price < max(open_price, price, low_price)
+            or low_price > min(open_price, price, high_price)
+            or volume is None
+            or volume <= 0.0
+            or trade_count is None
+            or trade_count <= 0.0
+            or vwap is None
+            or vwap <= 0.0
+            or timestamp_et != expected_bar_start
+            or str(raw.get("bar_end_exclusive") or "")
+            != session_close_et.isoformat()
+            or str(raw.get("timeframe") or "") != "1Min"
+            or str(raw.get("feed") or "").upper() != "IEX"
+            or str(raw.get("adjustment") or "").lower() != "raw"
+            or str(raw.get("currency") or "").upper() != "USD"
+            or wall_age < -5.0
+        ):
+            raise RuntimeError(
+                f"session-final bar is missing, invalid, or outside final minute for {symbol}"
+            )
+        prices[symbol] = float(price)
+        evidence_rows.append(
+            {
+                "symbol": symbol,
+                "price": float(price),
+                "close": float(price),
+                "bar_start": timestamp.isoformat(),
+                "bar_end_exclusive": session_close_et.isoformat(),
+                "mark_interval_completed_at": session_close_et.isoformat(),
+                "wall_age_since_completed_interval_seconds": wall_age,
+                "timeframe": "1Min",
+                "feed": "IEX",
+                "adjustment": "raw",
+                "currency": "USD",
+                "open": open_price,
+                "high": high_price,
+                "low": low_price,
+                "volume": volume,
+                "trade_count": trade_count,
+                "vwap": vwap,
+            }
+        )
+    evidence = {
+        "schema_version": "caerus.authorization_market_state.v1",
+        "captured_at": str(authorized_at),
+        "price_as_of": session_close_et.isoformat(),
+        "pricing_basis": _SESSION_FINAL_BAR_PRICE_BASIS,
+        "market_closed_at_authorization": True,
+        "new_order_submission_allowed_at_authorization": False,
+        "freshness_reference": "completed_official_regular_session_final_minute",
+        "calendar": "XNYS",
+        "session_date": session_close_et.date().isoformat(),
+        "session_open_et": session_open_et.isoformat(),
+        "session_close_et": session_close_et.isoformat(),
+        "query_start_et": expected_bar_start.isoformat(),
+        "query_end_exclusive_et": session_close_et.isoformat(),
+        "requested_symbols": unique,
+        "returned_symbols": sorted(prices),
+        "quotes": evidence_rows,
+    }
+    evidence["content_hash"] = _canonical_hash(evidence)
+    return prices, evidence
+
+
+def _rebase_request_to_authoritative_prices(
+    *,
+    request: Any,
+    prices: Mapping[str, float],
+    broker_cash: float,
+    broker_reported_nav: float,
+    planning_cap: float | None,
+    price_basis: str,
+    required_symbols: list[str],
+) -> tuple[Any, dict[str, Any]]:
+    """Put pricing, NAV, holdings, and target sizing on one Decision window."""
+
+    if price_basis not in _BROKER_AUTHORITATIVE_PRICE_BASES:
+        raise RuntimeError("unsupported broker-authoritative price basis")
+    authoritative_prices = request.prices.iloc[0:0].copy()
+    normalized_required = sorted(
+        {
+            str(symbol).strip().upper()
+            for symbol in required_symbols
+            if str(symbol).strip()
+        }
+    )
+    for normalized in normalized_required:
+        price = _finite_float(prices.get(normalized))
+        if price is None or price <= 0.0:
+            raise RuntimeError(
+                f"broker-authoritative Decision price missing for {normalized or 'UNKNOWN'}"
+            )
+        authoritative_prices.loc[normalized] = float(price)
+
+    position_value = 0.0
+    if request.holdings is not None and not request.holdings.empty:
+        for _, row in request.holdings.iterrows():
+            symbol = str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+            quantity = _finite_float(row.get("shares", row.get("qty")))
+            price = _finite_float(authoritative_prices.get(symbol))
+            if (
+                not symbol
+                or quantity is None
+                or quantity < 0.0
+                or price is None
+                or price <= 0.0
+            ):
+                raise RuntimeError(
+                    f"same-window NAV reconstruction failed for {symbol or 'UNKNOWN'}"
+                )
+            position_value += float(quantity) * float(price)
+
+    reconstructed_nav = float(broker_cash) + position_value
+    if not math.isfinite(reconstructed_nav) or reconstructed_nav <= 0.0:
+        raise RuntimeError("broker-authoritative reconstructed NAV is invalid")
+    planning_equity = reconstructed_nav
+    if planning_cap is not None and planning_cap > 0.0:
+        planning_equity = min(planning_equity, float(planning_cap))
+    planning_cash = min(float(broker_cash), planning_equity)
+    planning_account = dict(request.planning_account)
+    planning_account.update(
+        {
+            "cash": str(planning_cash),
+            "equity": str(planning_equity),
+            "portfolio_value": str(planning_equity),
+        }
+    )
+    rebased = dataclasses.replace(
+        request,
+        prices=authoritative_prices,
+        total_equity=float(planning_equity),
+        starting_cash=float(planning_cash),
+        planning_account=planning_account,
+        price_basis=price_basis,
+    )
+    return rebased, {
+        "broker_reported_nav": float(broker_reported_nav),
+        "authoritative_position_value": position_value,
+        "authoritative_account_nav": reconstructed_nav,
+        "broker_reported_to_authoritative_nav_delta": (
+            reconstructed_nav - float(broker_reported_nav)
+        ),
+        "planning_equity": float(planning_equity),
+        "planning_equity_cap": (
+            float(planning_cap)
+            if planning_cap is not None and planning_cap > 0.0
+            else None
+        ),
+        "planning_cash": float(planning_cash),
+        "price_basis": price_basis,
+        "priced_symbols": normalized_required,
+        "current_post_snapshot_quantities_and_cash_marked_at_price_as_of": True,
+    }
 
 
 def _recover_existing_authority_for_wal(
@@ -470,10 +974,12 @@ def authorize_exact_execution_plan(
     run_id: str,
     plan_path: Path | None = None,
     created_at: str | None = None,
+    authorization_completed_at: str | None = None,
     regime_state_root: Path | None = None,
     drill_epoch: str | None = None,
+    broker_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    effective_authorized_at = created_at or _now()
+    trade_date = str(plan.get("trade_date") or "")
     if str(plan.get("execution_lane") or "").strip().lower() != "paper":
         raise RuntimeError("exact execution authorization is PAPER-lane only")
     if str(plan.get("approved_sleeve") or "").strip().lower() not in {
@@ -553,8 +1059,19 @@ def authorize_exact_execution_plan(
             comparable_governed.pop(identity_key, None)
     if outer_risk_controls != comparable_governed:
         raise RuntimeError("outer risk_controls diverge from persisted Risk authority")
-    snapshot = _broker_snapshot(broker, fail_on_open_order_lookup=True)
+    snapshot = (
+        dict(broker_snapshot)
+        if isinstance(broker_snapshot, Mapping)
+        else _broker_snapshot(broker, fail_on_open_order_lookup=True)
+    )
     account = snapshot.get("account") if isinstance(snapshot.get("account"), Mapping) else {}
+    open_orders = snapshot.get("open_orders")
+    if not isinstance(open_orders, list):
+        raise RuntimeError("fresh broker open-order snapshot is malformed")
+    if open_orders:
+        raise RuntimeError(
+            "fresh broker snapshot contains unresolved open orders; exact authorization prohibited"
+        )
     cash = _finite_float((account or {}).get("cash"))
     nav = _finite_float((account or {}).get("portfolio_value") or (account or {}).get("equity"))
     if cash is None or cash < 0 or nav is None or nav <= 0:
@@ -565,30 +1082,192 @@ def authorize_exact_execution_plan(
         pre_snapshot=snapshot,
         plan=plan,
         run_id=run_id,
-        planning_equity_cap=planning_cap,
+        # Apply this only after every holding and target is repriced onto the
+        # broker-authoritative Decision window below.
+        planning_equity_cap=None,
     )
     if request is None or malformed:
         raise RuntimeError(f"fresh broker state cannot support exact planning: {malformed}")
-    decision_symbols = [
-        str(symbol).strip().upper()
-        for symbol in set(request.prices.index.tolist())
-        if str(symbol).strip()
-    ]
-    fresh_prices, market_state_evidence = _fresh_market_prices(
+    # Bind the Decision clock immediately before the final calendar/market-data
+    # reads. Earlier authority-chain validation must not consume the quote-age
+    # budget or make a newly captured trade look artificially future-dated.
+    effective_authorized_at = created_at or _now()
+    # Explicit timestamps are a hermetic replay/test clock. Snapshot reads are
+    # real-time even in those fixtures, so project only their timing envelope
+    # onto that injected Decision instant while preserving measured duration.
+    # Production passes no ``created_at`` and retains the actual wall clock.
+    if created_at is not None:
+        raw_snapshot_started = dt.datetime.fromisoformat(
+            str(snapshot.get("capture_started_at") or snapshot.get("captured_at") or "").replace(
+                "Z", "+00:00"
+            )
+        )
+        raw_snapshot_completed = dt.datetime.fromisoformat(
+            str(snapshot.get("capture_completed_at") or snapshot.get("captured_at") or "").replace(
+                "Z", "+00:00"
+            )
+        )
+        injected_decision = dt.datetime.fromisoformat(
+            str(effective_authorized_at).replace("Z", "+00:00")
+        )
+        if (
+            raw_snapshot_started.tzinfo is None
+            or raw_snapshot_completed.tzinfo is None
+            or injected_decision.tzinfo is None
+            or raw_snapshot_completed < raw_snapshot_started
+        ):
+            raise RuntimeError("fresh broker snapshot timing evidence is inconsistent")
+        measured_duration = raw_snapshot_completed - raw_snapshot_started
+        snapshot["capture_completed_at"] = injected_decision.isoformat()
+        snapshot["captured_at"] = injected_decision.isoformat()
+        snapshot["capture_started_at"] = (
+            injected_decision - measured_duration
+        ).isoformat()
+    try:
+        snapshot_started_at = dt.datetime.fromisoformat(
+            str(snapshot.get("capture_started_at") or snapshot.get("captured_at") or "").replace(
+                "Z", "+00:00"
+            )
+        )
+        snapshot_completed_at = dt.datetime.fromisoformat(
+            str(snapshot.get("capture_completed_at") or snapshot.get("captured_at") or "").replace(
+                "Z", "+00:00"
+            )
+        )
+        decision_capture_time = dt.datetime.fromisoformat(
+            str(effective_authorized_at).replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise RuntimeError("fresh broker snapshot timing evidence is invalid") from exc
+    if (
+        snapshot_started_at.tzinfo is None
+        or snapshot_completed_at.tzinfo is None
+        or decision_capture_time.tzinfo is None
+        or snapshot_completed_at < snapshot_started_at
+        or snapshot_completed_at > decision_capture_time
+    ):
+        raise RuntimeError("fresh broker snapshot timing evidence is inconsistent")
+    try:
+        snapshot_max_age_seconds = float(
+            env.get("CAERUS_AUTHORIZATION_SNAPSHOT_MAX_AGE_SECONDS") or 120
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("invalid broker snapshot freshness policy") from exc
+    snapshot_age_seconds = (
+        decision_capture_time.astimezone(dt.timezone.utc)
+        - snapshot_completed_at.astimezone(dt.timezone.utc)
+    ).total_seconds()
+    snapshot_capture_duration_seconds = (
+        snapshot_completed_at.astimezone(dt.timezone.utc)
+        - snapshot_started_at.astimezone(dt.timezone.utc)
+    ).total_seconds()
+    if (
+        snapshot_max_age_seconds <= 0
+        or snapshot_age_seconds < -5.0
+        or snapshot_age_seconds > snapshot_max_age_seconds
+        or snapshot_capture_duration_seconds > snapshot_max_age_seconds
+    ):
+        raise RuntimeError("fresh broker snapshot became stale before Decision")
+    held_symbols = {
+        str(row.get("symbol") or row.get("ticker") or "").strip().upper()
+        for row in snapshot.get("positions") or []
+        if isinstance(row, Mapping)
+        and str(row.get("symbol") or row.get("ticker") or "").strip()
+    }
+    governed_target_symbols = {
+        str(row.get("symbol") or row.get("ticker") or "").strip().upper()
+        for row in governed_execution.approved_target_rows
+        if str(row.get("symbol") or row.get("ticker") or "").strip()
+    }
+    request_target_symbols = {
+        str(row.get("ticker") or row.get("symbol") or "").strip().upper()
+        for _, row in request.targets.iterrows()
+        if str(row.get("ticker") or row.get("symbol") or "").strip()
+    }
+    if request_target_symbols != governed_target_symbols:
+        raise RuntimeError(
+            "governed target symbols could not be represented in exact planning"
+        )
+    decision_symbols = sorted(held_symbols | governed_target_symbols)
+    session, decision_et, broker_session_evidence = _verified_market_session(
         broker=broker,
-        symbols=decision_symbols,
-        as_of=effective_authorized_at,
-        env=env,
+        trade_date=str(plan.get("trade_date") or ""),
+        authorized_at=effective_authorized_at,
     )
-    for symbol, price in fresh_prices.items():
-        request.prices.loc[symbol] = float(price)
-    request = dataclasses.replace(
-        request,
-        price_basis="timestamped_alpaca_latest_trade_at_authorization",
+    if session.reason == "AFTER_MARKET_CUTOFF":
+        try:
+            snapshot_captured_at = dt.datetime.fromisoformat(
+                str(snapshot.get("captured_at") or "").replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "closed-session broker snapshot timestamp is invalid"
+            ) from exc
+        if (
+            snapshot_captured_at.tzinfo is None
+            or snapshot_captured_at.astimezone(ET_TZ) < session.session_close_et
+        ):
+            raise RuntimeError(
+                "closed-session broker snapshot predates the official close"
+            )
+    if session.reason == "MARKET_OPEN":
+        decision_prices, market_state_evidence = _fresh_market_prices(
+            broker=broker,
+            symbols=decision_symbols,
+            as_of=effective_authorized_at,
+            env=env,
+            session_open_et=session.session_open_et,
+            session_close_et=session.session_close_et,
+        )
+    else:
+        decision_prices, market_state_evidence = _session_final_bar_prices(
+            broker=broker,
+            symbols=decision_symbols,
+            authorized_at=effective_authorized_at,
+            session_open_et=session.session_open_et,
+            session_close_et=session.session_close_et,
+        )
+    price_basis = str(market_state_evidence.get("pricing_basis") or "")
+    request, nav_evidence = _rebase_request_to_authoritative_prices(
+        request=request,
+        prices=decision_prices,
+        broker_cash=float(cash),
+        broker_reported_nav=float(nav),
+        planning_cap=planning_cap,
+        price_basis=price_basis,
+        required_symbols=decision_symbols,
     )
+    market_state_evidence = dict(market_state_evidence)
+    market_state_evidence.pop("content_hash", None)
+    market_state_evidence.update(
+        {
+            "session_reason": session.reason,
+            "session_open_et": session.session_open_et.isoformat(),
+            "session_close_et": session.session_close_et.isoformat(),
+            "decision_time_et": decision_et.isoformat(),
+            "broker_snapshot_captured_at": snapshot.get("captured_at"),
+            "broker_snapshot_capture_started_at": snapshot.get(
+                "capture_started_at"
+            ),
+            "broker_snapshot_capture_completed_at": snapshot.get(
+                "capture_completed_at"
+            ),
+            "broker_snapshot_age_at_decision_seconds": snapshot_age_seconds,
+            "broker_snapshot_capture_duration_seconds": (
+                snapshot_capture_duration_seconds
+            ),
+            "broker_snapshot_max_age_seconds": snapshot_max_age_seconds,
+            "broker_session_authority": broker_session_evidence or None,
+            "nav_reconstruction": nav_evidence,
+        }
+    )
+    market_state_evidence["content_hash"] = _canonical_hash(
+        market_state_evidence
+    )
+    decision_nav = float(nav_evidence["authoritative_account_nav"])
     settled, _history, availability = _settled_cash_context(
         broker,
-        broker_cash=request.planning_account.get("cash"),
+        broker_cash=float(cash),
         as_of_date=str(plan.get("trade_date") or ""),
         env=env,
     )
@@ -596,7 +1275,7 @@ def authorize_exact_execution_plan(
         raise RuntimeError(f"settled cash unavailable at Decision: {availability}")
     request.planning_account["settled_cash"] = float(settled.settled_cash)
     request.planning_account["settled_cash_fail_closed"] = False
-    cap, cap_source = resolve_dynamic_cap(float(nav), env)
+    cap, cap_source = resolve_dynamic_cap(decision_nav, env)
     if cap is None or cap <= 0:
         raise RuntimeError("dynamic capital cap is unresolved at Decision")
     max_orders = int(float(env.get("CAERUS_LIVE_PILOT_MAX_ORDERS") or 50))
@@ -628,7 +1307,9 @@ def authorize_exact_execution_plan(
         planning_account=request.planning_account,
         config=config,
     )
-    exact_rows = _core_rows_from_frame(executable, plan=plan)
+    exact_rows = _protective_day_limit_orders(
+        _core_rows_from_frame(executable, plan=plan)
+    )
     if len(exact_rows) > max_orders:
         raise RuntimeError("exact order count exceeds authorized maximum")
     sells = [dict(row) for row in exact_rows if str(row.get("side")).upper() == "SELL"]
@@ -695,6 +1376,87 @@ def authorize_exact_execution_plan(
         cash=float(cash),
         orders=[*sells, *buys],
     )
+    seal_checked_at = authorization_completed_at
+    if seal_checked_at is None:
+        seal_checked_at = (
+            effective_authorized_at
+            if created_at is not None
+            else _now()
+        )
+    try:
+        seal_time = dt.datetime.fromisoformat(
+            str(seal_checked_at).replace("Z", "+00:00")
+        )
+        authorization_start = dt.datetime.fromisoformat(
+            str(effective_authorized_at).replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise RuntimeError("authorization seal timestamp is invalid") from exc
+    if seal_time.tzinfo is None or authorization_start.tzinfo is None:
+        raise RuntimeError("authorization seal timestamp lacks timezone")
+    if seal_time < authorization_start:
+        raise RuntimeError("authorization seal timestamp precedes Decision capture")
+    seal_session = market_session_status(
+        trade_date,
+        seal_time.astimezone(ET_TZ),
+        "16:00",
+    )
+    if (
+        seal_session.reason != session.reason
+        or seal_session.session_open_et != session.session_open_et
+        or seal_session.session_close_et != session.session_close_et
+    ):
+        raise RuntimeError(
+            "market session changed before exact authorization was sealed"
+        )
+    if session.reason == "MARKET_OPEN":
+        market_state_evidence = _revalidate_open_market_prices_at_seal(
+            market_state_evidence=market_state_evidence,
+            required_symbols=decision_symbols,
+            seal_time=seal_time,
+            session_open_et=session.session_open_et,
+            session_close_et=session.session_close_et,
+        )
+    # The snapshot is one logical Decision input with the price marks. It must
+    # remain fresh through the immutable seal, not merely through quote capture.
+    snapshot_age_at_seal_seconds = (
+        seal_time.astimezone(dt.timezone.utc)
+        - snapshot_completed_at.astimezone(dt.timezone.utc)
+    ).total_seconds()
+    if (
+        snapshot_age_at_seal_seconds < -5.0
+        or snapshot_age_at_seal_seconds > snapshot_max_age_seconds
+    ):
+        raise RuntimeError("broker snapshot became stale before authorization seal")
+    # Re-read open-order truth at the final seal. An unrelated order can alter
+    # cash/buying power even when it does not overlap a planned symbol.
+    seal_open_orders = getattr(broker, "list_orders", None)
+    if not callable(seal_open_orders):
+        raise RuntimeError("broker lacks open-order lookup at authorization seal")
+    seal_open_rows = seal_open_orders(status="open", limit=100)
+    if not isinstance(seal_open_rows, list) or any(
+        not isinstance(row, Mapping) for row in seal_open_rows
+    ):
+        raise RuntimeError("broker open-order seal response is malformed")
+    if seal_open_rows:
+        raise RuntimeError(
+            "broker open order appeared before exact authorization seal"
+        )
+    market_state_evidence = dict(market_state_evidence)
+    market_state_evidence.pop("content_hash", None)
+    market_state_evidence.update(
+        {
+            "authorization_seal_checked_at": seal_time.isoformat(),
+            "authorization_seal_session_reason": seal_session.reason,
+            "broker_snapshot_age_at_authorization_seal_seconds": (
+                snapshot_age_at_seal_seconds
+            ),
+            "open_order_revalidated_at_authorization_seal": True,
+        }
+    )
+    market_state_evidence["content_hash"] = _canonical_hash(
+        market_state_evidence
+    )
     source_hashes: dict[str, str] = {}
     if plan_path is not None and plan_path.exists():
         source_hashes[str(plan_path)] = _hash_file(plan_path)
@@ -713,10 +1475,31 @@ def authorize_exact_execution_plan(
     source_hashes["regime_authority_event_content"] = (
         regime_record.event.content_hash
     )
-    trade_date = str(plan.get("trade_date") or "")
+    market_closed_at_authorization = bool(
+        market_state_evidence.get("market_closed_at_authorization")
+    )
+    new_order_submission_allowed = (
+        market_state_evidence.get(
+            "new_order_submission_allowed_at_authorization"
+        )
+        is True
+    )
+    authorization_reason = (
+        "MARKET_CLOSED_AUTHORIZED_NO_TRADE"
+        if market_closed_at_authorization and not exact_rows
+        else (
+            "MARKET_CLOSED_EXACT_PLAN_SEALED_NO_NEW_ORDER_AUTHORITY"
+            if market_closed_at_authorization
+            else (
+                "AUTHORIZED_NO_TRADE"
+                if not exact_rows
+                else "ORION_PAPER_EXACT_ORDERS_AUTHORIZED"
+            )
+        )
+    )
     exact = build_exact_execution_plan(
         run_id=run_id,
-        as_of=f"{trade_date}T09:35:00-04:00",
+        as_of=str(market_state_evidence["price_as_of"]),
         created_at=effective_authorized_at,
         orchestrator_version=str(env.get("CAERUS_ORCHESTRATOR_VERSION") or "choice2.v1"),
         source_precompute_ids=[
@@ -728,7 +1511,8 @@ def authorize_exact_execution_plan(
         market_state_id=market_state_id,
         market_state={
             "captured_at": snapshot.get("captured_at"),
-            "pricing_basis": "timestamped_alpaca_latest_trade_at_authorization",
+            "price_as_of": market_state_evidence["price_as_of"],
+            "pricing_basis": price_basis,
             "quote_evidence": market_state_evidence,
             "risk_package_id": _risk.package_id,
             "risk_package_hash": _risk.content_hash,
@@ -742,7 +1526,7 @@ def authorize_exact_execution_plan(
                 "allocation_weight": 1.0,
             }
         ],
-        portfolio_nav=float(nav),
+        portfolio_nav=decision_nav,
         starting_positions=starting_positions,
         starting_cash=float(cash),
         account_id_hash=broker_account_id_hash,
@@ -752,6 +1536,7 @@ def authorize_exact_execution_plan(
             "capital_budget": capital_budget,
             "execution_filter": filter_stats,
             "settled_cash": settled.to_report(),
+            "decision_nav_reconstruction": nav_evidence,
         },
         sell_orders=sells,
         buy_orders=buys,
@@ -772,6 +1557,16 @@ def authorize_exact_execution_plan(
                 1.0,
                 sum(float(row.get("notional") or 0.0) for row in exact_rows) * 0.01,
             ),
+            "max_adverse_fill_slippage_bps": (
+                MAX_ADVERSE_FILL_SLIPPAGE_BPS
+            ),
+            "new_order_execution_style": "protective_day_limit",
+            "authorization_session_reason": session.reason,
+            "authorization_price_basis": price_basis,
+            "market_closed_at_authorization": market_closed_at_authorization,
+            "new_order_submission_allowed_at_authorization": (
+                new_order_submission_allowed
+            ),
             **(
                 {
                     "paper_drill_epoch": drill_epoch,
@@ -784,12 +1579,8 @@ def authorize_exact_execution_plan(
         authorization_state={
             "status": "AUTHORIZED",
             "authority": "CAERUS_ORCHESTRATOR",
-            "authorized_at": effective_authorized_at,
-            "authorization_reason": (
-                "AUTHORIZED_NO_TRADE"
-                if not exact_rows
-                else "ORION_PAPER_EXACT_ORDERS_AUTHORIZED"
-            ),
+            "authorized_at": seal_time.isoformat(),
+            "authorization_reason": authorization_reason,
         },
     )
     result = dict(plan)
@@ -798,9 +1589,17 @@ def authorize_exact_execution_plan(
             "schema_version": "caerus.authorized_execution_handoff.v1",
             "status": "AUTHORIZED_NO_TRADE" if not exact.orders else "AUTHORIZED_EXACT_PLAN",
             "reason_code": (
-                "authorized_no_trade"
-                if not exact.orders
-                else "fresh_broker_state_exact_plan_authorized"
+                "market_closed_authorized_no_trade"
+                if market_closed_at_authorization and not exact.orders
+                else (
+                    "market_closed_exact_plan_sealed_no_submission_authority"
+                    if market_closed_at_authorization
+                    else (
+                        "authorized_no_trade"
+                        if not exact.orders
+                        else "fresh_broker_state_exact_plan_authorized"
+                    )
+                )
             ),
             "exact_execution_plan": exact.to_dict(),
             "exact_execution_plan_id": exact.plan_id,
@@ -900,36 +1699,45 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
-    if drill_epoch:
-        try:
-            unresolved = []
-            for intent_path_candidate in base_wal_root.glob(
-                f"**/{trade_date}/intents/*.json"
-            ):
-                intent = OrderIntent.from_dict(json.loads(
-                    intent_path_candidate.read_text(encoding="utf-8")
-                ))
-                candidate_root = intent_path_candidate.parents[2]
-                if unresolved_intent_requires_lookup(
-                    candidate_root,
-                    trade_date=trade_date,
-                    client_order_id=intent.client_order_id,
-                ):
-                    unresolved.append(intent.client_order_id)
-            if unresolved:
-                raise RuntimeError(
-                    "unresolved prior PAPER submission WAL intents: "
-                    + ",".join(sorted(unresolved))
-                )
-        except Exception as exc:
-            print(json.dumps({
-                "status": "BLOCKED",
-                "reason_code": "paper_drill_prior_submission_unresolved",
-                "error": str(exc)[:1000],
-                "orders_submitted": 0,
-            }, sort_keys=True))
-            return 1
     broker = AlpacaBroker.from_env()
+    try:
+        preauthorization_snapshot = _broker_snapshot(
+            broker, fail_on_open_order_lookup=True
+        )
+        preauthorization_account = preauthorization_snapshot.get("account")
+        if not isinstance(preauthorization_account, Mapping):
+            raise RuntimeError("PAPER broker account snapshot is malformed")
+        preauthorization_cash = _finite_float(
+            preauthorization_account.get("cash")
+        )
+        if preauthorization_cash is None or preauthorization_cash < 0:
+            raise RuntimeError("PAPER broker cash is unavailable")
+        preauthorization_state_hash = compute_starting_state_hash(
+            _quantity_positions(preauthorization_snapshot),
+            preauthorization_cash,
+        )
+        unresolved = unresolved_foreign_intent_client_ids(
+            base_wal_root,
+            current_wal_root=epoch_wal_root,
+            trade_date=trade_date,
+            lookup_by_client_order_id=getattr(
+                broker, "find_order_by_client_id", None
+            ),
+            current_state_hash=preauthorization_state_hash,
+        )
+        if unresolved:
+            raise RuntimeError(
+                "unresolved prior PAPER submission WAL intents: "
+                + ",".join(sorted(unresolved))
+            )
+    except Exception as exc:
+        print(json.dumps({
+            "status": "BLOCKED",
+            "reason_code": "paper_drill_prior_submission_unresolved",
+            "error": str(exc)[:1000],
+            "orders_submitted": 0,
+        }, sort_keys=True))
+        return 1
     resolved_regime_state_root = (
         latest_pointer.parent.parent / "state" / "regime_authority"
     )
@@ -942,6 +1750,7 @@ def main(argv: list[str] | None = None) -> int:
             plan_path=args.plan,
             regime_state_root=resolved_regime_state_root,
             drill_epoch=drill_epoch,
+            broker_snapshot=preauthorization_snapshot,
         )
     except Exception as exc:
         transient = is_retryable_broker_read_error(exc)
