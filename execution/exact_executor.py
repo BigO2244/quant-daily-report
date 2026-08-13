@@ -35,6 +35,7 @@ from core.live_pilot_guardrails import (
     validate_live_pilot_submission_guardrails,
 )
 from core.paper_drill_epoch import claim_namespace, plan_drill_epoch, scoped_wal_root
+from paper.trading_calendar import ET_TZ, market_session_status
 from core.submission_wal import (
     OrderIntent,
     ResolutionState,
@@ -75,6 +76,32 @@ class ExactOrderSuppressionReason(str, Enum):
     PRIOR_SUBMISSION_UNKNOWN = "PRIOR_SUBMISSION_UNKNOWN"
     PRIOR_RECONCILIATION_FAILURE = "PRIOR_RECONCILIATION_FAILURE"
     EXECUTION_HALTED = "EXECUTION_HALTED"
+
+
+def _exact_market_is_open(
+    *,
+    trade_date: str,
+    now_et: dt.datetime | None,
+) -> bool:
+    """Return whether a new exact-plan broker submission is allowed now.
+
+    Production callers intentionally pass ``None`` so every submission-boundary
+    check samples the current wall clock. Tests may inject an explicit clock.
+    Naive injected values are interpreted as Eastern time to match the outer
+    governed lane's clock handling.
+    """
+
+    current = now_et or dt.datetime.now(ET_TZ)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=ET_TZ)
+    current = current.astimezone(ET_TZ)
+    return bool(
+        market_session_status(
+            run_date=trade_date,
+            now_et=current,
+            cutoff_time_et="16:00",
+        ).is_open_now
+    )
 
 
 def _canonical_json(payload: Mapping[str, Any]) -> bytes:
@@ -695,6 +722,7 @@ def _execute_exact_plan_locked(
     wal_root: Path | str,
     attempt_id: str,
     dry_run: bool,
+    now_et: dt.datetime | None,
 ) -> ExactExecutionOutcome:
     """Validate and execute exactly one v3 plan, or fail closed without mutation."""
     plan = exact_execution_plan_from_dict(plan_payload, expected_account_scope="PAPER")
@@ -1152,6 +1180,33 @@ def _execute_exact_plan_locked(
         ).exists()
         for order in plan.orders
     )
+    if has_new_intents and not dry_run and not _exact_market_is_open(
+        trade_date=plan.trade_date,
+        now_et=now_et,
+    ):
+        prior_mutation = bool(recovered_evidence)
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="FAILED_RECONCILIATION" if prior_mutation else "BLOCKED",
+            reason="exact_execution_market_closed:new_intents_forbidden",
+            submitted=recovered_evidence if recovering else (),
+            filled=(
+                [row for row in recovered_evidence if _has_fill(row)]
+                if recovering
+                else ()
+            ),
+            final_positions=positions,
+            final_cash=cash,
+            reconciliation=(
+                "FAILED_RECONCILIATION" if prior_mutation else "FAILED_PRE_SUBMIT"
+            ),
+            failure_class=(
+                FailureClass.EXECUTION_FAILURE
+                if prior_mutation
+                else FailureClass.AUTHORIZATION_FAILURE
+            ),
+        )
     if has_new_intents and (
         runtime_cap is None or aggregate_buy_notional > float(runtime_cap) + 1e-9
     ):
@@ -1362,6 +1417,31 @@ def _execute_exact_plan_locked(
                 failure_class=FailureClass.EXECUTION_FAILURE,
             )
         for order in orders:
+            order_has_wal = intent_path(
+                wal_root,
+                trade_date=plan.trade_date,
+                client_order_id=str(order["client_order_id"]),
+            ).exists()
+            if not order_has_wal and not _exact_market_is_open(
+                trade_date=plan.trade_date, now_et=now_et
+            ):
+                failure_positions, failure_cash = _best_effort_snapshot(broker)
+                mutated = bool(submitted or recovered_evidence)
+                return _outcome(
+                    plan,
+                    terminal=TerminalOutcome.SYSTEM_FAILURE,
+                    status="FAILED_RECONCILIATION" if mutated else "BLOCKED",
+                    reason="exact_execution_market_closed:mid_batch_submission_halted",
+                    submitted=submitted,
+                    filled=filled,
+                    rejected=rejected,
+                    final_positions=failure_positions,
+                    final_cash=failure_cash,
+                    reconciliation=(
+                        "FAILED_RECONCILIATION" if mutated else "FAILED_PRE_SUBMIT"
+                    ),
+                    failure_class=FailureClass.EXECUTION_FAILURE,
+                )
             broker_row, ambiguity = _submit_one(
                 plan=plan,
                 order=order,
@@ -1545,6 +1625,7 @@ def execute_exact_plan(
     wal_root: Path | str,
     attempt_id: str,
     dry_run: bool,
+    now_et: dt.datetime | None = None,
 ) -> ExactExecutionOutcome:
     """Execute under a date-wide OS mutex and an immutable account claim.
 
@@ -1574,6 +1655,7 @@ def execute_exact_plan(
                 wal_root=wal_root,
                 attempt_id=attempt_id,
                 dry_run=dry_run,
+                now_et=now_et,
             )
     except ExecutionMutexError as exc:
         return _outcome(

@@ -3932,6 +3932,7 @@ def _run_exact_execution_path(
     trade_date: str,
     output_root: Path | str,
     dry_run: bool,
+    now_et: dt.datetime | None = None,
 ) -> dict[str, Any]:
     """Consume v3 as exact orders. No target reconstruction is reachable here."""
     from core.failure_semantics import TerminalOutcome
@@ -3994,6 +3995,32 @@ def _run_exact_execution_path(
             operator_action="Preserve the invalid plan and obtain a new authorization.",
             preflight=preflight,
         )
+
+    market_hours_gate = _normal_market_hours_gate(now_et=now_et)
+    exact_order_count = len(bound.orders)
+    market_open = market_hours_gate.get("status") == "PASS"
+    market_hours_gate.update(
+        {
+            "execution_source": "exact_execution_plan_v3",
+            "exact_order_count": exact_order_count,
+            "submission_allowed": bool(market_open),
+            "zero_order_verification_allowed": exact_order_count == 0,
+            "dry_run_validation_allowed": bool(dry_run),
+            "decision": (
+                "ALLOW_SUBMISSION"
+                if market_open
+                else "ALLOW_ZERO_ORDER_VERIFICATION"
+                if exact_order_count == 0
+                else "ALLOW_DRY_RUN_ONLY"
+                if dry_run
+                else "BLOCK_SUBMISSION"
+            ),
+        }
+    )
+    _write_json(run_root / "live_pilot_market_hours_gate.json", market_hours_gate)
+    # The exact executor is the locked, WAL-aware mutation boundary. It blocks
+    # every new intent after close while still allowing stable-ID lookup and
+    # reconciliation of orders that were durably recorded before close.
 
     can_append_reconcile = False
     if not dry_run:
@@ -4066,6 +4093,7 @@ def _run_exact_execution_path(
             wal_root=Path(output_root) / "submission_wal",
             attempt_id=run_id,
             dry_run=bool(dry_run),
+            now_et=now_et,
         )
     except Exception as exc:
         return _write_blocked_artifacts(
@@ -5290,6 +5318,7 @@ def run_live_pilot(
             trade_date=trade_date,
             output_root=output_root,
             dry_run=bool(gate.dry_run),
+            now_et=now_et,
         )
 
     return _run_live_pilot_core_path(

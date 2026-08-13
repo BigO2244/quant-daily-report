@@ -10,6 +10,7 @@ from execution.exact_executor import execute_exact_plan
 from scripts.authorize_exact_execution_plan import authorize_exact_execution_plan
 from Tests.test_exact_execution_choice2 import (
     TrackingPaperBroker,
+    TEST_NOW_ET,
     _env,
     _finalize_direct_authorization,
 )
@@ -111,8 +112,8 @@ def test_paper_chain_scenario_matrix(
         wal_root=tmp_path / "outputs" / "paper_lane" / "submission_wal",
         attempt_id=f"{run_id}-simulated-submit",
         dry_run=False,
+        now_et=TEST_NOW_ET,
     )
     assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
     assert result.reconciliation_status == "CLEAN"
     assert broker.submit_calls == len(exact.orders)
-

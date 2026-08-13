@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import datetime as dt
 import hashlib
 import json
 import os
@@ -8,6 +9,7 @@ import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -15,8 +17,8 @@ from authority.contracts import AuthorityContractError
 from authority.exact_plan import build_exact_execution_plan, exact_execution_plan_from_dict
 from core.failure_semantics import TerminalOutcome
 from core.orchestrator_state import load_orchestrator_state
-from execution.exact_executor import execute_exact_plan
-from scripts.live_pilot_execute import run_live_pilot
+from execution.exact_executor import execute_exact_plan as _execute_exact_plan
+from scripts.live_pilot_execute import run_live_pilot as _run_live_pilot
 from core.regime_state_store import (
     RegimeAuthorityEvent,
     RegimePersistenceResult,
@@ -30,6 +32,21 @@ from scripts.authorize_exact_execution_plan import (
 
 
 PAPER_HOST = "https://paper-api.alpaca.markets"
+TEST_NOW_ET = dt.datetime(2026, 8, 12, 13, 35, tzinfo=ZoneInfo("America/New_York"))
+
+
+def execute_exact_plan(**kwargs):
+    """Keep direct executor tests independent of the wall-clock market state."""
+
+    kwargs.setdefault("now_et", TEST_NOW_ET)
+    return _execute_exact_plan(**kwargs)
+
+
+def run_live_pilot(**kwargs):
+    """Keep governed-entrypoint tests independent of the wall-clock session."""
+
+    kwargs.setdefault("now_et", TEST_NOW_ET)
+    return _run_live_pilot(**kwargs)
 
 
 class TrackingPaperBroker:
@@ -591,6 +608,80 @@ def test_intentional_zero_order_plan_is_authorized_no_trade(tmp_path: Path):
     assert broker.submit_calls == 0
 
 
+def test_direct_exact_new_intents_are_blocked_after_close_without_wal_or_submit(
+    tmp_path: Path,
+):
+    broker = TrackingPaperBroker()
+    plan = _plan()
+    result = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="direct-after-close",
+        dry_run=False,
+        now_et=dt.datetime(2026, 8, 12, 16, 15, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    assert result.status == "BLOCKED"
+    assert result.reason_code == "exact_execution_market_closed:new_intents_forbidden"
+    assert result.reconciliation_status == "FAILED_PRE_SUBMIT"
+    assert broker.submit_calls == 0
+    assert not list((tmp_path / "wal").rglob("*.json"))
+    assert not list((tmp_path / "account_authority").rglob("plan_claim.json"))
+
+
+def test_direct_exact_zero_order_plan_reconciles_after_close(tmp_path: Path):
+    broker = TrackingPaperBroker()
+    result = execute_exact_plan(
+        plan_payload=_plan(no_trade=True).to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="direct-after-close-no-trade",
+        dry_run=False,
+        now_et=dt.datetime(2026, 8, 12, 16, 15, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    assert result.terminal_outcome is TerminalOutcome.AUTHORIZED_NO_TRADE
+    assert result.status == "AUTHORIZED_NO_TRADE"
+    assert broker.submit_calls == 0
+    assert not list((tmp_path / "wal").rglob("*.json"))
+
+
+def test_completed_wal_recovery_after_close_is_lookup_only_and_reconciles(
+    tmp_path: Path,
+):
+    broker = TrackingPaperBroker()
+    plan = _plan()
+    first = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="before-close",
+        dry_run=False,
+    )
+    calls = broker.submit_calls
+    assert first.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+
+    recovered = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="after-close-recovery",
+        dry_run=False,
+        now_et=dt.datetime(2026, 8, 12, 16, 15, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    assert recovered.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert broker.submit_calls == calls
+    recovered_ids = [row["client_order_id"] for row in recovered.orders_submitted]
+    assert len(recovered_ids) == len(set(recovered_ids)) == len(plan.orders)
+    assert all(row["recovered_by_client_order_id"] for row in recovered.orders_submitted)
+
+
 def test_restart_after_accepted_response_loss_recovers_without_duplicate(tmp_path: Path):
     broker = TrackingPaperBroker(crash_after_accept=True)
     plan = _plan()
@@ -626,6 +717,67 @@ def test_completed_wal_recovery_ignores_later_cap_tightening_and_never_duplicate
     assert len(recovered.orders_submitted) == 2
     assert all(row["recovered_by_client_order_id"] for row in recovered.orders_submitted)
     assert broker.submit_calls == calls
+
+
+def test_partial_wal_recovery_after_close_is_truthful_and_never_duplicates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    broker = TrackingPaperBroker()
+    plan = _plan()
+    first_clock = iter((True, True, False))
+    monkeypatch.setattr(
+        "execution.exact_executor._exact_market_is_open",
+        lambda **_kwargs: next(first_clock),
+    )
+    crossed = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="crossed-close",
+        dry_run=False,
+    )
+    assert crossed.status == "FAILED_RECONCILIATION"
+    assert broker.submit_calls == 1
+    assert len(crossed.orders_submitted) == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+
+    monkeypatch.setattr(
+        "execution.exact_executor._exact_market_is_open",
+        lambda **_kwargs: False,
+    )
+    closed = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="partial-closed",
+        dry_run=False,
+    )
+    assert closed.status == "FAILED_RECONCILIATION"
+    assert closed.reconciliation_status == "FAILED_RECONCILIATION"
+    assert len(closed.orders_submitted) == 1
+    assert broker.submit_calls == 1
+
+    recovery_clock = iter((True, False))
+    monkeypatch.setattr(
+        "execution.exact_executor._exact_market_is_open",
+        lambda **_kwargs: next(recovery_clock),
+    )
+    recovery_crossed = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="partial-recovery-crossed",
+        dry_run=False,
+    )
+    client_ids = [row["client_order_id"] for row in recovery_crossed.orders_submitted]
+    assert recovery_crossed.status == "FAILED_RECONCILIATION"
+    assert len(client_ids) == len(set(client_ids)) == 1
+    assert broker.submit_calls == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
 def test_foreign_same_date_wal_blocks_a_different_exact_plan_before_broker_mutation(
@@ -1278,6 +1430,91 @@ def test_production_entrypoint_routes_v3_directly_and_writes_canonical_artifacts
         "OBSERVE", "RESEARCH", "PRECOMPUTE", "DECIDE", "AUTHORIZE",
         "EXECUTE", "VERIFY", "RECONCILE", "LEARN",
     ]
+
+
+def test_exact_orders_are_blocked_after_market_close_before_submission(tmp_path: Path):
+    broker = TrackingPaperBroker()
+    exact = _plan()
+
+    result = run_live_pilot(
+        plan=_handoff(exact),
+        broker=broker,
+        env={**_env(), "CAERUS_REQUIRE_EXACT_EXECUTION_PLAN": "1"},
+        run_id="exact-after-close-blocked",
+        output_root=tmp_path / "outputs" / "paper_lane",
+        now_et=dt.datetime(2026, 8, 12, 16, 15),
+    )
+
+    run_root = Path(result["run_root"])
+    gate = json.loads((run_root / "live_pilot_market_hours_gate.json").read_text())
+    assert result["terminal_status"] == "BLOCKED"
+    assert result["reason_code"].startswith("exact_execution_market_closed:")
+    assert broker.submit_calls == 0
+    assert gate["status"] == "BLOCKED"
+    assert gate["decision"] == "BLOCK_SUBMISSION"
+    assert gate["exact_order_count"] == 2
+    assert gate["submission_allowed"] is False
+
+
+def test_exact_zero_order_verification_is_allowed_after_market_close(tmp_path: Path):
+    broker = TrackingPaperBroker()
+    exact = _plan(no_trade=True)
+
+    result = run_live_pilot(
+        plan=_handoff(exact),
+        broker=broker,
+        env={**_env(), "CAERUS_REQUIRE_EXACT_EXECUTION_PLAN": "1"},
+        run_id="exact-after-close-no-trade",
+        output_root=tmp_path / "outputs" / "paper_lane",
+        now_et=dt.datetime(2026, 8, 12, 16, 15),
+    )
+
+    run_root = Path(result["run_root"])
+    gate = json.loads((run_root / "live_pilot_market_hours_gate.json").read_text())
+    assert result["terminal_status"] == "AUTHORIZED_NO_TRADE"
+    assert result["canonical_economic_verification_status"] == "RECONCILED"
+    assert broker.submit_calls == 0
+    assert gate["status"] == "BLOCKED"
+    assert gate["decision"] == "ALLOW_ZERO_ORDER_VERIFICATION"
+    assert gate["exact_order_count"] == 0
+    assert gate["zero_order_verification_allowed"] is True
+
+
+def test_governed_entrypoint_allows_lookup_only_wal_recovery_after_close(
+    tmp_path: Path,
+):
+    broker = TrackingPaperBroker()
+    exact = _plan()
+    output_root = tmp_path / "outputs" / "paper_lane"
+    env = {**_execution_env(tmp_path), "CAERUS_REQUIRE_EXACT_EXECUTION_PLAN": "1"}
+    first = run_live_pilot(
+        plan=_handoff(exact),
+        broker=broker,
+        env=env,
+        run_id="exact-before-close",
+        output_root=output_root,
+    )
+    calls = broker.submit_calls
+    assert first["terminal_status"] == "SUBMITTED"
+
+    recovered = run_live_pilot(
+        plan=_handoff(exact),
+        broker=broker,
+        env=env,
+        run_id="exact-after-close-recovery",
+        output_root=output_root,
+        now_et=dt.datetime(2026, 8, 12, 16, 15),
+    )
+
+    submitted = json.loads(
+        (Path(recovered["run_root"]) / "live_pilot_orders_submitted.json").read_text()
+    )["orders"]
+    client_ids = [row["client_order_id"] for row in submitted]
+    assert recovered["terminal_status"] == "SUBMITTED"
+    assert recovered["canonical_economic_verification_status"] == "RECONCILED"
+    assert broker.submit_calls == calls
+    assert len(client_ids) == len(set(client_ids)) == len(exact.orders)
+    assert all(row["recovered_by_client_order_id"] for row in submitted)
 
 
 def test_no_trade_attribution_uses_execution_pre_to_post_nav_not_authorization_nav(

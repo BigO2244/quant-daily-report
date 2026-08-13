@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import copy
+import datetime as dt
 import hashlib
 import os
 import tempfile
+from zoneinfo import ZoneInfo
 
 from core.execution_attempt_registry import (
     AttemptRecord,
@@ -19,6 +21,7 @@ from core.execution_attempt_registry import (
 from core.failure_semantics import FailureClass, TerminalOutcome, get_failure_policy
 from authority.exact_plan import build_exact_execution_plan
 from execution.exact_executor import execute_exact_plan
+from Tests.test_exact_execution_choice2 import TEST_NOW_ET
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "incidents"
@@ -310,7 +313,11 @@ def test_august_7_functional_exact_replay_ignores_alternative_target_and_submits
 
     result = execute_exact_plan(
         plan_payload=payload, broker=broker, env=_replay_env(), wal_root=tmp_path / "wal",
-        attempt_id="aug7-functional", dry_run=False,
+        attempt_id="aug7-functional",
+        dry_run=False,
+        now_et=dt.datetime(
+            2026, 8, 7, 13, 35, tzinfo=ZoneInfo("America/New_York")
+        ),
     )
 
     assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
@@ -330,7 +337,7 @@ def test_august_12_functional_exact_replay_submits_all_twelve_and_writes_wal(tmp
 
     result = execute_exact_plan(
         plan_payload=plan.to_dict(), broker=broker, env=_replay_env(), wal_root=tmp_path / "wal",
-        attempt_id="aug12-functional", dry_run=False,
+        attempt_id="aug12-functional", dry_run=False, now_et=TEST_NOW_ET,
     )
 
     assert result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
