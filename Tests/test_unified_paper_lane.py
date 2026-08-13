@@ -1170,3 +1170,14 @@ def test_pointer_terminal_status_mapping(
     from scripts.paper_lane_write_execution_pointer import lane_exit_ok
 
     assert lane_exit_ok(status) is expected_ok
+
+
+def test_running_pointer_preserves_named_posttrade_verification_phase() -> None:
+    from scripts.paper_lane_write_execution_pointer import map_terminal_status
+
+    status, substatus = map_terminal_status(
+        "running", "paper_posttrade_verification_started"
+    )
+
+    assert status == "running"
+    assert substatus == "paper_posttrade_verification_started"

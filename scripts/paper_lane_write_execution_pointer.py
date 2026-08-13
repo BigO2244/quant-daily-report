@@ -59,7 +59,12 @@ def map_terminal_status(terminal_status: str, reason_code: str = "") -> tuple[st
     reason = str(reason_code or "").strip()
     upper = terminal.upper()
     if terminal.lower() == "running":
-        return "running", None
+        # The PAPER wrapper publishes named two-phase states while the run is
+        # intentionally nonterminal (initializing, dry-run, submission, then
+        # mandatory posttrade verification).  Preserve that phase in
+        # ``substatus`` so health can distinguish the one governed
+        # pre-publication state from a stale or arbitrary running pointer.
+        return "running", reason or None
     if upper == "SUBMITTED":
         return TERMINAL_STATUS_SUCCESS, None
     if upper == "AUTHORIZED_NO_TRADE":

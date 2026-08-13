@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.economic_reconciliation import verify_canonical_economic_artifact_hash
+
 
 SCHEMA_VERSION = "caerus_operational_drag_v1"
 DEFAULT_INCEPTION_DATE = "2026-02-23"
@@ -739,7 +741,221 @@ def discover_plan_snapshots(repo_root: Path | str, trade_date: str) -> list[Plan
             snapshot = _plan_from_holdings_snapshot(day_dir / "holdings_snapshot.json")
             if snapshot is not None and not any(existing.date == snapshot.date for existing in snapshots):
                 snapshots.append(snapshot)
+    # A sealed exact plan is the only execution intent for its run.  Once an
+    # exact-v3 no-trade has independently reconciled, the same-day precompute
+    # target book is lineage, not a set of unsubmitted orders.  Replace only
+    # that date; historical target snapshots retain their existing semantics.
+    exact_no_trade = _validated_exact_no_trade_evidence(repo, trade_date)
+    exact_snapshot = _plan_from_exact_no_trade(exact_no_trade) if exact_no_trade else None
+    if exact_snapshot is not None:
+        snapshots = [snapshot for snapshot in snapshots if snapshot.date != trade_date]
+        snapshots.append(exact_snapshot)
     return sorted(snapshots, key=lambda item: (item.date, item.plan_source))
+
+
+def _resolve_repo_path(repo: Path, value: Any) -> Path | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    path = Path(text)
+    return path if path.is_absolute() else repo / path
+
+
+def _exact_execution_payload_candidates(repo: Path, trade_date: str) -> list[Path]:
+    pointer_path = repo / "outputs" / "workflow" / trade_date / "execution.json"
+    if pointer_path.exists():
+        # The workflow pointer is authoritative for the current run.  Never
+        # skip a bad/partial current run and bless an older same-day run.
+        pointer = _read_json(pointer_path)
+        if not pointer or _payload_date(pointer) != trade_date:
+            return []
+        status = str(pointer.get("status") or "").strip().lower()
+        substatus = str(pointer.get("substatus") or "").strip().lower()
+        allowed_state = (
+            status == "running" and substatus == "paper_posttrade_verification_started"
+        ) or (status == "no_action" and substatus == "authorized_no_trade")
+        if (
+            str(pointer.get("stage") or "").strip().lower() != "execution"
+            or str(pointer.get("mode") or "").strip().upper() != "PAPER"
+            or not allowed_state
+        ):
+            return []
+        run_root = _resolve_repo_path(repo, pointer.get("run_root"))
+        run_id = str(pointer.get("run_id") or "").strip()
+        if run_root is None or not run_id or run_root.name != run_id:
+            return []
+        return [run_root / "execution_payload.json"]
+    # Current-date health without an authoritative pointer is ambiguous.  Do
+    # not infer the current run from directory ordering.
+    return []
+
+
+def _zero_order_artifact(path: Path) -> bool:
+    payload = _read_json(path)
+    return isinstance(payload, dict) and payload.get("orders") == []
+
+
+def _validated_exact_no_trade_evidence(
+    repo: Path,
+    trade_date: str,
+) -> dict[str, Any] | None:
+    """Return only cryptographically sealed, economically clean no-trade truth.
+
+    This deliberately does not trust a terminal label alone.  The exact plan
+    must re-validate, all requested/submitted counts and persisted order lists
+    must be zero, and the content-hashed canonical economic artifact must be
+    RECONCILED.  Any ambiguity falls back to the existing fail-closed analysis.
+    """
+
+    from authority.exact_plan import exact_execution_plan_from_dict
+
+    for payload_path in _exact_execution_payload_candidates(repo, trade_date):
+        run_id = _run_id_from_path(payload_path)
+        if run_id is not None and not run_id.startswith(trade_date):
+            continue
+        payload = _read_json(payload_path)
+        if not payload or _payload_date(payload) != trade_date:
+            continue
+        if str(payload.get("execution_source") or "") != "exact_execution_plan_v3":
+            continue
+        if str(payload.get("terminal_status") or "").upper() != "AUTHORIZED_NO_TRADE":
+            continue
+        if str(payload.get("terminal_outcome") or "").upper() != "AUTHORIZED_NO_TRADE":
+            continue
+        count_values = [
+            _safe_float(payload.get(key))
+            for key in (
+                "orders_requested_count",
+                "orders_submitted_count",
+                "orders_filled_count",
+                "orders_suppressed_count",
+            )
+        ]
+        if any(value is None or value != 0.0 for value in count_values):
+            continue
+        package = payload.get("exact_execution_plan")
+        if not isinstance(package, dict):
+            continue
+        try:
+            exact = exact_execution_plan_from_dict(
+                package,
+                expected_plan_id=str(package.get("plan_id") or ""),
+                expected_run_id=str(package.get("run_id") or ""),
+                expected_account_scope="PAPER",
+            )
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if exact.trade_date != trade_date or exact.orders:
+            continue
+        if str(payload.get("exact_execution_plan_hash") or "") != exact.content_hash:
+            continue
+        run_root = payload_path.parent
+        intended_path = run_root / "live_pilot_orders_intended.json"
+        submitted_path = run_root / "live_pilot_orders_submitted.json"
+        if not _zero_order_artifact(intended_path) or not _zero_order_artifact(submitted_path):
+            continue
+        economic_path = run_root / "canonical_economic_verification.json"
+        economic = _read_json(economic_path)
+        if not economic or _payload_date(economic) != trade_date:
+            continue
+        if (
+            str(economic.get("status") or "").upper() != "RECONCILED"
+            or economic.get("reconciled") is not True
+            or not verify_canonical_economic_artifact_hash(economic)
+        ):
+            continue
+        economic_recon = economic.get("economic_reconciliation")
+        sleeve_recon = economic.get("sleeve_attribution_reconciliation")
+        if not isinstance(economic_recon, dict) or not isinstance(sleeve_recon, dict):
+            continue
+        if (
+            str(economic_recon.get("status") or "").upper() != "RECONCILED"
+            or economic_recon.get("reconciled") is not True
+            or str(sleeve_recon.get("status") or "").upper() != "RECONCILED"
+            or sleeve_recon.get("reconciled") is not True
+        ):
+            continue
+        positions = economic_recon.get("positions") or {}
+        tolerance = economic_recon.get("tolerance") or {}
+        quantity_tolerance = _safe_float(tolerance.get("quantity_abs"))
+        cash_tolerance = _safe_float(tolerance.get("cash_abs"))
+        if quantity_tolerance is None or quantity_tolerance < 0:
+            continue
+        if cash_tolerance is None or cash_tolerance < 0:
+            continue
+        exact_positions = _position_map_from_any(
+            [dict(row) for row in exact.expected_posttrade_positions]
+        )
+        economic_expected = _position_map_from_any(positions.get("expected"))
+        economic_actual = _position_map_from_any(positions.get("actual"))
+        symbols = set(exact_positions) | set(economic_expected) | set(economic_actual)
+        if any(
+            abs(exact_positions.get(symbol, 0.0) - economic_expected.get(symbol, 0.0))
+            > quantity_tolerance
+            or abs(exact_positions.get(symbol, 0.0) - economic_actual.get(symbol, 0.0))
+            > quantity_tolerance
+            for symbol in symbols
+        ):
+            continue
+        cash = economic_recon.get("cash") or {}
+        expected_cash = _safe_float(cash.get("expected"))
+        actual_cash = _safe_float(cash.get("actual"))
+        if (
+            expected_cash is None
+            or actual_cash is None
+            or abs(expected_cash - float(exact.expected_posttrade_cash)) > cash_tolerance
+            or abs(actual_cash - float(exact.expected_posttrade_cash)) > cash_tolerance
+        ):
+            continue
+        return {
+            "payload_path": payload_path,
+            "run_root": run_root,
+            "payload": payload,
+            "exact_plan": exact,
+            "economic_path": economic_path,
+            "economic": economic,
+        }
+    return None
+
+
+def _plan_from_exact_no_trade(evidence: dict[str, Any]) -> PlanSnapshot | None:
+    exact = evidence.get("exact_plan")
+    economic = evidence.get("economic") or {}
+    run_root = Path(evidence["run_root"])
+    post_snapshot = _read_json(run_root / "live_pilot_broker_snapshot_post.json") or {}
+    mark_by_symbol: dict[str, float] = {}
+    for row in post_snapshot.get("positions") or []:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        quantity = _safe_float(row.get("qty") or row.get("quantity"))
+        market_value = _safe_float(row.get("market_value"))
+        if symbol and quantity and market_value is not None:
+            mark_by_symbol[symbol] = abs(market_value / quantity)
+    positions = tuple(
+        PlanPosition(
+            symbol=str(row.get("symbol") or "").strip().upper(),
+            target_weight=None,
+            shares=_safe_float(row.get("quantity")),
+            plan_price=mark_by_symbol.get(str(row.get("symbol") or "").strip().upper()),
+            reason="exact_authorized_posttrade_position",
+        )
+        for row in exact.expected_posttrade_positions
+        if str(row.get("symbol") or "").strip() and _safe_float(row.get("quantity")) is not None
+    )
+    econ = economic.get("economic_reconciliation") or {}
+    nav = _safe_float((econ.get("nav") or {}).get("broker_equity")) or _safe_float(exact.portfolio_nav)
+    cash_weight = (float(exact.expected_posttrade_cash) / nav) if nav and nav > 0 else 0.0
+    return PlanSnapshot(
+        date=exact.trade_date,
+        strategy_id=str(exact.strategy_id),
+        equity=nav,
+        cash_weight=max(0.0, min(1.0, cash_weight)),
+        positions=positions,
+        source_path=Path(evidence["payload_path"]),
+        plan_source="exact_authorized_no_trade_posttrade_state",
+        reason_codes=("plan_source_exact_authorized_no_trade",),
+    )
 
 
 def _strategy_from_payload(payload: dict[str, Any] | None) -> str:
@@ -978,7 +1194,13 @@ def build_intended_nav(
                 )
                 carry_equity = _safe_float(carry_row.get("intended_equity_value"))
             active_plan = latest_plan
-            if carry_equity is not None:
+            if latest_plan.plan_source == "exact_authorized_no_trade_posttrade_state":
+                # The sealed run is an observed, broker-bound state at this
+                # execution window.  Do not size it from a hypothetical prior
+                # target-book NAV carried into the day.
+                rebalance_equity = latest_plan.equity
+                row_reasons.append("intended_rebalance_uses_exact_execution_nav")
+            elif carry_equity is not None:
                 rebalance_equity = carry_equity
                 row_reasons.append("intended_rebalance_marked_to_market")
                 marked_to_market = True
@@ -1416,6 +1638,33 @@ def _run_scoped_paths(repo: Path, suffix: str) -> list[Path]:
 
 def _actual_json_candidates(repo: Path, trade_date: str) -> list[Path]:
     candidates: list[Path] = []
+    exact_no_trade = _validated_exact_no_trade_evidence(repo, trade_date)
+    if exact_no_trade is not None:
+        candidates.append(Path(exact_no_trade["run_root"]) / "live_pilot_broker_snapshot_post.json")
+    pointer_path = repo / "outputs" / "workflow" / trade_date / "execution.json"
+    if pointer_path.exists():
+        pointer = _read_json(pointer_path)
+        run_root = _resolve_repo_path(repo, pointer.get("run_root")) if pointer else None
+        run_id = str((pointer or {}).get("run_id") or "").strip()
+        if (
+            not pointer
+            or _payload_date(pointer) != trade_date
+            or run_root is None
+            or not run_id
+            or run_root.name != run_id
+        ):
+            return []
+        candidates.extend(
+            [
+                run_root / "broker" / f"recon_posttrade_{trade_date}.json",
+                run_root / "broker" / "posttrade_account_snapshot.json",
+                run_root / "broker" / "posttrade_positions.json",
+                run_root / "trading_day_summary.json",
+                run_root / "execution_payload.json",
+                run_root / "live_pilot_broker_snapshot_post.json",
+            ]
+        )
+        return _dedupe_paths(candidates)
     candidates.extend(_run_scoped_paths(repo, f"broker/recon_posttrade_{trade_date}.json"))
     candidates.append(repo / "outputs" / "broker" / f"recon_posttrade_{trade_date}.json")
     candidates.extend(_run_scoped_paths(repo, "broker/posttrade_account_snapshot.json"))
@@ -1519,6 +1768,52 @@ def _reconciliation_assessment(
     repo: Path | None = None,
     source_path: Path | str | None = None,
 ) -> dict[str, Any]:
+    if payload.get("schema_version") == "caerus.canonical_economic_verification.v1":
+        economic = payload.get("economic_reconciliation")
+        sleeve = payload.get("sleeve_attribution_reconciliation")
+        economic = economic if isinstance(economic, dict) else {}
+        sleeve = sleeve if isinstance(sleeve, dict) else {}
+        positions = economic.get("positions") if isinstance(economic.get("positions"), dict) else {}
+        raw_expected = _position_map_from_any(positions.get("expected"))
+        raw_actual = _position_map_from_any(positions.get("actual"))
+        aliases = _load_manual_aliases(repo) if repo is not None else {}
+        expected, expected_aliases = _normalize_position_aliases(raw_expected, aliases)
+        actual, actual_aliases = _normalize_position_aliases(raw_actual, aliases)
+        mismatches = _position_mismatches(expected, actual)
+        alias_resolutions = expected_aliases + [
+            item for item in actual_aliases if item not in expected_aliases
+        ]
+        quantity_deltas = _position_map_from_any(positions.get("quantity_deltas"))
+        material_delta = any(abs(float(value)) > 1e-8 for value in quantity_deltas.values())
+        status_clean = (
+            str(payload.get("status") or "").upper() == "RECONCILED"
+            and payload.get("reconciled") is True
+            and str(economic.get("status") or "").upper() == "RECONCILED"
+            and economic.get("reconciled") is True
+            and str(sleeve.get("status") or "").upper() == "RECONCILED"
+            and sleeve.get("reconciled") is True
+            and verify_canonical_economic_artifact_hash(payload)
+        )
+        clean = status_clean and not mismatches and not material_delta
+        reasons = ["reconciliation_clean" if clean else "reconciliation_not_clean"]
+        reasons.extend(_alias_resolution_reason(item) for item in alias_resolutions)
+        if any(row.get("classification") == "MISSING_BROKER_POSITION" for row in mismatches):
+            reasons.append("missing_broker_position")
+        return {
+            "clean": clean,
+            "status_clean": status_clean,
+            "alias_resolved_clean": False,
+            "verdict": str(payload.get("status") or "").upper(),
+            "drift_status": str(economic.get("status") or "").upper(),
+            "expected_positions": expected,
+            "broker_positions": actual,
+            "raw_expected_positions": raw_expected,
+            "raw_broker_positions": raw_actual,
+            "mismatches": mismatches,
+            "alias_resolutions_applied": alias_resolutions,
+            "source_path": str(source_path) if source_path is not None else None,
+            "reason_codes": _dedupe_reasons(reasons),
+        }
     verdict = str(payload.get("verdict") or payload.get("status") or "").upper()
     drift_status = str(payload.get("drift_status") or payload.get("comparison_status") or "").upper()
     verdict_clean = verdict in {"", "PASS", "OK", "CLEAN"}
@@ -2062,6 +2357,25 @@ def _run_id_from_path(path: Path | str | None) -> str | None:
 
 
 def _current_reconciliation_candidates(repo: Path, trade_date: str) -> list[Path]:
+    pointer_path = repo / "outputs" / "workflow" / trade_date / "execution.json"
+    if pointer_path.exists():
+        pointer = _read_json(pointer_path)
+        if not pointer or _payload_date(pointer) != trade_date:
+            return []
+        run_root = _resolve_repo_path(repo, pointer.get("run_root"))
+        run_id = str(pointer.get("run_id") or "").strip()
+        if (
+            str(pointer.get("stage") or "").strip().lower() != "execution"
+            or str(pointer.get("mode") or "").strip().upper() != "PAPER"
+            or run_root is None
+            or not run_id
+            or run_root.name != run_id
+        ):
+            return []
+        return [
+            run_root / "live_pilot_reconciliation.json",
+            run_root / "broker" / f"recon_posttrade_{trade_date}.json",
+        ]
     candidates: list[Path] = []
     candidates.extend(_run_scoped_paths(repo, "live_pilot_reconciliation.json"))
     candidates.extend(_run_scoped_paths(repo, f"broker/recon_posttrade_{trade_date}.json"))
@@ -2074,6 +2388,12 @@ def _select_current_reconciliation(
     trade_date: str,
 ) -> tuple[Path | None, dict[str, Any] | None, dict[str, Any]]:
     diagnostics = _new_diagnostics()
+    exact_no_trade = _validated_exact_no_trade_evidence(repo, trade_date)
+    if exact_no_trade is not None:
+        path = Path(exact_no_trade["economic_path"])
+        _diag_add_candidate(diagnostics, path)
+        _diag_add_selected(diagnostics, path)
+        return path, dict(exact_no_trade["economic"]), diagnostics
     for path in _current_reconciliation_candidates(repo, trade_date):
         _diag_add_candidate(diagnostics, path)
         payload = _read_json(path)
@@ -2094,7 +2414,27 @@ def _select_current_reconciliation(
 
 
 def _has_execution_evidence(repo: Path, trade_date: str) -> bool:
-    for path in _run_scoped_paths(repo, "execution_results.json"):
+    if _validated_exact_no_trade_evidence(repo, trade_date) is not None:
+        return True
+    pointer_path = repo / "outputs" / "workflow" / trade_date / "execution.json"
+    if pointer_path.exists():
+        pointer = _read_json(pointer_path)
+        run_root = _resolve_repo_path(repo, pointer.get("run_root")) if pointer else None
+        run_id = str((pointer or {}).get("run_id") or "").strip()
+        if (
+            not pointer
+            or _payload_date(pointer) != trade_date
+            or run_root is None
+            or not run_id
+            or run_root.name != run_id
+        ):
+            return False
+        result_paths = [run_root / "execution_results.json"]
+        order_paths = [run_root / "broker" / f"orders_{trade_date}.csv"]
+    else:
+        result_paths = _run_scoped_paths(repo, "execution_results.json")
+        order_paths = _run_scoped_paths(repo, f"broker/orders_{trade_date}.csv")
+    for path in result_paths:
         run_id = _run_id_from_path(path)
         if not run_id or not run_id.startswith(trade_date):
             continue
@@ -2109,7 +2449,7 @@ def _has_execution_evidence(repo: Path, trade_date: str) -> bool:
         ).upper()
         if status in {"EXECUTED", "RECONCILED_SUCCESS", "PARTIAL"}:
             return True
-    for path in _run_scoped_paths(repo, f"broker/orders_{trade_date}.csv"):
+    for path in order_paths:
         run_id = _run_id_from_path(path)
         if run_id and run_id.startswith(trade_date) and _read_csv_rows(path):
             return True
@@ -2796,6 +3136,41 @@ def build_operational_drag_analysis(
         actual=actual,
         attribution=attribution,
     )
+    current_execution_pointer = repo / "outputs" / "workflow" / trade_date / "execution.json"
+    if (
+        current_execution_pointer.exists()
+        and reconciliation_diagnostic.get("decision_grade_impact") == "blocks_decision_grade"
+    ):
+        diagnostic_reasons = [
+            str(reason)
+            for reason in reconciliation_diagnostic.get("reason_codes") or []
+            if reason and reason != "ok"
+        ] or ["reconciliation_not_clean"]
+        attribution_entries = list(attribution.get("attributions") or [])
+        attribution_entries.append(
+            {
+                "category": "reconciliation_health",
+                "date_range": trade_date,
+                "estimated_drag_bps": None,
+                "supporting_artifacts": [
+                    path
+                    for path in [reconciliation_diagnostic.get("reconciliation_source")]
+                    if path
+                ],
+                "confidence": "HIGH",
+                "explanation": "The current run does not have clean, authoritative reconciliation evidence.",
+                "reason_codes": diagnostic_reasons,
+            }
+        )
+        attribution["attributions"] = attribution_entries
+        attribution["reason_codes"] = _dedupe_reasons(
+            [
+                reason
+                for entry in attribution_entries
+                for reason in entry.get("reason_codes", [])
+            ]
+        )
+        attribution["confidence"] = _aggregate_confidence(attribution_entries)
     windows = build_stable_window_analysis(trade_date=trade_date, operational_drag=drag)
     # FR-061: classify (never delete) reason codes into current-date / historical /
     # window / materiality buckets so a clean requested date is not obscured by
