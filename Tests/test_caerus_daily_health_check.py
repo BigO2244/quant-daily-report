@@ -720,6 +720,99 @@ def test_material_operational_drag_gap_blocks_false_green(tmp_path: Path) -> Non
     assert "planned_buys_without_submissions" in check["reason_codes"]
 
 
+def test_historical_operational_drag_caveats_do_not_make_current_date_red(
+    tmp_path: Path,
+) -> None:
+    _write_base_artifacts(tmp_path)
+    _write_json(
+        tmp_path
+        / "outputs"
+        / "operational_drag"
+        / TRADE_DATE
+        / "operational_drag.json",
+        {
+            "trade_date": TRADE_DATE,
+            "available": True,
+            "decision_grade": True,
+            "current_date_status": "current_date_available_with_historical_caveats",
+            "current_date_reason_codes": ["actual_nav_from_live_overlay"],
+            "historical_reason_codes": ["planned_buys_without_submissions"],
+            "material_reason_codes": ["planned_buys_without_submissions"],
+            "current_date_health": {
+                "requested_date": TRADE_DATE,
+                "reaches_requested_date": True,
+                "current_date_material_reason_codes": [],
+                "blocking_components": [],
+            },
+        },
+    )
+
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+
+    assert _status(payload, "NAV/operational-drag reconciliation") == "GREEN"
+
+
+def test_current_operational_drag_caveats_remain_red(tmp_path: Path) -> None:
+    _write_base_artifacts(tmp_path)
+    _write_json(
+        tmp_path
+        / "outputs"
+        / "operational_drag"
+        / TRADE_DATE
+        / "operational_drag.json",
+        {
+            "trade_date": TRADE_DATE,
+            "available": True,
+            "decision_grade": False,
+            "current_date_status": "current_date_available_with_caveats",
+            "current_date_reason_codes": ["reconciliation_not_clean"],
+        },
+    )
+
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+
+    check = next(
+        item
+        for item in payload["checks"]
+        if item["name"] == "NAV/operational-drag reconciliation"
+    )
+    assert check["status"] == "RED"
+    assert "reconciliation_not_clean" in check["reason_codes"]
+
+
+def test_canonical_operational_drag_status_cross_checks_current_health(
+    tmp_path: Path,
+) -> None:
+    _write_base_artifacts(tmp_path)
+    _write_json(
+        tmp_path
+        / "outputs"
+        / "operational_drag"
+        / TRADE_DATE
+        / "operational_drag.json",
+        {
+            "trade_date": TRADE_DATE,
+            "available": True,
+            "decision_grade": True,
+            "current_date_status": "current_date_available_with_historical_caveats",
+            "current_date_reason_codes": [],
+            "reason_codes": ["planned_buys_without_submissions"],
+            "current_date_health": {
+                "requested_date": TRADE_DATE,
+                "reaches_requested_date": True,
+                "current_date_material_reason_codes": [
+                    "planned_buys_without_submissions"
+                ],
+                "blocking_components": ["intended"],
+            },
+        },
+    )
+
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+
+    assert _status(payload, "NAV/operational-drag reconciliation") == "RED"
+
+
 def test_equality_gate_divergence_blocks_universal_green(tmp_path: Path) -> None:
     _write_base_artifacts(tmp_path)
     _write_json(

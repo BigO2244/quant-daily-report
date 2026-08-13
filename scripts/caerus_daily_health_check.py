@@ -281,22 +281,46 @@ def _check_operational_drag(root: Path, trade_date: str) -> CheckResult:
     assert payload is not None
     decision_grade = payload.get("decision_grade") is True
     available = payload.get("available") is True
+    evidence_source = (
+        payload.get("current_date_reason_codes")
+        if "current_date_reason_codes" in payload
+        else payload.get("reason_codes")
+    )
     evidence_reason_codes = [
         str(item)
-        for item in (
-            payload.get("current_date_reason_codes")
-            or payload.get("reason_codes")
-            or []
-        )
+        for item in (evidence_source or [])
     ]
     reason_codes: list[str] = []
     current_status = _norm_text(payload.get("current_date_status")).upper()
+    artifact_date = _artifact_date(payload)
+    if artifact_date != trade_date:
+        reason_codes.append("OPERATIONAL_DRAG_TRADE_DATE_MISMATCH")
     if not available:
         reason_codes.append("OPERATIONAL_DRAG_UNAVAILABLE")
     if not decision_grade:
         reason_codes.append("OPERATIONAL_DRAG_NOT_DECISION_GRADE")
-    if current_status and current_status not in {"CLEAN", "OK", "PASS"}:
+    clean_current_statuses = {
+        "CLEAN",
+        "OK",
+        "PASS",
+        "CURRENT_DATE_OK",
+        "CURRENT_DATE_AVAILABLE_WITH_HISTORICAL_CAVEATS",
+    }
+    if current_status and current_status not in clean_current_statuses:
         reason_codes.append(f"OPERATIONAL_DRAG_{current_status}")
+    if current_status.startswith("CURRENT_DATE_"):
+        current_health = payload.get("current_date_health")
+        if not isinstance(current_health, dict):
+            reason_codes.append("OPERATIONAL_DRAG_CURRENT_DATE_HEALTH_MISSING")
+        else:
+            if current_health.get("requested_date") != trade_date:
+                reason_codes.append("OPERATIONAL_DRAG_CURRENT_DATE_HEALTH_DATE_MISMATCH")
+            if current_health.get("reaches_requested_date") is not True:
+                reason_codes.append("OPERATIONAL_DRAG_CURRENT_DATE_NOT_REACHED")
+            if current_health.get("current_date_material_reason_codes"):
+                reason_codes.append("OPERATIONAL_DRAG_CURRENT_DATE_MATERIAL_GAP")
+            if current_health.get("blocking_components"):
+                reason_codes.append("OPERATIONAL_DRAG_CURRENT_DATE_BLOCKING_COMPONENT")
     if reason_codes:
         reason_codes.extend(evidence_reason_codes)
         return CheckResult(
