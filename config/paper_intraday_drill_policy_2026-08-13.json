@@ -1,0 +1,23 @@
+{
+  "schema_version": "caerus.paper_intraday_drill_policy.v1",
+  "policy_id": "paper_intraday_e2e_drill_2026-08-13",
+  "trade_date": "2026-08-13",
+  "paper_only": true,
+  "live_eligible": false,
+  "allowed_epochs": [
+    "2026-08-13T1030ET",
+    "2026-08-13T1130ET",
+    "2026-08-13T1230ET",
+    "2026-08-13T1330ET",
+    "2026-08-13T1430ET",
+    "2026-08-13T1530ET",
+    "2026-08-13T1615ET"
+  ],
+  "safety_contract": {
+    "account_date_mutex_remains_global": true,
+    "epoch_reuse_is_idempotent_only": true,
+    "unresolved_prior_epoch_blocks_submission": true,
+    "wal_and_claim_records_are_append_only": true,
+    "normal_hours_market_orders_after_close_prohibited": true
+  }
+}

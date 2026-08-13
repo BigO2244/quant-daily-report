@@ -639,6 +639,92 @@ def test_foreign_same_date_wal_blocks_a_different_exact_plan_before_broker_mutat
     assert broker.submit_calls == calls
 
 
+def _epoch_plan(plan, epoch: str):
+    payload = plan.to_dict()
+    return _rebuild_exact(
+        payload,
+        constraints={
+            **payload["constraints"],
+            "paper_drill_epoch": epoch,
+            "paper_drill_live_eligible": False,
+        },
+    )
+
+
+def test_distinct_paper_drill_epochs_have_isolated_wal_and_claims(tmp_path: Path):
+    broker = TrackingPaperBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    first_result = execute_exact_plan(
+        plan_payload=first.to_dict(), broker=broker, env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal", attempt_id="epoch-1030", dry_run=False,
+    )
+    assert first_result.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+
+    second = _rebuild_exact(
+        first.to_dict(),
+        run_id="authority-epoch-1130",
+        starting_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        starting_cash=900.0,
+        sell_orders=[],
+        buy_orders=[],
+        expected_posttrade_positions=[{"symbol": "AAPL", "quantity": 2.0}],
+        expected_posttrade_cash=900.0,
+        constraints={
+            **first.to_dict()["constraints"],
+            "paper_drill_epoch": "2026-08-12T1130ET",
+        },
+    )
+    second_result = execute_exact_plan(
+        plan_payload=second.to_dict(), broker=broker, env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal", attempt_id="epoch-1130", dry_run=False,
+    )
+    assert second_result.terminal_outcome is TerminalOutcome.AUTHORIZED_NO_TRADE
+    assert broker.submit_calls == 2
+    assert len(list((tmp_path / "account_authority").rglob("plan_claim.json"))) == 2
+    assert (tmp_path / "wal/epochs/2026-08-12T1030ET/2026-08-12/intents").is_dir()
+
+
+def test_reusing_epoch_with_different_plan_is_blocked(tmp_path: Path):
+    broker = TrackingPaperBroker()
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    execute_exact_plan(
+        plan_payload=first.to_dict(), broker=broker, env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal", attempt_id="epoch-first", dry_run=False,
+    )
+    different = _epoch_plan(_plan(no_trade=True), "2026-08-12T1030ET")
+    blocked = execute_exact_plan(
+        plan_payload=different.to_dict(), broker=broker, env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal", attempt_id="epoch-reuse", dry_run=False,
+    )
+    assert blocked.reason_code in {
+        "foreign_or_mixed_submission_wal_plan",
+        "plan_claim_conflicts_with_authorized_plan",
+    }
+    assert broker.submit_calls == 2
+
+
+def test_unresolved_prior_epoch_blocks_new_epoch(tmp_path: Path):
+    class UnknownAfterAcceptBroker(TrackingPaperBroker):
+        def find_order_by_client_id(self, client_id):
+            raise TimeoutError(f"broker lookup unavailable for {client_id}")
+
+    broker = UnknownAfterAcceptBroker(crash_after_accept=True)
+    first = _epoch_plan(_plan(), "2026-08-12T1030ET")
+    failed = execute_exact_plan(
+        plan_payload=first.to_dict(), broker=broker, env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal", attempt_id="epoch-unknown", dry_run=False,
+    )
+    assert failed.terminal_outcome is TerminalOutcome.SUBMISSION_UNKNOWN
+    calls = broker.submit_calls
+    second = _epoch_plan(_plan(no_trade=True), "2026-08-12T1130ET")
+    blocked = execute_exact_plan(
+        plan_payload=second.to_dict(), broker=broker, env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal", attempt_id="epoch-after-unknown", dry_run=False,
+    )
+    assert blocked.reason_code == "prior_epoch_submission_unresolved"
+    assert broker.submit_calls == calls
+
+
 def test_concurrent_different_same_date_plans_have_one_os_locked_winner(
     tmp_path: Path,
 ):
@@ -1521,6 +1607,7 @@ def test_fresh_broker_decision_seals_transition_before_executor(tmp_path: Path):
         plan_path=source,
         created_at="2026-08-12T13:35:01+00:00",
         regime_state_root=regime_state_root,
+        drill_epoch="2026-08-12T1230ET",
     )
     authorized = _finalize_direct_authorization(regime_state_root, authorized)
     exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
@@ -1528,6 +1615,8 @@ def test_fresh_broker_decision_seals_transition_before_executor(tmp_path: Path):
     assert authorized["precompute_execution_authority"] is False
     assert [row["side"] for row in exact.orders] == ["SELL", "BUY"]
     assert [row["symbol"] for row in exact.orders] == ["OLD", "AAPL"]
+    assert exact.constraints["paper_drill_epoch"] == "2026-08-12T1230ET"
+    assert exact.constraints["paper_drill_live_eligible"] is False
 
 
 def test_authorizer_accepts_real_governed_paper_target_attainment_package(tmp_path: Path):

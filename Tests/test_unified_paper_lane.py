@@ -678,6 +678,21 @@ def test_choice2_cron_has_one_authority_and_terminal_verification_order() -> Non
     assert "options_execution_authority=DISABLED_PENDING_EXACT_PLAN_INTEGRATION" in text
 
 
+def test_cron_execute_uses_governed_intraday_paper_epoch_without_live_eligibility() -> None:
+    text = (REPO_ROOT / "scripts" / "cron_execute.sh").read_text(encoding="utf-8")
+    policy = json.loads(
+        (REPO_ROOT / "config" / "paper_intraday_drill_policy_2026-08-13.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "CAERUS_PAPER_DRILL_EPOCH" in text
+    assert "--drill-epoch" in text
+    assert "paper_intraday_drill_policy_2026-08-13.json" in text
+    assert policy["paper_only"] is True
+    assert policy["live_eligible"] is False
+    assert "2026-08-13T1230ET" in policy["allowed_epochs"]
+
+
 def test_cron_execute_pins_two_minute_confirmed_proceeds_rotation() -> None:
     paper = (REPO_ROOT / "scripts" / "cron_execute.sh").read_text(encoding="utf-8")
     ci_dry_run = (REPO_ROOT / "scripts" / "ci_dry_run.sh").read_text(encoding="utf-8")

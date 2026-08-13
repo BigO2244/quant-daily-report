@@ -34,6 +34,7 @@ from core.live_pilot_guardrails import (
     validate_live_pilot_asset,
     validate_live_pilot_submission_guardrails,
 )
+from core.paper_drill_epoch import claim_namespace, plan_drill_epoch, scoped_wal_root
 from core.submission_wal import (
     OrderIntent,
     ResolutionState,
@@ -42,6 +43,7 @@ from core.submission_wal import (
     intent_path,
     new_resolution,
     prepare_order_intent,
+    unresolved_intent_requires_lookup,
 )
 
 
@@ -174,12 +176,14 @@ def _ensure_plan_claim(
     if current_account_id_hash != plan.account_id_hash:
         raise PlanClaimError("exact_plan_account_identity_mismatch")
     account_scope = "PAPER"
+    epoch = plan_drill_epoch(plan)
     claim_path = (
         _account_date_root(
             authority_root,
             trade_date=plan.trade_date,
             account_id_hash=plan.account_id_hash,
         )
+        / claim_namespace(epoch)
         / "plan_claim.json"
     )
     canonical_wal_root = str(Path(wal_root).expanduser().resolve())
@@ -694,9 +698,53 @@ def _execute_exact_plan_locked(
 ) -> ExactExecutionOutcome:
     """Validate and execute exactly one v3 plan, or fail closed without mutation."""
     plan = exact_execution_plan_from_dict(plan_payload, expected_account_scope="PAPER")
+    epoch = plan_drill_epoch(plan)
+    base_wal_root = Path(wal_root)
+    wal_root = scoped_wal_root(base_wal_root, epoch)
     authority_root = _account_authority_root(env)
     if not bool(getattr(broker, "paper", False)):
         raise AuthorityContractError("exact v3 execution is PAPER-only")
+
+    # Epoch isolation never hides submission uncertainty.  A new epoch may
+    # proceed only when every intent in every other same-date namespace has a
+    # terminal durable resolution.  The current epoch is handled by the normal
+    # idempotent lookup-recovery path below.
+    if epoch:
+        try:
+            foreign_unresolved: list[str] = []
+            for candidate in base_wal_root.glob(
+                f"**/{plan.trade_date}/intents/*.json"
+            ):
+                candidate_root = candidate.parents[2]
+                if candidate_root.resolve() == Path(wal_root).resolve():
+                    continue
+                intent = OrderIntent.from_dict(
+                    json.loads(candidate.read_text(encoding="utf-8"))
+                )
+                if unresolved_intent_requires_lookup(
+                    candidate_root,
+                    trade_date=plan.trade_date,
+                    client_order_id=intent.client_order_id,
+                ):
+                    foreign_unresolved.append(intent.client_order_id)
+            if foreign_unresolved:
+                return _outcome(
+                    plan,
+                    terminal=TerminalOutcome.SYSTEM_FAILURE,
+                    status="BLOCKED",
+                    reason="prior_epoch_submission_unresolved",
+                    reconciliation="FAILED_PRE_SUBMIT",
+                    failure_class=FailureClass.STATE_FAILURE,
+                )
+        except Exception as exc:
+            return _outcome(
+                plan,
+                terminal=TerminalOutcome.SYSTEM_FAILURE,
+                status="BLOCKED",
+                reason=f"prior_epoch_wal_integrity_failed:{exc}",
+                reconciliation="FAILED_PRE_SUBMIT",
+                failure_class=FailureClass.STATE_FAILURE,
+            )
 
     max_age_raw = env.get("CAERUS_EXACT_MAX_PLAN_AGE_SECONDS", "900")
     try:

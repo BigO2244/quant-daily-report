@@ -4594,9 +4594,14 @@ def _run_exact_execution_path(
             )
 
             from core.submission_wal import OrderIntent
+            from core.paper_drill_epoch import plan_drill_epoch, scoped_wal_root
 
             wal_clients: list[str] = []
-            wal_dir = Path(output_root) / "submission_wal" / trade_date / "intents"
+            effective_wal_root = scoped_wal_root(
+                Path(output_root) / "submission_wal",
+                plan_drill_epoch(bound),
+            )
+            wal_dir = effective_wal_root / trade_date / "intents"
             for path in sorted(wal_dir.glob("*.json")) if wal_dir.exists() else []:
                 intent = OrderIntent.from_dict(
                     json.loads(path.read_text(encoding="utf-8"))

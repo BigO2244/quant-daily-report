@@ -259,6 +259,10 @@ echo "deployed_sha=${_DEPLOY_SHA}"
 RUN_TS="$(date +%Y%m%dT%H%M%S%z)"
 DRY_RUN_ID="${REPORT_DATE}T${RUN_TS}_paper_cron_dry"
 SUBMIT_RUN_ID="${REPORT_DATE}T${RUN_TS}_paper_cron_submit"
+if [[ -n "${CAERUS_PAPER_DRILL_EPOCH:-}" ]]; then
+    DRY_RUN_ID="${REPORT_DATE}_${CAERUS_PAPER_DRILL_EPOCH}_paper_drill_dry"
+    SUBMIT_RUN_ID="${REPORT_DATE}_${CAERUS_PAPER_DRILL_EPOCH}_paper_drill_submit"
+fi
 
 write_paper_pointer() {
     # write_paper_pointer <run_id> <run_root> <terminal_status> <reason_code>
@@ -591,12 +595,22 @@ echo "plan_path=${PLAN_PATH}"
 
 # --- One final Decision: bind current broker state and seal exact orders ---
 AUTHORITY_RUN_ID="${REPORT_DATE}T${RUN_TS}_paper_authority"
+DRILL_AUTH_ARGS=()
 EXACT_PLAN_PATH="${PAPER_PLANS_DIR}/exact_execution_plan_${REPORT_DATE}.json"
+if [[ -n "${CAERUS_PAPER_DRILL_EPOCH:-}" ]]; then
+    AUTHORITY_RUN_ID="${REPORT_DATE}_${CAERUS_PAPER_DRILL_EPOCH}_paper_authority"
+    EXACT_PLAN_PATH="${PAPER_PLANS_DIR}/exact_execution_plan_${CAERUS_PAPER_DRILL_EPOCH}.latest.json"
+    DRILL_AUTH_ARGS+=(
+        --drill-epoch "${CAERUS_PAPER_DRILL_EPOCH}"
+        --drill-policy-config "${REPO_ROOT}/config/paper_intraday_drill_policy_2026-08-13.json"
+    )
+fi
 set +e
 AUTHORITY_OUTPUT="$("${PYTHON_BIN}" scripts/authorize_exact_execution_plan.py \
     --plan "${PLAN_PATH}" \
     --run-id "${AUTHORITY_RUN_ID}" \
-    --output "${EXACT_PLAN_PATH}" 2>&1)"
+    --output "${EXACT_PLAN_PATH}" \
+    "${DRILL_AUTH_ARGS[@]}" 2>&1)"
 AUTHORITY_STATUS=$?
 set -e
 echo "${AUTHORITY_OUTPUT}"

@@ -28,6 +28,7 @@ from brokers.alpaca_broker import AlpacaBroker
 from core.broker_retry_policy import is_retryable_broker_read_error
 from core.live_pilot_guardrails import resolve_dynamic_cap
 from core.precompute_bundle_validation import validate_sleeve_evaluation_payload
+from core.paper_drill_epoch import scoped_wal_root, validate_drill_epoch
 from core.regime_state_store import (
     RegimeAuthorityEvent,
     RegimePersistenceResult,
@@ -35,7 +36,7 @@ from core.regime_state_store import (
     persist_regime_authority,
     prepare_regime_authority,
 )
-from core.submission_wal import OrderIntent
+from core.submission_wal import OrderIntent, unresolved_intent_requires_lookup
 from execution.core import (
     apply_capital_budget_and_execution_filter,
     compute_transition_trades,
@@ -469,6 +470,7 @@ def authorize_exact_execution_plan(
     plan_path: Path | None = None,
     created_at: str | None = None,
     regime_state_root: Path | None = None,
+    drill_epoch: str | None = None,
 ) -> dict[str, Any]:
     effective_authorized_at = created_at or _now()
     if str(plan.get("execution_lane") or "").strip().lower() != "paper":
@@ -765,6 +767,14 @@ def authorize_exact_execution_plan(
                 1.0,
                 sum(float(row.get("notional") or 0.0) for row in exact_rows) * 0.01,
             ),
+            **(
+                {
+                    "paper_drill_epoch": drill_epoch,
+                    "paper_drill_live_eligible": False,
+                }
+                if drill_epoch
+                else {}
+            ),
         },
         authorization_state={
             "status": "AUTHORIZED",
@@ -814,6 +824,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--plan", required=True, type=Path)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--drill-epoch")
+    parser.add_argument("--drill-policy-config", type=Path)
     return parser.parse_args(argv)
 
 
@@ -824,7 +836,32 @@ def main(argv: list[str] | None = None) -> int:
     latest_pointer = args.output or args.plan.with_name(
         f"exact_execution_plan_{trade_date}.latest.json"
     )
-    wal_intents = latest_pointer.parent.parent / "submission_wal" / trade_date / "intents"
+    try:
+        paper_mode = str(os.environ.get("MODE") or "").strip().lower() == "paper"
+        trading_mode = (
+            str(os.environ.get("TRADING_MODE") or "").strip().lower() == "paper"
+        )
+        paper_flag = str(os.environ.get("ALPACA_PAPER") or "").strip() == "1"
+        if args.drill_epoch and not (paper_mode and trading_mode and paper_flag):
+            raise RuntimeError("paper drill epoch requires all PAPER mode pins")
+        drill_epoch = validate_drill_epoch(
+            args.drill_epoch,
+            trade_date=trade_date,
+            policy_path=args.drill_policy_config,
+            broker_paper=True,
+            base_url=str(os.environ.get("ALPACA_BASE_URL") or ""),
+        )
+    except Exception as exc:
+        print(json.dumps({
+            "status": "BLOCKED",
+            "reason_code": "paper_drill_epoch_policy_failed",
+            "error": str(exc)[:1000],
+            "orders_submitted": 0,
+        }, sort_keys=True))
+        return 1
+    base_wal_root = latest_pointer.parent.parent / "submission_wal"
+    epoch_wal_root = scoped_wal_root(base_wal_root, drill_epoch)
+    wal_intents = epoch_wal_root / trade_date / "intents"
     try:
         prior_path = _recover_existing_authority_for_wal(
             latest_pointer=latest_pointer,
@@ -858,6 +895,35 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
+    if drill_epoch:
+        try:
+            unresolved = []
+            for intent_path_candidate in base_wal_root.glob(
+                f"**/{trade_date}/intents/*.json"
+            ):
+                intent = OrderIntent.from_dict(json.loads(
+                    intent_path_candidate.read_text(encoding="utf-8")
+                ))
+                candidate_root = intent_path_candidate.parents[2]
+                if unresolved_intent_requires_lookup(
+                    candidate_root,
+                    trade_date=trade_date,
+                    client_order_id=intent.client_order_id,
+                ):
+                    unresolved.append(intent.client_order_id)
+            if unresolved:
+                raise RuntimeError(
+                    "unresolved prior PAPER submission WAL intents: "
+                    + ",".join(sorted(unresolved))
+                )
+        except Exception as exc:
+            print(json.dumps({
+                "status": "BLOCKED",
+                "reason_code": "paper_drill_prior_submission_unresolved",
+                "error": str(exc)[:1000],
+                "orders_submitted": 0,
+            }, sort_keys=True))
+            return 1
     broker = AlpacaBroker.from_env()
     resolved_regime_state_root = (
         latest_pointer.parent.parent / "state" / "regime_authority"
@@ -870,6 +936,7 @@ def main(argv: list[str] | None = None) -> int:
             run_id=args.run_id,
             plan_path=args.plan,
             regime_state_root=resolved_regime_state_root,
+            drill_epoch=drill_epoch,
         )
     except Exception as exc:
         transient = is_retryable_broker_read_error(exc)
