@@ -1150,7 +1150,6 @@ def test_canonical_authorized_no_trade_is_clean_execution_evidence(tmp_path: Pat
         == str(run_root / "canonical_economic_verification.json")
     )
 
-
 def test_canonical_reconciled_fill_replaces_precompute_intent_and_remains_clean(
     tmp_path: Path,
 ) -> None:
@@ -1195,6 +1194,25 @@ def test_canonical_reconciled_fill_replaces_precompute_intent_and_remains_clean(
         analysis["reconciliation_drift_diagnostic"]["reconciliation_source"]
         == str(run_root / "canonical_economic_verification.json")
     )
+
+    _write_json(
+        root / "outputs" / "workflow" / EXACT_NO_TRADE_DATE / "execution.json",
+        {
+            "trade_date": EXACT_NO_TRADE_DATE,
+            "run_id": run_root.name,
+            "run_root": str(run_root),
+            "status": "success",
+            "substatus": "exact_plan_submitted_filled_and_reconciled",
+            "stage": "execution",
+            "mode": "PAPER",
+        },
+    )
+    terminal_rebuild = build_operational_drag_analysis(
+        trade_date=EXACT_NO_TRADE_DATE, repo_root=root, write=False
+    )
+    assert terminal_rebuild["decision_grade"] is True
+    assert "planned_buys_without_submissions" not in terminal_rebuild["current_date_reason_codes"]
+    assert "reconciliation_not_clean" not in terminal_rebuild["current_date_reason_codes"]
 
 
 def test_tampered_submitted_order_does_not_receive_clean_exact_execution_status(

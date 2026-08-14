@@ -773,6 +773,9 @@ def _exact_execution_payload_candidates(repo: Path, trade_date: str) -> list[Pat
         substatus = str(pointer.get("substatus") or "").strip().lower()
         allowed_state = (
             status == "running" and substatus == "paper_posttrade_verification_started"
+        ) or (
+            status == "success"
+            and substatus == "exact_plan_submitted_filled_and_reconciled"
         ) or (status == "no_action" and substatus == "authorized_no_trade")
         if (
             str(pointer.get("stage") or "").strip().lower() != "execution"
@@ -859,6 +862,18 @@ def _validated_exact_execution_evidence(
             and str(payload.get("reconciliation_status") or "").upper() == "CLEAN"
         )
         if not no_trade and not submitted_success:
+            continue
+        pointer = _read_json(repo / "outputs" / "workflow" / trade_date / "execution.json") or {}
+        pointer_state = (
+            str(pointer.get("status") or "").strip().lower(),
+            str(pointer.get("substatus") or "").strip().lower(),
+        )
+        if no_trade and pointer_state != ("no_action", "authorized_no_trade"):
+            continue
+        if submitted_success and pointer_state not in {
+            ("running", "paper_posttrade_verification_started"),
+            ("success", "exact_plan_submitted_filled_and_reconciled"),
+        }:
             continue
         raw_counts = {
             key: _safe_float(payload.get(key))
