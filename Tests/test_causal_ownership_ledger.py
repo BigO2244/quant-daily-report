@@ -32,7 +32,9 @@ def _fixture(tmp_path: Path, *, unmatched_after_epoch: bool = False) -> tuple[Pa
     fills = [
         {
             "activity_id": "legacy-buy",
-            "transaction_time_utc": "2026-08-13T14:00:00Z",
+            # Alpaca history may emit fractional widths that Python 3.10's
+            # datetime parser does not accept without normalization.
+            "transaction_time_utc": "2026-08-13T14:00:00.52469Z",
             "trade_date_et": "2026-08-13",
             "symbol": "AAPL",
             "side": "buy",

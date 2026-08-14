@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -80,6 +81,16 @@ def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
 
 def _parse_timestamp(value: Any) -> dt.datetime:
     raw = str(value or "").strip().replace("Z", "+00:00")
+    # Python 3.10's fromisoformat accepts only selected fractional-second
+    # widths, while Alpaca history can contain (for example) five digits.
+    # Normalize any ISO fractional component to microseconds.
+    fractional = re.fullmatch(
+        r"(?P<prefix>.+T\d{2}:\d{2}:\d{2})\.(?P<fraction>\d+)(?P<zone>[+-]\d{2}:\d{2})",
+        raw,
+    )
+    if fractional:
+        micros = fractional.group("fraction")[:6].ljust(6, "0")
+        raw = f"{fractional.group('prefix')}.{micros}{fractional.group('zone')}"
     try:
         parsed = dt.datetime.fromisoformat(raw)
     except ValueError as exc:
