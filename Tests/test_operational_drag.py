@@ -1202,7 +1202,7 @@ def test_canonical_reconciled_fill_replaces_precompute_intent_and_remains_clean(
             "run_id": run_root.name,
             "run_root": str(run_root),
             "status": "success",
-            "substatus": "exact_plan_submitted_filled_and_reconciled",
+            "substatus": None,
             "stage": "execution",
             "mode": "PAPER",
         },

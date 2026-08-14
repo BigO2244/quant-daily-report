@@ -773,10 +773,9 @@ def _exact_execution_payload_candidates(repo: Path, trade_date: str) -> list[Pat
         substatus = str(pointer.get("substatus") or "").strip().lower()
         allowed_state = (
             status == "running" and substatus == "paper_posttrade_verification_started"
-        ) or (
-            status == "success"
-            and substatus == "exact_plan_submitted_filled_and_reconciled"
-        ) or (status == "no_action" and substatus == "authorized_no_trade")
+        ) or (status == "success" and not substatus) or (
+            status == "no_action" and substatus == "authorized_no_trade"
+        )
         if (
             str(pointer.get("stage") or "").strip().lower() != "execution"
             or str(pointer.get("mode") or "").strip().upper() != "PAPER"
@@ -872,7 +871,7 @@ def _validated_exact_execution_evidence(
             continue
         if submitted_success and pointer_state not in {
             ("running", "paper_posttrade_verification_started"),
-            ("success", "exact_plan_submitted_filled_and_reconciled"),
+            ("success", ""),
         }:
             continue
         raw_counts = {
