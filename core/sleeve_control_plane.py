@@ -85,11 +85,13 @@ class SleeveControlRegistry:
         *,
         definitions: list[SleeveDefinition],
         paper_capital_authority: str,
+        paper_allocation_policy: Mapping[str, Any],
         registry_path: Path,
         manifest_path: Path,
     ) -> None:
         self.definitions = tuple(definitions)
         self.paper_capital_authority = paper_capital_authority
+        self.paper_allocation_policy = dict(paper_allocation_policy)
         self.registry_path = registry_path
         self.manifest_path = manifest_path
         self._by_id = {item.sleeve_id: item for item in self.definitions}
@@ -177,6 +179,11 @@ class SleeveControlRegistry:
         registry = cls(
             definitions=definitions,
             paper_capital_authority=str(control.get("paper_capital_authority") or "").strip(),
+            paper_allocation_policy=(
+                control.get("paper_allocation_policy")
+                if isinstance(control.get("paper_allocation_policy"), Mapping)
+                else {}
+            ),
             registry_path=path,
             manifest_path=resolved_manifest,
         )
@@ -304,17 +311,21 @@ class SleeveControlRegistry:
             raise SleeveRegistryIntegrityError("paper_capital_authority is required")
         if self.paper_capital_authority != "caerus_orion":
             raise SleeveRegistryIntegrityError(
-                "caerus_orion must remain the PAPER capital authority"
+                "caerus_orion must remain the current primary PAPER sleeve"
             )
         capital = [item for item in self.definitions if item.capital_eligible]
         execution = [item for item in self.definitions if item.execution_eligible]
-        if [item.sleeve_id for item in capital] != [self.paper_capital_authority]:
+        if not capital or self.paper_capital_authority not in {
+            item.sleeve_id for item in capital
+        }:
             raise SleeveRegistryIntegrityError(
-                "Orion must be the sole capital-eligible sleeve"
+                "the current primary PAPER sleeve must remain capital eligible"
             )
-        if [item.sleeve_id for item in execution] != [self.paper_capital_authority]:
+        if {item.sleeve_id for item in execution} != {
+            item.sleeve_id for item in capital
+        }:
             raise SleeveRegistryIntegrityError(
-                "Orion must be the sole execution-eligible sleeve"
+                "capital and PAPER execution eligibility must match"
             )
         authority = self.require(self.paper_capital_authority)
         if authority.lifecycle_status != "paper" or authority.execution_impact != "PAPER":
@@ -325,13 +336,71 @@ class SleeveControlRegistry:
             raise SleeveRegistryIntegrityError(
                 "paper capital authority cannot be evaluation-only or frozen"
             )
+        for item in capital:
+            if item.lifecycle_status != "paper" or item.execution_impact != "PAPER":
+                raise SleeveRegistryIntegrityError(
+                    f"{item.sleeve_id}: capital sleeves require lifecycle=paper and execution_impact=PAPER"
+                )
+            if item.evaluation_only or item.frozen:
+                raise SleeveRegistryIntegrityError(
+                    f"{item.sleeve_id}: capital sleeves cannot be evaluation-only or frozen"
+                )
         for item in self.definitions:
-            if item.sleeve_id == self.paper_capital_authority:
+            if item.capital_eligible:
                 continue
             if not item.evaluation_only or item.execution_impact != "NON_EXECUTIONAL":
                 raise SleeveRegistryIntegrityError(
-                    f"{item.sleeve_id}: non-authority sleeves must be evaluation-only and NON_EXECUTIONAL"
+                    f"{item.sleeve_id}: non-capital sleeves must be evaluation-only and NON_EXECUTIONAL"
                 )
+        from core.portfolio_operating_model import ALLOCATION_POLICY_SCHEMA
+
+        policy = self.paper_allocation_policy
+        if policy.get("schema_version") != ALLOCATION_POLICY_SCHEMA:
+            raise SleeveRegistryIntegrityError("paper allocation policy schema is invalid")
+        if policy.get("method") != "configured_risk_budget":
+            raise SleeveRegistryIntegrityError("paper allocator method is not approved")
+        if policy.get("unavailable_policy") != "fail_closed":
+            raise SleeveRegistryIntegrityError("paper allocator must fail closed")
+        if bool((policy.get("governance") or {}).get("automatic_promotion_enabled")):
+            raise SleeveRegistryIntegrityError("automatic sleeve promotion must remain disabled")
+        if bool((policy.get("governance") or {}).get("live_enabled")):
+            raise SleeveRegistryIntegrityError("paper allocation policy cannot enable live")
+        if str((policy.get("governance") or {}).get("current_primary_sleeve") or "") != self.paper_capital_authority:
+            raise SleeveRegistryIntegrityError(
+                "allocation policy primary sleeve must match the registry primary"
+            )
+        raw_budgets = policy.get("sleeve_risk_budgets")
+        if not isinstance(raw_budgets, Mapping):
+            raise SleeveRegistryIntegrityError("paper sleeve risk budgets are missing")
+        if set(raw_budgets) != {item.sleeve_id for item in capital}:
+            raise SleeveRegistryIntegrityError(
+                "paper sleeve risk budgets must match capital-eligible sleeves"
+            )
+        try:
+            budget_total = sum(float(value) for value in raw_budgets.values())
+            policy_cash = float(policy.get("target_cash_weight"))
+        except (TypeError, ValueError) as exc:
+            raise SleeveRegistryIntegrityError("paper allocation weights are invalid") from exc
+        if abs(budget_total - 1.0) > 1e-10:
+            raise SleeveRegistryIntegrityError("paper sleeve risk budgets must sum to one")
+        if abs(policy_cash - 0.05) > 1e-12:
+            raise SleeveRegistryIntegrityError("paper allocator must retain approved 5% cash")
+        freshness = policy.get("source_freshness") or {}
+        if (
+            freshness.get("calendar") != "XNYS"
+            or freshness.get("allowed_sessions")
+            != "CURRENT_OR_PREVIOUS_TRADING_SESSION"
+            or int(freshness.get("max_trading_session_lag") or -1) != 1
+        ):
+            raise SleeveRegistryIntegrityError(
+                "paper allocator source freshness policy is invalid"
+            )
+        from core.target_attainment_policy import validate_target_attainment_policy
+
+        validate_target_attainment_policy(
+            policy.get("account_target_attainment_policy"),
+            expected_target_cash_weight=policy_cash,
+        )
 
 
 def default_registry_path() -> Path:
@@ -696,6 +765,20 @@ def _run_shadow_snapshot(
         )
         payload = _read_json(source)
         observation_status = str(payload.get("observation_status") or "OK").upper()
+    data_status = str(payload.get("data_status") or "OK").upper()
+    data_reason = str(payload.get("data_reason") or payload.get("reason_code") or "").upper()
+    if data_status not in {"OK", "COMPLETE"} or data_reason in {
+        "PRICE_CACHE_STALE",
+        "NO_DATA",
+        "SOURCE_STALE",
+    }:
+        return RunnerResult(
+            status="FAILED",
+            reason_codes=(data_reason or f"SOURCE_DATA_STATUS_{data_status}",),
+            message="shadow snapshot is not fresh enough for a daily decision",
+            opportunity={"available": False, "candidate_count": 0},
+            source_paths=(source,),
+        )
     weights = payload.get("target_weights")
     if not isinstance(weights, Mapping):
         raise ValueError("shadow snapshot target_weights is missing or invalid")
@@ -747,6 +830,20 @@ def _run_shadow_benchmark(
     del daily_snapshot
     source = _resolve_dated_source(definition, trade_date, root, allow_prior=True)
     payload = _read_json(source)
+    data_status = str(payload.get("data_status") or "OK").upper()
+    data_reason = str(payload.get("data_reason") or payload.get("reason_code") or "").upper()
+    if data_status not in {"OK", "COMPLETE"} or data_reason in {
+        "PRICE_CACHE_STALE",
+        "NO_DATA",
+        "SOURCE_STALE",
+    }:
+        return RunnerResult(
+            status="FAILED",
+            reason_codes=(data_reason or f"SOURCE_DATA_STATUS_{data_status}",),
+            message="shadow benchmark is not fresh enough for a daily observation",
+            opportunity={"available": False, "candidate_count": 0},
+            source_paths=(source,),
+        )
     strategy = (payload.get("strategies") or {}).get(definition.sleeve_id)
     if not isinstance(strategy, Mapping):
         raise ValueError("benchmark entry missing from shadow performance artifact")
@@ -915,25 +1012,14 @@ def _resolve_dated_source(
     if exact.exists():
         return exact
     if allow_prior:
-        template = Path(definition.source_artifact)
-        parent_parts = []
-        for part in template.parts:
-            if "{trade_date}" in part:
-                break
-            parent_parts.append(part)
-        parent = root.joinpath(*parent_parts)
-        filename = template.name
-        if parent.exists():
-            for dated in sorted(parent.iterdir(), reverse=True):
-                try:
-                    parsed_date = dt.date.fromisoformat(dated.name)
-                except ValueError:
-                    continue
-                if not dated.is_dir() or parsed_date >= dt.date.fromisoformat(trade_date):
-                    continue
-                candidate = dated / filename
-                if candidate.exists():
-                    return candidate
+        from paper.trading_calendar import prev_trading_day
+
+        prior_trade_date = prev_trading_day(trade_date)
+        candidate = root / definition.source_artifact.format(
+            trade_date=prior_trade_date
+        )
+        if candidate.exists():
+            return candidate
     raise SleeveEvaluationBlocked(
         f"source artifact missing: {definition.source_artifact.format(trade_date=trade_date)}"
     )

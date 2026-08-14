@@ -162,6 +162,13 @@ def test_wrapper_logs_local_hydration_guidance_for_stale_cache(tmp_path: Path) -
     assert result.returncode == 0
     text = (repo_root / "logs" / f"shadow_{trade_date}.log").read_text()
     assert "[SHADOW] price cache stale; run local hydration workflow to refresh." in text
+    assert "[SHADOW] current-date decision unavailable: PRICE_CACHE_STALE" in text
+    assert not (out_dir / "latest" / "comparison.json").exists()
+    summary = json.loads(
+        (repo_root / "outputs" / "workflow" / trade_date / "shadow.json").read_text()
+    )
+    assert summary["status"] == "UNAVAILABLE"
+    assert summary["latest_publish_status"] == "UNAVAILABLE"
 
 
 def test_local_hydration_workflow_dry_run_prints_expected_commands(tmp_path: Path) -> None:

@@ -147,6 +147,9 @@ PLAN_PROVENANCE_KEYS = (
     "final_qty",
     "scale_reason",
     "approved_sleeve_override",
+    "sleeve_contributions",
+    "allocation_id",
+    "session_id",
 )
 
 

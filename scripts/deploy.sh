@@ -78,11 +78,14 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
     python3 -m py_compile daily_quant_report.py core/live_pilot_guardrails.py \
         core/live_pilot_sha_guard.py core/precompute_contract.py \
         core/paper_target_authority.py core/precompute_bundle_validation.py \
+        core/portfolio_operating_model.py core/causal_ownership_ledger.py \
+        core/daily_portfolio_audit.py \
         scripts/finalize_deployment.py scripts/live_pilot_execute.py \
         scripts/live_pilot_build_plan_from_precompute.py \
         scripts/seal_paper_precompute_target.py \
         scripts/certify_execution_readiness.py \
-        scripts/build_portfolio_history.py
+        scripts/build_portfolio_history.py scripts/build_causal_paper_ledger.py \
+        scripts/build_daily_portfolio_audit.py
     python3 -m pytest \
         Tests/test_live_pilot_guardrails.py \
         Tests/test_live_pilot_client_order_id.py \
@@ -91,6 +94,12 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         Tests/test_paper_target_authority.py \
         Tests/test_paper_execution_real_chain.py \
         Tests/test_portfolio_history_builder.py \
+        Tests/test_portfolio_operating_model.py \
+        Tests/test_causal_ownership_ledger.py \
+        Tests/test_daily_portfolio_audit.py \
+        Tests/test_sleeve_control_plane.py \
+        Tests/test_shadow_daily_wrapper.py \
+        Tests/test_caerus_daily_health_check.py \
         -q
     python3 scripts/finalize_deployment.py \
         --repo-root "${VALIDATION_WORKTREE}" \

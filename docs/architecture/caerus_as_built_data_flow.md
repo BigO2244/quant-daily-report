@@ -1,151 +1,208 @@
-# Caerus as-built data flow and authority line
+# Caerus institutional portfolio operating model
 
-**Current as-built:** 2026-08-14, after the owner-approved authority migration
-**Execution scope:** PAPER only; live remains blocked
+**As built:** 2026-08-14 owner-approved migration
+
+**Capital scope:** Alpaca PAPER only
+
+**Current capital allocation:** 100% of sleeve risk budget to Caerus Orion, with
+5% account cash target
+
+**Live and options:** blocked
 
 ## Executive conclusion
 
-Caerus now has one straight PAPER decision line. Orion is selected once during
-precompute from the current or immediately preceding XNYS session. That target
-is sealed as an immutable Decision hash. The 09:35 workflow consumes that exact
-Decision object, adds fresh broker/market state, permits Risk only to reduce the
-target, produces exact whole-share orders mechanically, submits them, and then
-records and audits broker truth.
+Caerus has one portfolio operating line:
 
-The legacy daily allocator still runs because it supplies research and market
-state evidence. Its signals and proposed trades are moved under a content-hashed
-`research/growth_engine_v4/` directory and explicitly have no execution
-authority. They never rejoin the PAPER path.
+```text
+data -> session -> sleeve decisions -> allocation -> risk -> exact execution
+     -> broker reconciliation -> causal ownership -> valuation -> audit/reporting
+```
+
+There is one morning session, one terminal decision for every registered
+non-frozen sleeve, one configured account allocator, one exact order package,
+one broker-truth reconciliation, and one explicit reporting as-of. A downstream
+component cannot replace the strategy, reconstruct a target from signals, or
+assign P&L to a sleeve without causal execution evidence.
+
+Orion is the only capital sleeve in the current registry policy. That is a
+configuration fact, not a single-sleeve architecture: adding a governed capital
+sleeve requires a complete registry/policy change but no alternate precompute,
+allocator, executor, ledger, or report.
 
 ```mermaid
 flowchart LR
-  I["Data in: prices, universe, research, registry, prior broker evidence"]
-  O["Observation: sleeve evaluations + dated market state"]
-  D["Decision: one sealed Orion target hash"]
-  R["09:35 Risk: fresh broker/market state; may only reduce"]
-  T["Trader: exact whole-share transition plan"]
-  B["Alpaca PAPER: submit and fill"]
-  C["Record: run-local results + broker-truth ledger"]
-  A["Audit: equality, reconciliation, health, target attainment"]
-  I --> O --> D --> R --> T --> B --> C --> A
+  I["Data inputs"] --> S["Immutable daily session"]
+  S --> F["Registry fan-out"]
+  F --> D["One decision per sleeve"]
+  D --> A["Account allocator"]
+  A --> R["Independent risk gate"]
+  R --> E["Exact execution plan"]
+  E --> B["Alpaca PAPER"]
+  B --> C["Broker reconciliation"]
+  C --> O["Causal ownership ledger"]
+  O --> V["Single-as-of valuation"]
+  V --> U["Daily audit and reporting"]
 ```
 
-## Schedule and ownership
+## Authority by stage
 
-| ET | Stage | Sole authority | Output |
+| Stage | Authority | Contract and output | Failure posture |
 |---|---|---|---|
-| 06:30 | Research inputs | Evidence only | Research digest |
-| 06:45 | Security master | Evidence only | Dated security master |
-| 07:00 | Precompute and seal | Decision | `paper_target_package.json` and one `approved_target_hash` |
-| 09:35 | Exact planning/execution | Risk then Trader | Immutable exact plan, intended/submitted orders, broker results |
-| 10:00 | Confirmation | Audit/read-only | Canonical selected run and operator email |
-| 18:30 | Price/shadow refresh | Research only | Shadow observations; never PAPER authority |
-| 19:15 | Broker-truth pull | Accounting truth | `outputs/ledger/paper/daily_nav.csv` and broker ledger |
-| 19:45 | Canonical history | Derived accounting view | `outputs/portfolio_history/nav.csv` from broker ledger only |
-| 21:00 | Shadow CIO report | Research only | Comparative research report |
+| Data admission | Session builder | `session_manifest.json`: paths, hashes, freshness, one session ID | Missing, changed, or stale required input fails the seal |
+| Sleeve assessment | Registry control plane | `sleeve_decisions.json`: exactly one `RECOMMENDATION`, `NO_TRADE`, `UNAVAILABLE`, `FROZEN`, or `OBSERVATION` outcome per expected sleeve | Coverage mismatch fails; stale sources are `UNAVAILABLE`, never silently carried |
+| Portfolio construction | Configured risk-budget allocator | `portfolio_allocation.json`: account targets plus decision-bound sleeve contributions | Capital set must exactly equal policy set; an unavailable positive-budget sleeve fails closed |
+| Decision seal | PAPER target authority | `paper_target_package.json` and `audit_manifest.json` | Any identity, target, source, or hash mismatch fails closed |
+| Risk | Existing independent Risk package | Hash-bound risk decision; may reduce exposure or increase cash | Cannot add a symbol, increase a target, reverse a side, or lower required cash |
+| Trader | Exact-plan authorizer | Immutable `caerus.execution_plan.v3`, including session, allocation, and sleeve contribution lineage | Cannot rebuild from signals or use a recovery target |
+| Broker | Unified PAPER executor | Intent, write-ahead submission record, Alpaca order IDs, fills, terminal state | Ambiguous post-submit failures are not automatically retried |
+| Reconciliation | Execution and broker truth | Intended = submitted; orders terminal; expected positions = broker positions | Divergence prevents success and top-level green |
+| Ownership | Causal ledger | Broker order ID -> client order ID -> exact order -> allocation -> sleeve decision | A post-cutover unmatched fill fails; pre-cutover fills remain `legacy_unattributed` |
+| Valuation | Broker snapshots | One `valuation_latest.json` with account and positions at the same `pulled_at_utc` | Equity must reconcile to cash plus positions within 1 bp (minimum $0.01) |
+| Reporting/audit | Scheduled portfolio history and daily audit | One reporting snapshot/as-of and `portfolio_audit.json` | Mixed dates, stale NAV, degraded reporting, or broken lineage suppress the report |
 
-## The precompute bundle
+## What “precompute” means now
 
-`outputs/precompute/<trade-date>/` contains five execution-path members:
-
-| Artifact | Meaning | May create orders? |
-|---|---|---:|
-| `daily_snapshot.json` | Dated market-state observation | No |
-| `sleeve_evaluations.json` | Complete registry evaluation and sole Orion source selection | No |
-| `paper_target_package.json` | Immutable Evidence + Decision packages and target hash | Target authority only |
-| `signals.json` | Exact projection of the sealed Decision target | No independent authority |
-| `planned_execution_payload.json` | Handoff pointing to the same target hash; exact orders explicitly deferred | No |
-| `contract.json` | Completion marker and SHA-256 manifest for all five members | Gate only |
-
-The contract schema is version 2 and declares
-`authority_model: orion_single_sealed_target_v1`. Every canonical projection
-must carry the Decision package's `approved_target_hash`. Any missing file,
-hash mismatch, target mismatch, source change, stale session, strategy identity
-mismatch, or pre-open exact trade list fails closed.
-
-## Why there can appear to be two precomputes
-
-There are two computations, but only one is a PAPER decision:
-
-1. `daily_quant_report.py` computes the legacy multi-sleeve research frame and
-   dated market observations.
-2. The sleeve control plane evaluates every registered non-frozen sleeve and
-   identifies the one capital authority, Orion.
-
-The seal step makes the boundary explicit. The legacy frame is retained at:
+The scheduled 07:00 job still invokes the historical daily quant program to
+collect market/research evidence. Its old proposed signals and trades are
+quarantined under:
 
 `outputs/precompute/<date>/research/growth_engine_v4/precompute-<hash>/`
 
-It is immutable evidence with `execution_authority: false`. The selected Orion
-snapshot is converted into the only canonical target files. The later shadow
-refresh is research/reporting and cannot alter that morning seal.
+That directory is immutable research evidence and has
+`execution_authority: false`. It is not a second target and cannot rejoin the
+capital path.
+
+The same 07:00 job then runs the actual portfolio precompute:
+
+1. Admit dated inputs into one immutable session.
+2. Fan out over the registry and produce one terminal sleeve decision for every
+   non-frozen sleeve.
+3. Apply the configured capital risk budgets once at the account level.
+4. Net overlapping symbols while retaining every contributing sleeve decision
+   ID and hash.
+5. Seal all projections and their hashes into contract schema 3.
+
+`outputs/precompute/<trade-date>/` therefore has these canonical members:
+
+| Artifact | Purpose |
+|---|---|
+| `daily_snapshot.json` | Dated observation; proposed trades removed |
+| `sleeve_evaluations.json` | Complete registry dispatch evidence |
+| `session_manifest.json` | Immutable admitted-input set |
+| `sleeve_decisions.json` | Complete standardized daily decisions |
+| `portfolio_allocation.json` | Sole account-level target and causal contributions |
+| `paper_target_package.json` | Sealed Evidence and Decision authority |
+| `signals.json` | Read-only projection of the sealed target |
+| `planned_execution_payload.json` | Hash-bound handoff; exact orders deferred to 09:35 |
+| `audit_manifest.json` | Hash manifest across the full decision chain |
+| `contract.json` | Schema-3 completion gate and file-hash map |
+
+The apparent “multiple precomputes” problem is therefore removed at the
+authority boundary: one legacy research computation remains as evidence, but
+only the registry allocator produces a PAPER target.
 
 ```mermaid
 flowchart TD
-  L["Legacy allocator computation"] --> Q["Content-hashed research quarantine"]
-  S["All-sleeve evaluation"] --> O["Exactly one capital-eligible Orion envelope"]
-  O --> P["Sealed PAPER target package"]
-  Q -. "cannot rejoin" .-> X["PAPER execution path"]
-  P --> X
-  SH["Post-precompute shadow refresh"] -. "research only" .-> REP["Research reports"]
+  L["Legacy market/research computation"] --> Q["Hashed research quarantine"]
+  Q -. "evidence only" .-> S["Immutable session"]
+  G["Registry and sleeve source artifacts"] --> S
+  S --> D["Complete sleeve decision batch"]
+  D --> A["One account allocation"]
+  A --> P["One sealed PAPER target"]
+  P --> X["09:35 exact execution"]
+  Q -. "cannot create or replace target" .-> X
 ```
 
-## 09:35 execution invariants
+## Multiple sleeves
 
-- The builder does not resolve the shadow directory or choose current versus
-  prior Orion again.
-- It rehydrates the exact pre-open Evidence and Decision packages and verifies
-  the bundle file hashes.
-- The target symbols, weights, cash target, and Decision hash must match the
-  sealed package exactly.
-- Risk can remove/reduce a target or increase cash; it cannot invent a symbol,
-  increase a Decision weight, reverse a side, or lower Decision cash.
-- Trader receives the hash-bound Risk package and mechanically prices the
-  target against fresh broker holdings, cash, quotes, open orders, and market
-  session state.
-- The exact authorizer rejects a plan whose Decision hash or sealed target file
-  hash differs from precompute.
-- The executor accepts only the immutable exact plan; precompute has
-  `precompute_execution_authority: false`.
+The allocator is deliberately portfolio-level. If Orion and Lyra were both
+approved for capital, governance would update the registry so that:
 
-## Record and audit line
+- both are capital-eligible and PAPER-execution-eligible;
+- both appear in `sleeve_risk_budgets`, which must sum to 1.0;
+- the capital-eligible set, execution-eligible set, and budget set match
+  exactly; and
+- the account cash and target-attainment policies remain explicit.
 
-The execution run remains run-local and append-only: exact plan, intended
-orders, submission WAL, broker order IDs, fills, expected state, actual state,
-economic reconciliation, equality gate, execution health, and the canonical
-selection pointer all retain their existing fail-closed behavior.
+The allocator then scales each sleeve target by its risk budget and by the
+account investable weight, nets shared tickers, and records both causal claims.
+The exact plan uses the portfolio identity `caerus_paper_portfolio`; buys inherit
+the allocator contributions, and sells consume actual causal inventory
+proportionally. No new lane is created.
 
-Actual PAPER NAV now has one source:
+There is no automatic promotion. A newly registered research or shadow sleeve
+continues to generate observations but receives no capital until the owner
+approves the complete policy change.
 
-```mermaid
-flowchart LR
-  AP["Alpaca portfolio history + activities + positions"]
-  BL["outputs/ledger/paper — broker-truth ledger"]
-  PH["outputs/portfolio_history/nav.csv — derived append-only view"]
-  DB["Dashboard / performance / audit"]
-  AP --> BL --> PH --> DB
-  MN["Model and shadow NAV"] -. "comparison only" .-> DB
-```
+## Options and other instruments
 
-`live_overlay_nav_series.csv`, `nav_timeseries.csv`, and shadow NAV remain valid
-research/comparison surfaces but can no longer silently populate canonical
-actual PAPER NAV. If the broker ledger is unavailable, canonical history emits
-a warning/freshness escalation and uses no model fallback.
+Options remain disabled in both scheduled submission flags. They must not be
+added through a second options submitter. To become eligible, an instrument
+adapter must first implement the same straight line end to end:
 
-## Operator proof for a trading day
+1. canonical contract identity (underlying, expiry, strike, call/put,
+   multiplier and asset class);
+2. sleeve target and allocator semantics in exposure/risk units;
+3. independent limits for liquidity, Greeks, concentration, expiry and exercise;
+4. exact-plan and write-ahead submission support;
+5. broker fill, assignment/exercise and position reconciliation; and
+6. causal ownership and mark-to-market valuation at the same reporting as-of.
 
-The shortest proof is:
+Only after those contracts and failure tests exist may an options sleeve be
+enabled by governance. The portfolio line stays the same; only the instrument
+adapter changes.
 
-1. `contract.json` is schema 2 and bundle validation is `OK`.
-2. `approved_target_hash` is identical in the contract, target package,
-   signals, precompute handoff, 09:35 plan, and persisted Decision package.
-3. The exact plan binds the sealed target file hash and Decision hash.
-4. Intended orders equal submitted orders; all broker orders reach terminal
-   states; reconciliation and execution health are green.
-5. Nightly canonical NAV identifies
-   `outputs/ledger/paper/daily_nav.csv` as its source.
+## Scheduled operating day
 
-No successful 2026-08-14 evidence is rewritten by this migration. The deployed
-code governs the next precompute/execution cycle; any attempted use of an old
-schema-1 bundle in the PAPER cron lane triggers one self-heal rebuild and then
-fails closed if a valid seal cannot be produced.
+| ET | Job | Canonical result |
+|---|---|---|
+| 06:30–07:00 | Research, security master, precompute | Immutable session, full decisions, one allocation and seal |
+| 09:35 | PAPER execution heartbeat | Exact risk-authorized transition, submission and reconciliation |
+| 10:00 | Confirmation | Selected terminal run and operator communication |
+| 18:30 | Price/shadow refresh | Research observations; stale data publishes no new `latest` and makes health non-green |
+| 19:15 | Broker ledger | Fills, orders, positions, account snapshot, causal ownership and valuation |
+| 19:45 | Portfolio history and daily audit | Strict same-day/same-as-of reporting snapshot and portfolio audit |
+| 21:00 | Shadow CIO report | Research comparison only |
+
+## End-to-end proof for a day
+
+A trading day is complete only when all of the following are true:
+
+1. Contract schema 3 validates every declared file hash.
+2. The session covers all required inputs and the sleeve batch covers the full
+   expected non-frozen registry.
+3. The capital set equals the configured risk-budget set and every positive
+   budget sleeve produced a recommendation.
+4. The sealed target, exact plan, and submitted orders carry the same session,
+   allocation, decisions and target hashes.
+5. Intended orders equal submitted orders, all broker orders are terminal, and
+   expected positions reconcile to broker positions.
+6. Every post-cutover fill has exact-plan lineage; broker quantities equal the
+   sum of causal ownership quantities.
+7. Account equity equals cash plus broker-valued positions and all reporting
+   sources share one explicit `as_of`.
+8. `outputs/audit/<date>/portfolio_audit.json` is `PASS`.
+
+Historical fills are never rewritten. Transactions before the first
+allocator-bound exact plan are explicitly `legacy_unattributed`; causal sleeve
+performance begins at the cutover rather than assigning past P&L to a strategy
+that cannot be proven to have caused it.
+
+## Architectural invariants after the migration
+
+| Invariant | Enforced result |
+|---|---|
+| Every non-frozen sleeve generates a daily decision | Complete registry fan-out and coverage equality |
+| Every executable order traces to a sleeve decision | Session/allocation/decision hashes and per-order contributions |
+| No strategy can be silently substituted downstream | Recovery targets rejected; legacy planner quarantined |
+| Provenance survives every transformation | Preserved through target, exact order, broker fill, ownership and valuation |
+| PAPER performance represents executed capital | Broker-truth valuation plus causal ownership |
+| Shadow reporting cannot look fresh when decisions are stale | No stale `latest`; workflow and health become unavailable/non-green |
+| NAV reconciles to positions and executions | Quantity and equity reconciliation gates |
+| No sleeve receives uncaused P&L | Pre-cutover remains unattributed; post-cutover requires exact lineage |
+| Reporting has one explicit as-of | Scheduled history requires causal valuation and exact timestamp equality |
+| Operator-visible precompute is what execution uses | One sealed allocation; exact plan is hash-bound to it |
+
+The remaining operational observation is the first full scheduled session under
+these contracts. That observation can validate production behavior; it cannot
+change or relax the contracts.

@@ -22,6 +22,7 @@ from .contracts import AuthorityContractError
 
 EXACT_EXECUTION_SCHEMA_VERSION = "caerus.execution_plan.v3"
 _SAFE_SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
+_SAFE_SLEEVE = re.compile(r"^[a-z][a-z0-9_\-]{1,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ORDER_TYPES = {"market", "limit"}
 _TIME_IN_FORCE = {"day", "gtc", "opg", "cls", "ioc", "fok"}
@@ -148,11 +149,62 @@ def compute_starting_state_hash(
     return _hash(payload)
 
 
+def _normalize_sleeve_contributions(
+    raw: Any,
+    *,
+    eligible_sleeves: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Canonical causal ownership carried by every exact broker order."""
+
+    allowed = tuple(sorted({str(value).strip().lower() for value in eligible_sleeves}))
+    if not allowed or any(not _SAFE_SLEEVE.fullmatch(value) for value in allowed):
+        raise AuthorityContractError("exact plan eligible sleeve set is invalid")
+    supplied = raw if isinstance(raw, (list, tuple)) else []
+    if not supplied:
+        if len(allowed) != 1:
+            raise AuthorityContractError(
+                "multi-sleeve exact orders require causal sleeve contributions"
+            )
+        supplied = [{"sleeve_id": allowed[0], "allocation_fraction": 1.0}]
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    bases: list[float] = []
+    for item in supplied:
+        if not isinstance(item, Mapping):
+            raise AuthorityContractError("sleeve contribution rows must be objects")
+        sleeve_id = str(item.get("sleeve_id") or item.get("sleeve") or "").strip().lower()
+        if sleeve_id not in allowed or sleeve_id in seen:
+            raise AuthorityContractError(
+                "exact order sleeve contributions must uniquely match eligible sleeves"
+            )
+        seen.add(sleeve_id)
+        basis = _finite(
+            item.get("allocation_fraction", item.get("target_weight")),
+            f"sleeve_contribution.{sleeve_id}",
+            minimum=0.0,
+        )
+        if basis <= 0.0:
+            raise AuthorityContractError("sleeve contribution must be positive")
+        row = {str(key): _as_plain(value) for key, value in item.items()}
+        row.pop("sleeve", None)
+        row["sleeve_id"] = sleeve_id
+        rows.append(row)
+        bases.append(basis)
+    total = sum(bases)
+    if total <= 0.0:
+        raise AuthorityContractError("sleeve contribution total must be positive")
+    for row, basis in zip(rows, bases, strict=True):
+        row["allocation_fraction"] = basis / total
+    rows.sort(key=lambda row: str(row["sleeve_id"]))
+    return rows
+
+
 def _normalize_orders(
     rows: Sequence[Mapping[str, Any]],
     *,
     required_side: str,
     plan_seed: str,
+    eligible_sleeves: Sequence[str],
 ) -> tuple[Mapping[str, Any], ...]:
     normalized: list[Mapping[str, Any]] = []
     seen_symbols: set[str] = set()
@@ -222,10 +274,15 @@ def _normalize_orders(
             raise AuthorityContractError("market exact order cannot carry limit_price")
         if order_type == "limit" and not row.get("limit_price"):
             raise AuthorityContractError("limit exact order requires positive limit_price")
-        sleeve = str(row.get("sleeve") or "caerus_orion").strip().lower()
-        if sleeve not in {"orion", "caerus_orion"}:
-            raise AuthorityContractError("exact PAPER orders must belong to Orion")
-        row["sleeve"] = "caerus_orion"
+        row["sleeve_contributions"] = _normalize_sleeve_contributions(
+            row.get("sleeve_contributions"),
+            eligible_sleeves=eligible_sleeves,
+        )
+        row["sleeve"] = (
+            str(eligible_sleeves[0])
+            if len(eligible_sleeves) == 1
+            else "caerus_paper_portfolio"
+        )
         limit_price = row.get("limit_price")
         cap_enforcement_price = row.get("cap_enforcement_price")
         if order_type == "limit":
@@ -265,7 +322,8 @@ def _normalize_orders(
 
 
 def _order_seed_rows(
-    rows: Sequence[Mapping[str, Any]], *, required_side: str
+    rows: Sequence[Mapping[str, Any]], *, required_side: str,
+    eligible_sleeves: Sequence[str],
 ) -> list[dict[str, Any]]:
     """Canonicalize aliases and remove generated IDs for the decision seed."""
     result: list[dict[str, Any]] = []
@@ -310,7 +368,15 @@ def _order_seed_rows(
                 row[price_key] = _finite(
                     row[price_key], f"{required_side}.{symbol}.{price_key}", minimum=0.0
                 )
-        row["sleeve"] = "caerus_orion"
+        row["sleeve_contributions"] = _normalize_sleeve_contributions(
+            row.get("sleeve_contributions"),
+            eligible_sleeves=eligible_sleeves,
+        )
+        row["sleeve"] = (
+            str(eligible_sleeves[0])
+            if len(eligible_sleeves) == 1
+            else "caerus_paper_portfolio"
+        )
         limit_price = row.get("limit_price")
         cap_enforcement_price = row.get("cap_enforcement_price")
         if row["order_type"] == "limit":
@@ -375,7 +441,12 @@ class ExactExecutionPlan:
 
     @property
     def orders(self) -> tuple[Mapping[str, Any], ...]:
-        return (*self.sell_orders, *self.buy_orders)
+        # The stored sell/buy rows remain recursively frozen. Consumers receive
+        # detached plain-JSON copies so nested causal lineage is serializable
+        # and cannot mutate the immutable plan.
+        return tuple(
+            _as_plain(row) for row in (*self.sell_orders, *self.buy_orders)
+        )
 
     def to_dict(self, *, include_hash: bool = True) -> dict[str, Any]:
         payload = {
@@ -437,11 +508,10 @@ def build_exact_execution_plan(
     strategy_id: str = "caerus_orion",
     account_scope: str = "PAPER",
     allow_legacy_missing_fill_risk_authority: bool = False,
+    validate_current_allocator: bool = True,
 ) -> ExactExecutionPlan:
     as_of = _iso(as_of, "as_of")
     created_at = _iso(created_at, "created_at")
-    if str(strategy_id).strip().lower() != "caerus_orion":
-        raise AuthorityContractError("only caerus_orion PAPER authority may build an exact plan")
     if str(account_scope).strip().upper() != "PAPER":
         raise AuthorityContractError("exact execution plan is PAPER-only; live capital remains blocked")
     normalized_account_id_hash = str(account_id_hash or "").strip().lower()
@@ -473,15 +543,42 @@ def build_exact_execution_plan(
     ):
         raise AuthorityContractError("source_artifact_hashes must contain SHA-256 lineage")
     allocations = [dict(row) for row in sleeve_allocations]
-    eligible = []
+    eligible: list[str] = []
     for row in allocations:
         sleeve = str(row.get("sleeve_id") or row.get("sleeve") or "").strip().lower()
         if bool(row.get("capital_eligible")):
             eligible.append(sleeve)
-            if sleeve not in {"orion", "caerus_orion"}:
-                raise AuthorityContractError("only Orion may be capital-eligible")
-    if eligible not in (["orion"], ["caerus_orion"]):
-        raise AuthorityContractError("exact PAPER plan requires sole Orion capital eligibility")
+    plan_eligible = tuple(sorted(eligible))
+    if not plan_eligible or len(eligible) != len(set(eligible)):
+        raise AuthorityContractError(
+            "exact PAPER plan requires a unique capital-eligible sleeve set"
+        )
+    expected_eligible = plan_eligible
+    if validate_current_allocator:
+        from core.sleeve_control_plane import load_sleeve_control_registry
+
+        allocation_policy = load_sleeve_control_registry().paper_allocation_policy
+        governed_eligible = tuple(
+            sorted(
+                str(value).strip().lower()
+                for value in (allocation_policy.get("sleeve_risk_budgets") or {})
+            )
+        )
+        if plan_eligible != governed_eligible:
+            raise AuthorityContractError(
+                "exact PAPER capital-eligible sleeve set differs from the governed allocator"
+            )
+        expected_eligible = governed_eligible
+    expected_strategy_id = (
+        expected_eligible[0]
+        if len(expected_eligible) == 1
+        else "caerus_paper_portfolio"
+    )
+    normalized_strategy_id = str(strategy_id).strip().lower()
+    if normalized_strategy_id != expected_strategy_id:
+        raise AuthorityContractError(
+            "exact PAPER strategy identity differs from the governed allocator"
+        )
     starting = _position_rows(starting_positions, "starting_positions")
     expected = _position_rows(expected_posttrade_positions, "expected_posttrade_positions")
     cash = _finite(starting_cash, "starting_cash", minimum=0.0)
@@ -505,12 +602,16 @@ def build_exact_execution_plan(
         "starting_cash": cash,
         "account_id_hash": normalized_account_id_hash,
         "risk_state": _as_plain(risk_state),
-        "raw_sell_orders": _order_seed_rows(sell_orders, required_side="SELL"),
-        "raw_buy_orders": _order_seed_rows(buy_orders, required_side="BUY"),
+        "raw_sell_orders": _order_seed_rows(
+            sell_orders, required_side="SELL", eligible_sleeves=expected_eligible
+        ),
+        "raw_buy_orders": _order_seed_rows(
+            buy_orders, required_side="BUY", eligible_sleeves=expected_eligible
+        ),
         "expected_posttrade_positions": _as_plain(expected),
         "expected_posttrade_cash": expected_cash,
         "constraints": _as_plain(constraints),
-        "strategy_id": "caerus_orion",
+        "strategy_id": normalized_strategy_id,
         "account_scope": "PAPER",
     }
     plan_seed = _hash(seed_payload)
@@ -531,8 +632,18 @@ def build_exact_execution_plan(
     auth["authorized_at"] = _iso(auth.get("authorized_at"), "authorization_state.authorized_at")
     if not str(auth.get("authorization_reason") or "").strip():
         raise AuthorityContractError("exact execution authorization_reason is required")
-    sells = _normalize_orders(sell_orders, required_side="SELL", plan_seed=plan_seed)
-    buys = _normalize_orders(buy_orders, required_side="BUY", plan_seed=plan_seed)
+    sells = _normalize_orders(
+        sell_orders,
+        required_side="SELL",
+        plan_seed=plan_seed,
+        eligible_sleeves=expected_eligible,
+    )
+    buys = _normalize_orders(
+        buy_orders,
+        required_side="BUY",
+        plan_seed=plan_seed,
+        eligible_sleeves=expected_eligible,
+    )
     if bool(normalized_regime.get("risk_veto_buys")) and buys:
         raise AuthorityContractError(
             "emergency regime risk response vetoes all new buy exposure"
@@ -693,6 +804,7 @@ def build_exact_execution_plan(
         plan_id=plan_id,
         starting_state_hash=compute_starting_state_hash(starting, cash),
         content_hash="",
+        strategy_id=normalized_strategy_id,
     )
     return ExactExecutionPlan(**{**plan.__dict__, "content_hash": _hash(plan.to_dict(include_hash=False))})
 
@@ -762,6 +874,10 @@ def exact_execution_plan_from_dict(
             and "max_adverse_fill_slippage_bps"
             not in (payload.get("constraints") or {})
         ),
+        # Serialized plans are immutable historical evidence. Their internal
+        # strategy/allocation consistency and content hash are revalidated, but
+        # a later governed allocation-policy change must not invalidate history.
+        validate_current_allocator=False,
     )
     if str(payload.get("plan_id") or "") != rebuilt.plan_id:
         raise AuthorityContractError("exact execution plan_id mismatch")

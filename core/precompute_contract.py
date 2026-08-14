@@ -387,9 +387,19 @@ def check_bundle_completeness(bundle_dir: Path) -> tuple[bool, list[str], list[s
 
     Returns (complete, present_files, missing_files).
     """
+    required_files = BUNDLE_REQUIRED_FILES
+    contract = _read_json(bundle_dir / "contract.json")
+    if isinstance(contract, dict) and int(contract.get("schema_version") or 0) >= 2:
+        declared = tuple(
+            str(value)
+            for value in (contract.get("files") or {}).values()
+            if str(value).strip()
+        )
+        if declared:
+            required_files = tuple(dict.fromkeys(("contract.json", *declared)))
     present: list[str] = []
     missing: list[str] = []
-    for name in BUNDLE_REQUIRED_FILES:
+    for name in required_files:
         if (bundle_dir / name).is_file():
             present.append(name)
         else:
@@ -408,7 +418,17 @@ def normalize_bundle_to_canonical(bundle_dir: Path, report_date: str) -> Path:
     if bundle_dir.resolve() == canonical.resolve():
         return canonical
     canonical.mkdir(parents=True, exist_ok=True)
-    for name in BUNDLE_REQUIRED_FILES:
+    required_files = BUNDLE_REQUIRED_FILES
+    contract = _read_json(bundle_dir / "contract.json")
+    if isinstance(contract, dict) and int(contract.get("schema_version") or 0) >= 2:
+        declared = tuple(
+            str(value)
+            for value in (contract.get("files") or {}).values()
+            if str(value).strip()
+        )
+        if declared:
+            required_files = tuple(dict.fromkeys(("contract.json", *declared)))
+    for name in required_files:
         src = bundle_dir / name
         if src.is_file():
             shutil.copy2(str(src), str(canonical / name))

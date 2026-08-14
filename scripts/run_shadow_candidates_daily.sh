@@ -132,6 +132,12 @@ fi
 if [[ "${ALLOW_DOWNLOAD_ENABLED}" -ne 1 && "${NO_DATA_REASON}" == "PRICE_CACHE_STALE" ]]; then
     log "[SHADOW] price cache stale; run local hydration workflow to refresh."
 fi
+SHADOW_DATA_USABLE=1
+if [[ -n "${NO_DATA_REASON}" && "${NO_DATA_REASON}" != "OK" && "${NO_DATA_REASON}" != "NONE" ]]; then
+    SHADOW_DATA_USABLE=0
+    log "[SHADOW] current-date decision unavailable: ${NO_DATA_REASON}"
+    write_step_status "generate" "UNAVAILABLE" "${RC}" "${NO_DATA_REASON}"
+fi
 
 publish_shadow_latest() {
     mkdir -p "${LATEST_DIR}"
@@ -169,25 +175,29 @@ reconcile_live_vs_shadow() {
     return 0
 }
 
-if [[ ${RC} -eq 0 && -f "${DATED_DIR}/comparison.md" ]]; then
+if [[ ${RC} -eq 0 && ${SHADOW_DATA_USABLE} -eq 1 && -f "${DATED_DIR}/comparison.md" ]]; then
     publish_shadow_latest
     write_step_status "latest" "${LATEST_PUBLISH_STATUS}" "0" "${LATEST_DIR}"
     reconcile_live_vs_shadow
     write_step_status "reconciliation" "${RECONCILIATION_STATUS}" "0" "outputs/reconciliation/live_vs_shadow"
 else
     log "[SHADOW] no valid comparison.md found for latest publish"
-    if [[ ${RC} -eq 0 ]]; then
+    if [[ ${RC} -eq 0 && ${SHADOW_DATA_USABLE} -eq 1 ]]; then
         LATEST_PUBLISH_STATUS="FAILED"
+    elif [[ ${RC} -eq 0 ]]; then
+        LATEST_PUBLISH_STATUS="UNAVAILABLE"
     fi
     write_step_status "latest" "${LATEST_PUBLISH_STATUS}" "0" "comparison.md unavailable"
     write_step_status "reconciliation" "${RECONCILIATION_STATUS}" "0" "skipped because latest publish did not complete"
 fi
 
 SHADOW_STATUS="$(
-    if [[ ${RC} -eq 0 && "${LATEST_PUBLISH_STATUS}" == "OK" && "${RECONCILIATION_STATUS}" != "FAILED" ]]; then
+    if [[ ${RC} -eq 0 && ${SHADOW_DATA_USABLE} -eq 1 && "${LATEST_PUBLISH_STATUS}" == "OK" && "${RECONCILIATION_STATUS}" != "FAILED" ]]; then
         printf "OK"
-    elif [[ ${RC} -eq 0 ]]; then
+    elif [[ ${RC} -eq 0 && ${SHADOW_DATA_USABLE} -eq 1 ]]; then
         printf "PARTIAL"
+    elif [[ ${RC} -eq 0 ]]; then
+        printf "UNAVAILABLE"
     else
         printf "FAILED"
     fi

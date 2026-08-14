@@ -88,14 +88,16 @@ Benchmark:
 - SPY
 
 Execution:
-- Precompute selects the decision-eligible Orion snapshot from the current or
-  immediately preceding XNYS session exactly once and seals one Decision hash
+- Precompute admits one immutable session, produces one terminal decision for
+  every registered non-frozen sleeve, and allocates configured capital sleeves
+  exactly once; Orion currently has 100% of the sleeve risk budget
 - The legacy daily allocator is research evidence only and is quarantined below
   the dated precompute bundle; it cannot publish canonical PAPER signals/trades
-- The 09:35 builder reuses the sealed Evidence + Decision packages; Risk may
-  constrain but may not invent alpha
+- The 09:35 builder reuses the sealed session, decisions, allocation, Evidence,
+  and Decision packages; Risk may constrain but may not invent alpha
 - Trader consumes only the hash-verified approved execution package
-- Auditor is read-only and preserves Decision → Risk → Execution lineage
+- Broker fills preserve exact-order and sleeve-decision provenance through the
+  causal ownership ledger, valuation, and read-only daily audit
 - Live capital remains blocked; the PAPER promotion does not arm FR-104 or
   modify live credentials
 
@@ -184,19 +186,19 @@ Five phases run on the VM weekdays. Install with `crontab scripts/crontab.txt`.
 |---|---|---|---|
 | 1:00 AM | 0a — Overnight agents | `scripts/cron_overnight.sh` | `outputs/overnight_signals/YYYY-MM-DD.json` |
 | 6:30 AM | 0b — Claude research digest | `scripts/cron_research.sh` | `quant_research_agent/outputs/digest_YYYY-MM-DD.json` |
-| 7:00 AM | 1 — Precompute | `scripts/cron_precompute.sh` | `outputs/precompute/YYYY-MM-DD/` bundle + best-effort shadow artifacts |
-| 9:35 AM | 2 — Order execution | `scripts/cron_execute.sh` | Alpaca paper equity orders + gated protective-put options |
+| 7:00 AM | 1 — Precompute | `scripts/cron_precompute.sh` | Immutable session + full sleeve decisions + one account allocation |
+| 9:35 AM | 2 — Order execution | `scripts/cron_execute.sh` | Exact Alpaca PAPER equity orders; options disabled |
 | 10:00 AM | 3 — Confirmation + email | `scripts/cron_confirm.sh` | Email report |
 | 6:30 PM | Post-close price hydration | `python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts --strict` | `outputs/price_hydration/YYYY-MM-DD/status.json` + refreshed Shadow scorecard artifacts |
-| 7:15 PM | Broker-truth ledger | `scripts/cron_broker_ledger.sh` | Sole actual-PAPER NAV/accounting source under `outputs/ledger/paper/` |
-| 7:45 PM | Canonical portfolio history | `scripts/build_portfolio_history.py` + freshness escalation | Broker-ledger-derived append-only `outputs/portfolio_history/nav.csv` |
+| 7:15 PM | Broker-truth ledger | `scripts/cron_broker_ledger.sh` | Broker fills/positions plus causal ownership and single-as-of valuation |
+| 7:45 PM | Canonical portfolio history and audit | strict history + `scripts/build_daily_portfolio_audit.py` | Same-as-of reporting snapshot and `outputs/audit/<date>/portfolio_audit.json` |
 | 9:00 PM | Shadow CIO report | `python3 -m scripts.send_shadow_cio_report` | Daily Shadow scorecard/reporting email |
 | Monday 8 AM | Weekly model review | `scripts/cron_weekly_review.sh` | Review artifacts |
 
-**Data flow**: Phase 0a runs overnight agents → Phase 0b runs Claude to score
-news/arxiv/earnings → Phase 1 precompute consumes both (via thematic overlay) →
-successful precompute triggers the non-blocking shadow lane for Polaris / Orion /
-Lyra → Phase 2 executes the precomputed plan → Phase 3 confirms and emails.
+**Data flow**: inputs → immutable session → complete sleeve decision batch →
+configured account allocation → independent Risk → exact execution → broker
+reconciliation → causal ownership → valuation → daily audit/reporting. The
+post-precompute shadow refresh is research-only and cannot mutate the seal.
 
 Overnight signals are accepted up to 3 days old; research digest up to 3 days
 old. Non-fatal failures in 0a/0b do not block Phase 1.
@@ -210,7 +212,8 @@ Shadow generation is best-effort only:
   - `outputs/workflow/YYYY-MM-DD/shadow_latest.json`
   - `outputs/workflow/YYYY-MM-DD/shadow_reconciliation.json`
   - `outputs/workflow/YYYY-MM-DD/shadow.json`
-- failures are logged to `logs/shadow_YYYY-MM-DD.log` and swallowed
+- failures are logged to `logs/shadow_YYYY-MM-DD.log`; stale/unavailable input
+  publishes no new `latest` and makes system health non-green
 - shadow cannot block production execution
 
 Self-heal execution recovery is fail-closed:
@@ -221,10 +224,9 @@ Self-heal execution recovery is fail-closed:
 - Self-heal precompute suppresses precompute email, shadow generation, latest
   shadow publication, and shadow reconciliation.
 - Execution continues only when `core/precompute_bundle_validation.py` confirms
-  the schema-2 hash manifest for `contract.json`, `daily_snapshot.json`,
-  `signals.json`, `planned_execution_payload.json`, `sleeve_evaluations.json`,
-  and `paper_target_package.json`, including one matching
-  `approved_target_hash`.
+  the schema-3 hash manifest for the session, sleeve evaluations, sleeve
+  decisions, portfolio allocation, sealed target, read-only projections, and
+  audit manifest, including matching session/allocation/target lineage.
 - Recovery writes:
   - `outputs/workflow/YYYY-MM-DD/execution_bundle_validation.json`
   - `outputs/workflow/YYYY-MM-DD/execution_self_heal.json`
@@ -253,12 +255,15 @@ Post-close Shadow reporting guardrails:
 
 ### Main Orchestrator
 
-`daily_quant_report.py` — Phase 1 entry point. Runs regime classification,
-sleeve scoring, allocation, reconciliation, and writes the precompute bundle.
+`daily_quant_report.py` collects the historical market/research frame. The
+registry control plane and `core/portfolio_operating_model.py` then produce the
+capital-authoritative session, sleeve decisions, account allocation, and seal.
+Legacy planner targets are quarantined research evidence.
 
 ### Current Strategy State
 
-- **Paper execution model**: Caerus Orion, through an immutable approved package
+- **PAPER portfolio**: registry allocator, currently with Orion as the sole
+  capital sleeve and 100% of sleeve risk budget
 - **Historical research control**: Caerus Polaris
 - **Shadow daily models**: Caerus Polaris, Caerus Orion, Caerus Lyra
 - **Default FR-104 `LIVE_PILOT` sleeve**: Caerus Orion, only when all
@@ -527,6 +532,9 @@ Four independent layers prevent position and regime whipsaw:
 | `core/options_overlay_shadow.py` | Options strategy selection + shadow artifacts |
 | `core/options_execution.py` | Options live execution — OCC symbol, Alpaca submission |
 | `core/precompute_bundle_validation.py` | Full precompute bundle validation and recovery status payload generation |
+| `core/portfolio_operating_model.py` | Immutable session, standardized sleeve decisions, account allocator, lineage validation |
+| `core/causal_ownership_ledger.py` | Exact-plan-to-fill sleeve ownership and single-as-of broker valuation |
+| `core/daily_portfolio_audit.py` | End-of-day decision/execution/ownership/valuation/reporting proof |
 | `config/options_execution_policy.json` | Options execution gates — `allow_live_submission` flag |
 | `brokers/alpaca_broker.py` | Alpaca broker — equity + options order submission |
 | `scripts/crontab.txt` | Full cron schedule — install with `crontab scripts/crontab.txt` |
@@ -535,6 +543,8 @@ Four independent layers prevent position and regime whipsaw:
 | `scripts/cron_precompute.sh` | Phase 1 — 7:00 AM ET precompute |
 | `scripts/cron_execute.sh` | Phase 2 — 9:35 AM ET order execution |
 | `scripts/cron_confirm.sh` | Phase 3 — 10:00 AM ET confirmation + email |
+| `scripts/build_causal_paper_ledger.py` | Build broker-reconciled causal ownership and valuation |
+| `scripts/build_daily_portfolio_audit.py` | Build strict end-of-day portfolio audit |
 | `scripts/research/build_dashboard_v1.py` | Current strict dashboard builder — emits the broker-authoritative V2 prototype payload |
 | `scripts/refresh_quant_dashboard.py` | Refreshes Alpaca broker/fill/history artifacts and publishes both dashboard surfaces |
 | `scripts/deploy_dashboard_vm.sh` | Deploys dashboard assets, landing page, refresh service, and nginx config to the VM |
@@ -639,6 +649,10 @@ For scheduler incidents, inspect:
 - `logs/research_<date>.log`
 - `outputs/broker/recon_pretrade_<date>.json`
 - `outputs/precompute/<date>/contract.json`
+- `outputs/precompute/<date>/session_manifest.json`
+- `outputs/precompute/<date>/sleeve_decisions.json`
+- `outputs/precompute/<date>/portfolio_allocation.json`
+- `outputs/precompute/<date>/audit_manifest.json`
 - `outputs/workflow/<date>/execution_bundle_validation.json`
 - `outputs/workflow/<date>/execution_self_heal.json`
 - `outputs/workflow/<date>/precompute_bundle_validation.json`
@@ -647,6 +661,11 @@ For scheduler incidents, inspect:
 - `outputs/workflow/<date>/shadow_latest.json`
 - `outputs/workflow/<date>/shadow_reconciliation.json`
 - `outputs/workflow/<date>/shadow.json`
+- `outputs/ledger/paper/causal_fills.jsonl`
+- `outputs/ledger/paper/ownership_latest.json`
+- `outputs/ledger/paper/valuation_latest.json`
+- `outputs/portfolio_history/reporting_snapshot.json`
+- `outputs/audit/<date>/portfolio_audit.json`
 - `outputs/overnight_signals/<date>.json`
 - `outputs/shadow_candidates/<date>/comparison.md`
 - `outputs/shadow_candidates/performance/shadow_summary.json`
@@ -821,9 +840,9 @@ Runtime separation:
 - The VM cron is the production scheduler for precompute/live execution; GitHub
   daily precompute/live schedules are dispatch-only to avoid duplicate runs
 - Successful precompute triggers `scripts/run_shadow_candidates_daily.sh` for
-  Polaris / Orion / Lyra. The morning Orion source is already sealed from the
-  current/prior-session policy before that best-effort refresh; later shadow
-  output cannot mutate PAPER Decision. Other shadow reporting is non-blocking.
+  Polaris / Orion / Lyra. The session, complete decision batch, and account
+  allocation are already sealed before that refresh; later shadow output cannot
+  mutate PAPER Decision. Stale shadow state prevents overall green health.
 - Missing or invalid precompute bundles trigger `SELF_HEAL_PRECOMPUTE_ONLY=1`;
   execution continues only after full bundle validation passes
 - If a `SELF_HEAL` pretrade reconciliation occurs, the wrapper re-runs reconciliation

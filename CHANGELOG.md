@@ -9,21 +9,33 @@ This log covers material architectural and process changes. Routine bug fixes an
 
 ## Recent Major Changes (Early 2026)
 
-### Single Orion Decision Line and Broker-Truth NAV — August 14, 2026
+### Institutional Portfolio Operating Model — August 14, 2026
 
-- Replaced the split PAPER morning authority with one sealed Orion Decision
-  target selected from the current/immediately-prior XNYS sleeve evaluation.
-- Added schema-2 bundle hashes and one `approved_target_hash` across the target
-  package, signals, handoff, 09:35 plan, and exact authorization.
+- Replaced the split PAPER morning authority with one immutable session, one
+  terminal daily decision per registered non-frozen sleeve, and one configured
+  account-level allocation. Orion remains the sole current capital sleeve.
+- Added schema-3 hashes across session, decisions, allocation, target package,
+  projections, 09:35 exact plan, and audit manifest.
 - Quarantined the legacy `growth_engine_v4` precompute signals/trades as
   content-hashed research evidence with no execution authority.
+- Generalized the exact plan to retain causal contributions from multiple
+  capital sleeves and reject incomplete capital/budget/decision sets.
+- Added an append-only broker-order/fill ownership ledger. Historical fills
+  remain `legacy_unattributed`; post-cutover fills must trace to exact orders and
+  sleeve decisions.
+- Added one broker-reconciled valuation timestamp, strict same-as-of scheduled
+  reporting, and an end-of-day decision-to-report audit.
+- Stale shadow inputs now publish no new `latest` artifact and prevent universal
+  green health.
 - Made readiness certify target lineage/assets/connectivity instead of
   presenting stale pre-open share counts as expected broker submissions.
 - Made canonical actual PAPER NAV derive only from the direct Alpaca
   broker-truth ledger; rescheduled the ledger to 19:15 ET and portfolio-history
   projection/freshness escalation to 19:45 ET.
-- PAPER/live boundaries remain unchanged: no live credentials, approvals,
-  limits, or capital were enabled.
+- PAPER/live boundaries remain unchanged. Options stay disabled until they can
+  satisfy the same allocation, exact-order, reconciliation, ownership, and
+  valuation contracts; no live credentials, approvals, limits, or capital were
+  enabled.
 
 ### Shadow Scorecard Publication Integrity Gates (FR-085) — June 24, 2026
 

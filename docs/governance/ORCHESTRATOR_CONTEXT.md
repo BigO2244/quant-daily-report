@@ -23,19 +23,19 @@ strategy, review, and task delegation.
 Caerus is a paper-traded quantitative investment platform with deterministic
 artifacts and an explicit research-to-production promotion ladder.
 
-- Orion is the current PAPER-only execution authority under the owner decision
-  recorded 2026-08-08. Decision consumes its governed shadow snapshot from the
-  current or immediately preceding XNYS session while preserving the exact
-  source date/path/hash. Risk may only constrain, and Trader consumes only the
-  approved package.
-- The owner-approved 2026-08-14 authority migration is implemented: precompute
-  selects Orion once, seals one immutable Decision target, and publishes the
-  same `approved_target_hash` through contract, signals, handoff, 09:35 plan,
-  and exact authorization. The legacy allocator output is quarantined as
-  research and cannot rejoin PAPER execution.
-- Actual PAPER NAV has one authority: `outputs/ledger/paper/daily_nav.csv`,
-  pulled directly from Alpaca at 19:15 ET. The 19:45 portfolio-history build is
-  a derived append-only view and has no model-NAV fallback.
+- The owner-approved 2026-08-14 portfolio operating-model migration is
+  implemented. Precompute admits one immutable session, produces one terminal
+  daily decision for every registered non-frozen sleeve, and applies one
+  configured account allocator. Orion currently receives 100% of sleeve risk
+  budget; adding sleeves is a complete registry/policy change, not a new lane.
+- The session, decisions, allocation, sealed target, exact plan, fills, causal
+  ownership, valuation, and daily audit retain immutable hash lineage. Risk may
+  only constrain. Recovery target substitution and downstream strategy
+  reconstruction are rejected. Legacy planner output is quarantined research.
+- Actual PAPER accounting comes directly from Alpaca at 19:15 ET. Broker fills
+  are mapped to exact decisions, positions reconcile to causal ownership, and
+  account/position valuation shares one `pulled_at_utc`. The strict 19:45 build
+  has no model fallback and writes the end-of-day portfolio audit.
 - Polaris remains the historical research baseline and daily shadow comparison control.
 - Lyra is the shadow challenger.
 - SPY is the benchmark anchor.
@@ -50,9 +50,9 @@ artifacts and an explicit research-to-production promotion ladder.
   The canonical Shadow observation window begins on 2026-05-12; legacy
   mixed-convention Shadow history is superseded and non-decision-grade for
   promotion or retirement evidence.
-- FR-069 research architecture is the next major architecture workstream and
-  is moving toward a modular sleeve model aligned with the Caerus Investment
-  Doctrine. It remains research-only; Phase C requires separate approval.
+- The production control plane is now modular across sleeves. FR-069 remains a
+  research/model-design workstream; research promotion still requires explicit
+  approval before a sleeve is added to the capital allocation policy.
 - The live dashboard is nginx-protected with basic auth; recovery uses
   `scripts/reset_dashboard_auth.sh` and does not change trading, execution,
   allocation, or cron behavior.
@@ -85,9 +85,10 @@ artifacts and an explicit research-to-production promotion ladder.
 
 ## Current Priority Stack
 
-1. Observe the first post-migration sealed-target Orion PAPER run and require clean
-   fills/rejections, reconciliation, 2% target attainment, immutable lineage,
-   and universal GREEN health before declaring migration complete.
+1. Observe the first scheduled schema-3 allocator PAPER session and require
+   clean fills/rejections, reconciliation, causal ownership, same-as-of
+   valuation, daily audit, and universal GREEN health before declaring the
+   production observation complete.
 2. FR-069 research lab modular sleeve architecture is the next major
    architecture workstream; it remains research-only unless a separately
    governed implementation phase is approved.

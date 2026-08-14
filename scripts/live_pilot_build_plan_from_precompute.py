@@ -164,213 +164,14 @@ def _canonical_strategy_id(value: object) -> str:
     return {"orion": "caerus_orion", "polaris": "caerus_polaris"}.get(raw, raw)
 
 
-def _governed_paper_source_path(
-    *,
-    trade_date: str,
-    strategy_id: str,
-    shadow_root: Path,
-    config: Mapping[str, Any],
-) -> tuple[Path, str, int]:
-    """Resolve only the current or immediately prior governed market session.
-
-    Pre-open execution normally has no snapshot for the session that is about to
-    trade. In that case Decision may consume the immutable snapshot from the
-    immediately preceding XNYS session. This is an explicit freshness contract,
-    not a latest-file fallback: older artifacts and non-session execution dates
-    fail closed.
-    """
-    from paper.trading_calendar import is_trading_day, prev_trading_day
-
-    policy = str(config.get("source_session_policy") or "").strip().upper()
-    if policy != "SAME_OR_PREVIOUS_TRADING_SESSION":
-        raise ValueError(
-            "paper source_session_policy must be SAME_OR_PREVIOUS_TRADING_SESSION"
-        )
-    try:
-        max_lag = int(config.get("max_source_trading_session_lag"))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("paper max_source_trading_session_lag must be 1") from exc
-    if max_lag != 1:
-        raise ValueError("paper max_source_trading_session_lag must be 1")
-    if not is_trading_day(trade_date):
-        raise ValueError(f"PAPER trade date is not an XNYS trading session: {trade_date}")
-
-    exact_path = shadow_root / trade_date / f"{strategy_id}.json"
-    if exact_path.exists():
-        exact_payload = _read_json(exact_path)
-        if not isinstance(exact_payload, Mapping):
-            raise ValueError("governed PAPER exact source artifact must be a JSON object")
-        exact_pending = str(
-            exact_payload.get("observation_status") or ""
-        ).upper() == "PENDING_SESSION_CLOSE"
-        if exact_payload.get("decision_eligible") is not False and not exact_pending:
-            return exact_path, trade_date, 0
-
-    source_trade_date = prev_trading_day(trade_date)
-    prior_path = shadow_root / source_trade_date / f"{strategy_id}.json"
-    if prior_path.exists():
-        prior_payload = _read_json(prior_path)
-        if not isinstance(prior_payload, Mapping):
-            raise ValueError("governed PAPER prior source artifact must be a JSON object")
-        prior_pending = str(
-            prior_payload.get("observation_status") or ""
-        ).upper() == "PENDING_SESSION_CLOSE"
-        if prior_payload.get("decision_eligible") is not False and not prior_pending:
-            return prior_path, source_trade_date, 1
-        raise ValueError(
-            "governed PAPER prior source artifact is reporting-only and not "
-            "Decision-eligible"
-        )
-    raise FileNotFoundError(
-        "governed PAPER source artifact missing for both allowed sessions: "
-        f"{exact_path}, {prior_path}"
-    )
-
-
-def _build_paper_decision_input(
-    *,
-    trade_date: str,
-    approved_sleeve: str,
-    output_dir: Path,
-    shadow_root: Path,
-    strategy_registry_path: Path,
-) -> tuple[Path, dict[str, Any]]:
-    """Materialize Decision's immutable PAPER input from the governed Orion snapshot."""
-    from core.strategy_identity import strategy_identity_metadata
-    from core.strategy_registry import load_strategy_registry
-
-    registry = load_strategy_registry(strategy_registry_path)
-    strategy_id = registry.paper_execution_strategy_id()
-    config = registry.paper_execution_config()
-    from core.target_attainment_policy import validate_target_attainment_policy
-
-    target_attainment_policy = validate_target_attainment_policy(
-        config.get("target_attainment_policy"),
-        expected_target_cash_weight=float(config.get("target_cash_weight") or 0.0),
-    )
-    if _canonical_strategy_id(approved_sleeve) != strategy_id:
-        raise ValueError(
-            f"approved PAPER strategy {_canonical_strategy_id(approved_sleeve)!r} "
-            f"does not match registry authority {strategy_id!r}"
-        )
-    if str(config.get("approval_scope") or "").upper() != "PAPER_ONLY":
-        raise ValueError("paper execution approval_scope must be PAPER_ONLY")
-    if bool(config.get("live_enabled")):
-        raise ValueError("paper execution strategy must not enable live trading")
-    if str(config.get("source_kind") or "") != "shadow_snapshot":
-        raise ValueError("paper execution source_kind must be shadow_snapshot")
-
-    source_path, source_trade_date, source_session_lag = (
-        _governed_paper_source_path(
-            trade_date=trade_date,
-            strategy_id=strategy_id,
-            shadow_root=shadow_root,
-            config=config,
-        )
-    )
-    source = _read_json(source_path)
-    if not isinstance(source, Mapping):
-        raise ValueError("governed PAPER source artifact must be a JSON object")
-    if str(source.get("trade_date") or "") != source_trade_date:
-        raise ValueError("governed PAPER source trade_date mismatch")
-    source_effective_trade_date = str(
-        source.get("effective_trade_date") or source_trade_date
-    )
-    if source_effective_trade_date != source_trade_date:
-        raise ValueError("governed PAPER source effective_trade_date mismatch")
-    if str(source.get("strategy_slug") or "") != strategy_id:
-        raise ValueError("governed PAPER source strategy_slug mismatch")
-    expected_variant = str(config.get("source_variant") or "")
-    if expected_variant and str(source.get("source_variant") or "") != expected_variant:
-        raise ValueError("governed PAPER source variant mismatch")
-
-    raw_weights = source.get("target_weights")
-    if not isinstance(raw_weights, Mapping) or not raw_weights:
-        raise ValueError("governed PAPER source has no target_weights")
-    normalized: dict[str, float] = {}
-    for raw_symbol, raw_weight in raw_weights.items():
-        symbol = _clean_symbol(raw_symbol)
-        weight = _safe_float(raw_weight)
-        if not _is_supported_equity_symbol(symbol) or weight is None or weight <= 0.0:
-            raise ValueError(f"invalid governed PAPER target weight: {raw_symbol!r}")
-        normalized[symbol] = normalized.get(symbol, 0.0) + float(weight)
-    gross = sum(normalized.values())
-    if gross <= 0.0:
-        raise ValueError("governed PAPER source target gross must be positive")
-    target_cash_weight = _safe_float(config.get("target_cash_weight"))
-    if target_cash_weight is None or not 0.0 <= target_cash_weight < 1.0:
-        raise ValueError("paper target_cash_weight must be in [0, 1)")
-    invested_weight = 1.0 - float(target_cash_weight)
-    signals = [
-        {
-            "ticker": symbol,
-            "target_weight": round(weight / gross * invested_weight, 10),
-            "sleeve": "sleeve_trend",
-            "source_strategy_id": strategy_id,
-            "source_signal_target_weight": float(weight),
-        }
-        for symbol, weight in sorted(normalized.items())
-    ]
-    signals.append({"ticker": "CASH", "target_weight": float(target_cash_weight)})
-    source_hash = _file_sha256(source_path)
-    identity = strategy_identity_metadata(trade_date)
-    identity.update(
-        {
-            "execution_target_strategy_id": strategy_id,
-            "execution_target_source": str(source_path),
-            "execution_target_source_sha256": source_hash,
-            "execution_target_type": "governed_shadow_snapshot",
-            "paper_governed_strategy_id": strategy_id,
-            "paper_mapping_status": "DIRECT_APPROVED_PACKAGE",
-            "paper_tracks_approved_strategy": True,
-            "paper_tracks_shadow_baseline": True,
-            "shadow_baseline_source": str(source_path),
-            "shadow_baseline_source_sha256": source_hash,
-            "shadow_baseline_source_trade_date": source_trade_date,
-        }
-    )
-    decision_input = {
-        "schema_version": DECISION_INPUT_SCHEMA_VERSION,
-        "trade_date": trade_date,
-        "snapshot_date": trade_date,
-        "cash_target_weight": float(target_cash_weight),
-        "signals": signals,
-        "strategy_identity": identity,
-        "source_strategy_artifact": {
-            "path": str(source_path),
-            "sha256": source_hash,
-            "strategy_id": strategy_id,
-            "source_variant": source.get("source_variant"),
-            "trade_date": source_trade_date,
-            "source_trade_date": source_trade_date,
-            "source_effective_trade_date": source_effective_trade_date,
-            "decision_trade_date": trade_date,
-            "effective_trade_date": trade_date,
-            "source_session_policy": config.get("source_session_policy"),
-            "source_trading_session_lag": source_session_lag,
-            "target_attainment_tolerance": float(
-                config.get("target_attainment_tolerance") or 0.02
-            ),
-            "target_attainment_policy": target_attainment_policy,
-        },
-    }
-    decision_dir = output_dir / "decision_inputs" / trade_date
-    decision_path = decision_dir / f"{strategy_id}.json"
-    decision_dir.mkdir(parents=True, exist_ok=True)
-    _write_json(decision_path, decision_input)
-    return decision_path, dict(decision_input["source_strategy_artifact"])
-
-
 def _load_sealed_paper_decision(
     *, payload_path: Path, trade_date: str, approved_sleeve: str
 ) -> tuple[Path, dict[str, Any], Any, Any, dict[str, Any]]:
-    """Load the one pre-open Decision seal; never re-select an Orion snapshot."""
+    """Load the pre-open portfolio allocation; never re-select a sleeve source."""
 
     from authority.pipeline import decision_package_from_dict, evidence_package_from_dict
     from core.paper_target_authority import validate_sealed_paper_target_bundle
 
-    if _canonical_strategy_id(approved_sleeve) != "caerus_orion":
-        raise ValueError("sealed PAPER Decision authority is solely caerus_orion")
     bundle_dir = payload_path.parent
     repo_root = payload_path.resolve().parents[3]
     failures = validate_sealed_paper_target_bundle(
@@ -384,6 +185,12 @@ def _load_sealed_paper_decision(
     package = _read_json(package_path)
     if not isinstance(package, Mapping):
         raise ValueError("sealed PAPER target package must be a JSON object")
+    package_sleeve = _canonical_strategy_id(package.get("approved_sleeve"))
+    requested_sleeve = _canonical_strategy_id(approved_sleeve)
+    if requested_sleeve not in {package_sleeve, "caerus_orion"}:
+        raise ValueError(
+            "requested PAPER sleeve differs from the sealed allocator authority"
+        )
     evidence_raw = package.get("evidence_package")
     decision_raw = package.get("decision_package")
     if not isinstance(evidence_raw, Mapping) or not isinstance(decision_raw, Mapping):
@@ -405,6 +212,19 @@ def _load_sealed_paper_decision(
             "approved_target_hash": decision.content_hash,
             "paper_target_package_path": str(package_path),
             "paper_target_package_sha256": _file_sha256(package_path),
+            "session_id": package.get("session_id"),
+            "session_content_hash": package.get("session_content_hash"),
+            "allocation_id": package.get("allocation_id"),
+            "allocation_content_hash": package.get("allocation_content_hash"),
+            "source_session_manifest": dict(
+                package.get("source_session_manifest") or {}
+            ),
+            "source_sleeve_decisions": dict(
+                package.get("source_sleeve_decisions") or {}
+            ),
+            "source_portfolio_allocation": dict(
+                package.get("source_portfolio_allocation") or {}
+            ),
         }
     )
     return bundle_dir / "signals.json", source, evidence, decision, dict(package)
@@ -581,6 +401,7 @@ def _target_rows_from_weights(
     price_by_symbol: Mapping[str, float],
     source_by_symbol: Mapping[str, str],
     signal_sleeve_by_symbol: Mapping[str, str],
+    sleeve_contributions_by_symbol: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Full target portfolio rows (schema caerus.transition_target.v2).
 
@@ -598,8 +419,7 @@ def _target_rows_from_weights(
         if not symbol or price is None or target_weight is None:
             continue
         normalized_price = normalize_live_pilot_limit_price(float(price))
-        rows.append(
-            {
+        row = {
                 "symbol": symbol,
                 "ticker": symbol,
                 "target_weight": float(target_weight),
@@ -611,7 +431,12 @@ def _target_rows_from_weights(
                 "source_signal_sleeve": signal_sleeve_by_symbol.get(symbol) or None,
                 "source_signal_target_weight": float(target_weight),
             }
-        )
+        contributions = (sleeve_contributions_by_symbol or {}).get(symbol)
+        if isinstance(contributions, list) and contributions:
+            row["sleeve_contributions"] = [
+                dict(item) for item in contributions if isinstance(item, Mapping)
+            ]
+        rows.append(row)
     rows.sort(key=lambda r: (-(float(r["target_weight"])), str(r.get("symbol") or "")))
     return rows
 
@@ -714,6 +539,9 @@ def build_live_pilot_plan(
                 payload_path=payload_path,
                 trade_date=trade_date,
                 approved_sleeve=approved_sleeve,
+            )
+            approved_sleeve = str(
+                sealed_target_package.get("approved_sleeve") or approved_sleeve
             )
         except Exception as exc:
             return _emit_blocked_plan(
@@ -849,6 +677,17 @@ def build_live_pilot_plan(
         _clean_symbol(row.get("ticker")): str(row.get("sleeve") or "").strip()
         for _, row in targets.iterrows()
     }
+    sleeve_contributions_by_symbol: dict[str, list[dict[str, Any]]] = {}
+    if lane_id == "paper" and isinstance(sealed_target_package, Mapping):
+        for row in sealed_target_package.get("target_rows") or []:
+            if not isinstance(row, Mapping):
+                continue
+            symbol = _clean_symbol(row.get("symbol") or row.get("ticker"))
+            contributions = row.get("sleeve_contributions")
+            if symbol and isinstance(contributions, list):
+                sleeve_contributions_by_symbol[symbol] = [
+                    dict(item) for item in contributions if isinstance(item, Mapping)
+                ]
 
     # Live remains fail-closed when any target's layer cannot be resolved. This
     # is classification-only; paper/live continue to share the same target and
@@ -856,10 +695,15 @@ def build_live_pilot_plan(
     from core.sleeve_layers import unresolved_sleeve_labels
 
     unresolved_layers: dict[str, list[str]] = {}
-    for symbol, label in signal_sleeve_by_symbol.items():
-        unresolved = unresolved_sleeve_labels(label)
-        if unresolved:
-            unresolved_layers[symbol] = unresolved
+    # The sealed PAPER allocator target uses governed strategy sleeve IDs and
+    # carries the full per-symbol causal contribution list.  Functional alpha /
+    # protection / diversifier labels are a legacy live-pilot classification and
+    # are not an execution authority for the portfolio allocator.
+    if lane_id != "paper":
+        for symbol, label in signal_sleeve_by_symbol.items():
+            unresolved = unresolved_sleeve_labels(label)
+            if unresolved:
+                unresolved_layers[symbol] = unresolved
     if unresolved_layers:
         return _emit_blocked_plan(
             output_dir=output_dir,
@@ -945,6 +789,7 @@ def build_live_pilot_plan(
         price_by_symbol=price_by_symbol,
         source_by_symbol=source_by_symbol,
         signal_sleeve_by_symbol=signal_sleeve_by_symbol,
+        sleeve_contributions_by_symbol=sleeve_contributions_by_symbol,
     )
     if not target_portfolio:
         return _emit_blocked_plan(
@@ -980,7 +825,7 @@ def build_live_pilot_plan(
         if sleeve_evaluations_path.is_file()
         else ()
     )
-    decision_target_rows = [
+    projected_decision_target_rows = [
         {
             "symbol": _clean_symbol(row.get("ticker")),
             "ticker": _clean_symbol(row.get("ticker")),
@@ -994,11 +839,22 @@ def build_live_pilot_plan(
             raise ValueError("sealed PAPER Evidence and Decision authority is unresolved")
         evidence = sealed_evidence
         decision = sealed_decision
-        if decision_target_rows != list(decision.target_rows):
+        sealed_decision_rows = decision.to_dict()["target_rows"]
+        sealed_projection = [
+            {
+                "symbol": str(row.get("symbol") or ""),
+                "ticker": str(row.get("ticker") or row.get("symbol") or ""),
+                "sleeve": str(row.get("sleeve") or ""),
+                "target_weight": float(row.get("target_weight") or 0.0),
+            }
+            for row in sealed_decision_rows
+        ]
+        if projected_decision_target_rows != sealed_projection:
             raise ValueError("09:35 target projection diverges from sealed PAPER Decision")
         if abs(float(cash_target_weight) - float(decision.target_cash_weight)) > 1e-12:
             raise ValueError("09:35 cash target diverges from sealed PAPER Decision")
     else:
+        decision_target_rows = projected_decision_target_rows
         evidence = build_evidence_package(
             package_id=f"evidence:{authority_stem}",
             trade_date=trade_date,
@@ -1127,6 +983,76 @@ def build_live_pilot_plan(
             ),
             "source_paper_target_package_sha256": (
                 str((decision_source_artifact or {}).get("paper_target_package_sha256") or "")
+                if lane_id == "paper"
+                else None
+            ),
+            "source_session_manifest": (
+                str(
+                    ((decision_source_artifact or {}).get("source_session_manifest") or {}).get(
+                        "path"
+                    )
+                    or ""
+                )
+                if lane_id == "paper"
+                else None
+            ),
+            "source_session_manifest_sha256": (
+                str(
+                    ((decision_source_artifact or {}).get("source_session_manifest") or {}).get(
+                        "sha256"
+                    )
+                    or ""
+                )
+                if lane_id == "paper"
+                else None
+            ),
+            "source_sleeve_decisions": (
+                str(
+                    ((decision_source_artifact or {}).get("source_sleeve_decisions") or {}).get(
+                        "path"
+                    )
+                    or ""
+                )
+                if lane_id == "paper"
+                else None
+            ),
+            "source_sleeve_decisions_sha256": (
+                str(
+                    ((decision_source_artifact or {}).get("source_sleeve_decisions") or {}).get(
+                        "sha256"
+                    )
+                    or ""
+                )
+                if lane_id == "paper"
+                else None
+            ),
+            "source_portfolio_allocation": (
+                str(
+                    ((decision_source_artifact or {}).get("source_portfolio_allocation") or {}).get(
+                        "path"
+                    )
+                    or ""
+                )
+                if lane_id == "paper"
+                else None
+            ),
+            "source_portfolio_allocation_sha256": (
+                str(
+                    ((decision_source_artifact or {}).get("source_portfolio_allocation") or {}).get(
+                        "sha256"
+                    )
+                    or ""
+                )
+                if lane_id == "paper"
+                else None
+            ),
+            "session_id": (
+                (decision_source_artifact or {}).get("session_id")
+                if lane_id == "paper"
+                else None
+            ),
+            "allocation_id": (
+                (decision_source_artifact or {}).get("allocation_id")
                 if lane_id == "paper"
                 else None
             ),

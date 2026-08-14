@@ -982,11 +982,19 @@ def authorize_exact_execution_plan(
     trade_date = str(plan.get("trade_date") or "")
     if str(plan.get("execution_lane") or "").strip().lower() != "paper":
         raise RuntimeError("exact execution authorization is PAPER-lane only")
-    if str(plan.get("approved_sleeve") or "").strip().lower() not in {
-        "orion",
-        "caerus_orion",
-    }:
-        raise RuntimeError("only Orion is capital-eligible for exact PAPER authorization")
+    from core.sleeve_control_plane import load_sleeve_control_registry
+
+    control_registry = load_sleeve_control_registry()
+    capital_ids = sorted(
+        (control_registry.paper_allocation_policy.get("sleeve_risk_budgets") or {}).keys()
+    )
+    expected_approved_sleeve = (
+        capital_ids[0] if len(capital_ids) == 1 else "caerus_paper_portfolio"
+    )
+    if str(plan.get("approved_sleeve") or "").strip().lower() != expected_approved_sleeve:
+        raise RuntimeError(
+            "plan sleeve identity differs from the governed PAPER allocator"
+        )
     if not bool(getattr(broker, "paper", False)):
         raise RuntimeError("exact execution authorization requires a paper broker")
     sleeve_path_raw = str(plan.get("source_sleeve_evaluations") or "").strip()
@@ -1007,19 +1015,25 @@ def authorize_exact_execution_plan(
             "sleeve-evaluation authority semantic validation failed: "
             + ",".join(sleeve_failures[:5])
         )
-    orion_envelopes = [
-        row for row in sleeve_payload.get("envelopes") or []
-        if isinstance(row, Mapping) and row.get("sleeve_id") == "caerus_orion"
-    ]
-    if len(orion_envelopes) != 1:
-        raise RuntimeError("sleeve evaluations lack sole Orion authority evidence")
-    orion = orion_envelopes[0]
-    if (
-        (orion.get("evaluation") or {}).get("status") != "OK"
-        or (orion.get("eligibility") or {}).get("evaluation_usable_for_capital") is not True
-        or (orion.get("opportunity") or {}).get("decision_eligible") is not True
-    ):
-        raise RuntimeError("Orion sleeve evaluation is not capital-decision eligible")
+    envelope_by_id = {
+        str(row.get("sleeve_id") or ""): row
+        for row in sleeve_payload.get("envelopes") or []
+        if isinstance(row, Mapping)
+    }
+    for sleeve_id in capital_ids:
+        envelope = envelope_by_id.get(sleeve_id) or {}
+        if (
+            (envelope.get("evaluation") or {}).get("status") != "OK"
+            or (envelope.get("eligibility") or {}).get(
+                "evaluation_usable_for_capital"
+            )
+            is not True
+            or (envelope.get("opportunity") or {}).get("decision_eligible")
+            is not True
+        ):
+            raise RuntimeError(
+                f"capital sleeve is not Decision-eligible: {sleeve_id}"
+            )
     embedded_execution = plan.get("approved_execution_package")
     authority_paths = plan.get("authority_package_paths")
     if not isinstance(embedded_execution, Mapping) or not isinstance(authority_paths, Mapping):
@@ -1046,6 +1060,9 @@ def authorize_exact_execution_plan(
     if sealed_builder_plan and (not target_package_raw or not target_package_hash):
         raise RuntimeError("sealed precompute target package lineage is required")
     target_package_path: Path | None = None
+    target_package_payload: dict[str, Any] | None = None
+    portfolio_allocation_payload: dict[str, Any] | None = None
+    operating_lineage_paths: dict[str, tuple[Path, str]] = {}
     if target_package_raw or target_package_hash:
         if not target_package_raw or not target_package_hash:
             raise RuntimeError("sealed precompute target package lineage is incomplete")
@@ -1057,6 +1074,58 @@ def authorize_exact_execution_plan(
             or _hash_file(target_package_path) != target_package_hash
         ):
             raise RuntimeError("sealed precompute target package hash is invalid")
+        target_package_payload = json.loads(
+            target_package_path.read_text(encoding="utf-8")
+        )
+        if target_package_payload.get("schema_version") == "caerus.paper_target_package.v2":
+            for label in (
+                "session_manifest",
+                "sleeve_decisions",
+                "portfolio_allocation",
+            ):
+                raw_path = str(plan.get(f"source_{label}") or "").strip()
+                raw_hash = str(
+                    plan.get(f"source_{label}_sha256") or ""
+                ).strip().lower()
+                if not raw_path or not raw_hash:
+                    raise RuntimeError(
+                        f"sealed {label} authority lineage is required"
+                    )
+                resolved_path = Path(raw_path)
+                if not resolved_path.is_absolute():
+                    # A sealed target can be replayed from an isolated repository
+                    # root during certification.  Resolve its declared repo-relative
+                    # lineage from the target package itself, not the authorizer's
+                    # installed source tree.
+                    target_repo_root = target_package_path.resolve().parents[3]
+                    resolved_path = target_repo_root / resolved_path
+                if (
+                    not resolved_path.is_file()
+                    or _hash_file(resolved_path) != raw_hash
+                ):
+                    raise RuntimeError(f"sealed {label} authority hash is invalid")
+                operating_lineage_paths[label] = (resolved_path, raw_hash)
+            portfolio_allocation_payload = json.loads(
+                operating_lineage_paths["portfolio_allocation"][0].read_text(
+                    encoding="utf-8"
+                )
+            )
+            if (
+                str(target_package_payload.get("allocation_id") or "")
+                != str(portfolio_allocation_payload.get("allocation_id") or "")
+                or str(target_package_payload.get("allocation_content_hash") or "")
+                != str(portfolio_allocation_payload.get("content_hash") or "")
+            ):
+                raise RuntimeError(
+                    "sealed target package diverges from portfolio allocation"
+                )
+            if (
+                target_package_payload.get("target_rows")
+                != portfolio_allocation_payload.get("targets")
+            ):
+                raise RuntimeError(
+                    "sealed Decision target diverges from portfolio allocation"
+                )
     governed_risk_controls = _plain(_risk.constraints)
     governed_outer_controls = dict(governed_risk_controls)
     governed_outer_controls.pop("target_attainment_policy", None)
@@ -1337,6 +1406,11 @@ def authorize_exact_execution_plan(
     exact_rows = _protective_day_limit_orders(
         _core_rows_from_frame(executable, plan=plan)
     )
+    for row in exact_rows:
+        if plan.get("session_id"):
+            row["session_id"] = str(plan["session_id"])
+        if plan.get("allocation_id"):
+            row["allocation_id"] = str(plan["allocation_id"])
     if len(exact_rows) > max_orders:
         raise RuntimeError("exact order count exceeds authorized maximum")
     sells = [dict(row) for row in exact_rows if str(row.get("side")).upper() == "SELL"]
@@ -1367,7 +1441,7 @@ def authorize_exact_execution_plan(
     regime_inputs = {
         "account_scope": "PAPER",
         "account_id": broker_account_id_hash,
-        "sleeve_id": "caerus_orion",
+        "sleeve_id": expected_approved_sleeve,
         "authorization_run_id": run_id,
         "trade_date": str(plan.get("trade_date") or ""),
         "recorded_at": effective_authorized_at,
@@ -1499,6 +1573,8 @@ def authorize_exact_execution_plan(
         source_hashes[str(target_package_path)] = target_package_hash
         source_hashes["sealed_precompute_decision_target"] = _decision.content_hash
     source_hashes[str(sleeve_path)] = sleeve_hash
+    for lineage_path, lineage_hash in operating_lineage_paths.values():
+        source_hashes[str(lineage_path)] = lineage_hash
     source_hashes["authorization_market_state"] = str(
         market_state_evidence["content_hash"]
     )
@@ -1523,7 +1599,7 @@ def authorize_exact_execution_plan(
             else (
                 "AUTHORIZED_NO_TRADE"
                 if not exact_rows
-                else "ORION_PAPER_EXACT_ORDERS_AUTHORIZED"
+                else "PAPER_ALLOCATOR_EXACT_ORDERS_AUTHORIZED"
             )
         )
     )
@@ -1533,9 +1609,16 @@ def authorize_exact_execution_plan(
         created_at=effective_authorized_at,
         orchestrator_version=str(env.get("CAERUS_ORCHESTRATOR_VERSION") or "choice2.v1"),
         source_precompute_ids=[
-            str(plan.get("source_precompute_payload") or ""),
-            str(plan.get("source_signals") or ""),
-            str(plan.get("source_sleeve_evaluations") or ""),
+            value
+            for value in (
+                str(plan.get("source_precompute_payload") or ""),
+                str(plan.get("source_signals") or ""),
+                str(plan.get("source_sleeve_evaluations") or ""),
+                str(plan.get("source_session_manifest") or ""),
+                str(plan.get("source_sleeve_decisions") or ""),
+                str(plan.get("source_portfolio_allocation") or ""),
+            )
+            if value
         ],
         source_artifact_hashes=source_hashes,
         market_state_id=market_state_id,
@@ -1548,14 +1631,29 @@ def authorize_exact_execution_plan(
             "risk_package_hash": _risk.content_hash,
         },
         regime_state=regime_record.regime_state(),
-        sleeve_allocations=[
-            {
-                "sleeve_id": "caerus_orion",
-                "capital_eligible": True,
-                "account_scope": "PAPER",
-                "allocation_weight": 1.0,
-            }
-        ],
+        sleeve_allocations=(
+            [
+                {
+                    "sleeve_id": str(row.get("sleeve_id") or ""),
+                    "capital_eligible": True,
+                    "account_scope": "PAPER",
+                    "allocation_weight": float(row.get("risk_budget") or 0.0),
+                    "decision_id": row.get("decision_id"),
+                    "decision_hash": row.get("decision_hash"),
+                    "allocation_id": portfolio_allocation_payload.get("allocation_id"),
+                }
+                for row in portfolio_allocation_payload.get("sleeve_allocations") or []
+            ]
+            if isinstance(portfolio_allocation_payload, Mapping)
+            else [
+                {
+                    "sleeve_id": "caerus_orion",
+                    "capital_eligible": True,
+                    "account_scope": "PAPER",
+                    "allocation_weight": 1.0,
+                }
+            ]
+        ),
         portfolio_nav=decision_nav,
         starting_positions=starting_positions,
         starting_cash=float(cash),
@@ -1612,6 +1710,12 @@ def authorize_exact_execution_plan(
             "authorized_at": seal_time.isoformat(),
             "authorization_reason": authorization_reason,
         },
+        strategy_id=(
+            "caerus_paper_portfolio"
+            if isinstance(portfolio_allocation_payload, Mapping)
+            and len(portfolio_allocation_payload.get("sleeve_allocations") or []) > 1
+            else str(plan.get("approved_sleeve") or "caerus_orion")
+        ),
     )
     result = dict(plan)
     result.update(

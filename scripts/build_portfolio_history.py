@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import re
 from collections import defaultdict
@@ -79,6 +80,17 @@ ATTRIBUTION_FIELDS = [
     "traded_notional",
 ]
 
+SLEEVE_OWNERSHIP_FIELDS = [
+    "as_of",
+    "ticker",
+    "sleeve_id",
+    "quantity",
+    "market_value",
+    "portfolio_weight",
+    "symbol_ownership_weight",
+    "attribution_status",
+]
+
 
 def _read_json(path: Path) -> Any:
     try:
@@ -92,6 +104,18 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
         return []
     with path.open("r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            payload = json.loads(line)
+            if isinstance(payload, dict):
+                rows.append(payload)
+    return rows
 
 
 def _write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, Any]]) -> Path:
@@ -214,6 +238,41 @@ def _build_transactions(repo_root: Path, report_date: str | None) -> tuple[list[
     warnings: list[str] = []
     seen: set[tuple[Any, ...]] = set()
 
+    causal_path = repo_root / "outputs" / "ledger" / "paper" / "causal_fills.jsonl"
+    causal_rows = _read_jsonl(causal_path)
+    if causal_rows:
+        for fill in causal_rows:
+            date = _iso_date(fill.get("trade_date_et") or fill.get("transaction_time_utc"))
+            if report_date and date and date > report_date:
+                continue
+            side = _upper(fill.get("side"))
+            notional = float(fill.get("notional") or 0.0)
+            owners = [
+                str(row.get("sleeve_id") or "")
+                for row in fill.get("decision_contributions") or []
+                if isinstance(row, dict)
+            ]
+            rows.append(
+                {
+                    "date": date or "",
+                    "timestamp": str(fill.get("transaction_time_utc") or ""),
+                    "source": "causal_broker_fill",
+                    "order_id": str(fill.get("broker_order_id") or ""),
+                    "activity_id": str(fill.get("activity_id") or ""),
+                    "ticker": _upper(fill.get("symbol")),
+                    "side": side,
+                    "quantity": float(fill.get("quantity") or 0.0),
+                    "fill_price": float(fill.get("price") or 0.0),
+                    "notional": abs(notional),
+                    "signed_notional": abs(notional) if side == "BUY" else -abs(notional),
+                    "status": "FILLED",
+                    "sleeve": ",".join(sorted(filter(None, owners))),
+                    "reason": str(fill.get("attribution_status") or ""),
+                }
+            )
+        rows.sort(key=lambda row: (row["date"], row["timestamp"], row["ticker"]))
+        return rows, [_relative(repo_root, causal_path)], warnings
+
     for path in _broker_snapshot_paths(repo_root):
         payload = _read_json(path)
         if not isinstance(payload, dict):
@@ -334,6 +393,85 @@ def _build_positions(repo_root: Path, report_date: str | None) -> tuple[list[dic
         )
     rows.sort(key=lambda row: (-(abs(float(row["market_value"])) if row.get("market_value") not in (None, "") else 0.0), row["ticker"]))
     return rows, _relative(repo_root, path), snap_date, []
+
+
+def _build_causal_positions(
+    repo_root: Path,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None, str | None, list[str]]:
+    path = repo_root / "outputs" / "ledger" / "paper" / "valuation_latest.json"
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return [], [], None, None, ["Canonical causal valuation is unavailable."]
+    if (
+        payload.get("schema_version") != "caerus.causal_valuation.v1"
+        or (payload.get("reconciliation") or {}).get("status") != "PASS"
+    ):
+        return [], [], _relative(repo_root, path), None, [
+            "Canonical causal valuation failed schema or reconciliation validation."
+        ]
+    as_of = str(payload.get("as_of") or "").strip()
+    equity = _to_float(payload.get("equity"))
+    if not as_of or equity in (None, 0):
+        return [], [], _relative(repo_root, path), as_of or None, [
+            "Canonical causal valuation lacks a usable as-of or equity."
+        ]
+    positions: list[dict[str, Any]] = []
+    sleeve_rows: list[dict[str, Any]] = []
+    for item in payload.get("positions") or []:
+        if not isinstance(item, dict):
+            continue
+        ticker = _upper(item.get("symbol"))
+        quantity = _to_float(item.get("quantity"))
+        market_value = _to_float(item.get("market_value"))
+        cost_basis = _to_float(item.get("cost_basis"))
+        unrealized = _to_float(item.get("unrealized_pl"))
+        if not ticker:
+            continue
+        positions.append(
+            {
+                "as_of_date": _iso_date(as_of) or "",
+                "source": _relative(repo_root, path),
+                "ticker": ticker,
+                "quantity": quantity,
+                "current_price": _to_float(item.get("current_price")),
+                "market_value": market_value,
+                "cost_basis": cost_basis,
+                "unrealized_pl": unrealized,
+                "unrealized_plpc": (
+                    unrealized / cost_basis
+                    if unrealized is not None and cost_basis not in (None, 0)
+                    else None
+                ),
+                "weight": market_value / equity if market_value is not None else None,
+            }
+        )
+        for owner in item.get("ownership") or []:
+            if not isinstance(owner, dict):
+                continue
+            owner_qty = float(owner.get("quantity") or 0.0)
+            owner_value = float(owner.get("market_value") or 0.0)
+            sleeve_id = str(owner.get("sleeve_id") or "").strip()
+            sleeve_rows.append(
+                {
+                    "as_of": as_of,
+                    "ticker": ticker,
+                    "sleeve_id": sleeve_id,
+                    "quantity": owner_qty,
+                    "market_value": owner_value,
+                    "portfolio_weight": owner_value / equity,
+                    "symbol_ownership_weight": (
+                        owner_qty / quantity if quantity not in (None, 0) else None
+                    ),
+                    "attribution_status": (
+                        "LEGACY_UNATTRIBUTED"
+                        if sleeve_id == "legacy_unattributed"
+                        else "ATTRIBUTED"
+                    ),
+                }
+            )
+    positions.sort(key=lambda row: (-abs(float(row.get("market_value") or 0.0)), row["ticker"]))
+    sleeve_rows.sort(key=lambda row: (row["ticker"], row["sleeve_id"]))
+    return positions, sleeve_rows, _relative(repo_root, path), as_of, []
 
 
 def _build_nav(repo_root: Path, report_date: str | None) -> tuple[list[dict[str, Any]], str | None, list[str]]:
@@ -688,13 +826,24 @@ def build_portfolio_history(
     *,
     report_date: str | None = None,
     append_only: bool = True,
+    require_causal_valuation: bool = False,
 ) -> dict[str, Any]:
     root = Path(repo_root).resolve()
     out_dir = root / "outputs" / "portfolio_history"
     report_date = _iso_date(report_date) if report_date else None
 
     transactions, transaction_sources, tx_warnings = _build_transactions(root, report_date)
-    positions, position_source, positions_as_of, pos_warnings = _build_positions(root, report_date)
+    causal_positions = _build_causal_positions(root)
+    if causal_positions[0] or require_causal_valuation:
+        positions, sleeve_ownership, position_source, positions_as_of, pos_warnings = causal_positions
+    else:
+        positions, position_source, positions_as_of, pos_warnings = _build_positions(root, report_date)
+        sleeve_ownership = []
+        pos_warnings.append(
+            "Legacy position snapshot compatibility path used; scheduled production reporting requires causal valuation."
+        )
+    if require_causal_valuation and (not positions_as_of or pos_warnings):
+        raise RuntimeError("canonical causal valuation is required for production reporting")
     candidate_nav, nav_source, nav_warnings = _build_nav(root, report_date)
     attribution = _build_attribution(positions, transactions)
 
@@ -731,17 +880,39 @@ def build_portfolio_history(
             "Log explicit restatements in outputs/portfolio_history/restatements.json if a correction is intended."
         )
 
+    if positions_as_of and position_source and "valuation_latest.json" in position_source:
+        latest_nav_source_rows = _read_csv_rows(
+            root / "outputs" / "ledger" / "paper" / "daily_nav.csv"
+        )
+        latest_nav_source = latest_nav_source_rows[-1] if latest_nav_source_rows else {}
+        valuation_date = _iso_date(positions_as_of)
+        if (
+            str(latest_nav_source.get("pulled_at_utc") or "") != positions_as_of
+            or _iso_date(latest_nav_source.get("date")) != valuation_date
+            or (report_date and valuation_date != report_date)
+        ):
+            message = "Canonical NAV and causal valuation do not share one reporting as-of."
+            if require_causal_valuation:
+                raise RuntimeError(message)
+            nav_warnings.append(message)
+
     tx_path = _write_csv(out_dir / "transactions.csv", TRANSACTION_FIELDS, transactions)
     pos_path = _write_csv(out_dir / "positions.csv", POSITION_FIELDS, positions)
     nav_path = _write_csv(out_dir / "nav.csv", NAV_FIELDS, nav_rows)
     attr_path = _write_csv(out_dir / "attribution.csv", ATTRIBUTION_FIELDS, attribution)
+    sleeve_path = _write_csv(
+        out_dir / "sleeve_ownership.csv",
+        SLEEVE_OWNERSHIP_FIELDS,
+        sleeve_ownership,
+    )
 
     latest_nav = nav_rows[-1] if nav_rows else {}
     latest_equity = latest_nav.get("equity")
     total_traded = sum(abs(float(tx.get("notional") or 0.0)) for tx in transactions)
     summary = {
         "report_date": report_date or latest_nav.get("date") or positions_as_of,
-        "as_of_date": positions_as_of or latest_nav.get("date"),
+        "as_of": positions_as_of,
+        "as_of_date": _iso_date(positions_as_of) or latest_nav.get("date"),
         "source_priority": [
             "broker_fills",
             "broker_positions",
@@ -753,6 +924,7 @@ def build_portfolio_history(
             "positions": len(positions),
             "nav_rows": len(nav_rows),
             "attribution_rows": len(attribution),
+            "sleeve_ownership_rows": len(sleeve_ownership),
         },
         "latest": {
             "equity": latest_equity,
@@ -770,6 +942,7 @@ def build_portfolio_history(
             "positions": _relative(root, pos_path),
             "nav": _relative(root, nav_path),
             "attribution": _relative(root, attr_path),
+            "sleeve_ownership": _relative(root, sleeve_path),
             "transaction_sources": transaction_sources,
             "position_source": position_source or "",
             "nav_source": nav_source or "",
@@ -780,6 +953,48 @@ def build_portfolio_history(
     summary_path = out_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
+    reporting_sources = {
+        "valuation": root / "outputs" / "ledger" / "paper" / "valuation_latest.json",
+        "ownership": root / "outputs" / "ledger" / "paper" / "ownership_latest.json",
+        "broker_nav": root / "outputs" / "ledger" / "paper" / "daily_nav.csv",
+        "transactions": tx_path,
+        "positions": pos_path,
+        "sleeve_ownership": sleeve_path,
+        "nav": nav_path,
+    }
+    reporting_snapshot = {
+        "schema_version": "caerus.reporting_snapshot.v1",
+        "status": (
+            "PASS"
+            if positions_as_of
+            and position_source
+            and "valuation_latest.json" in position_source
+            and not (tx_warnings + pos_warnings + nav_warnings)
+            else "DEGRADED"
+        ),
+        "as_of": positions_as_of,
+        "report_date": summary["report_date"],
+        "sources": {
+            name: {
+                "path": _relative(root, path),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+            for name, path in reporting_sources.items()
+            if path.is_file()
+        },
+        "warnings": tx_warnings + pos_warnings + nav_warnings,
+    }
+    reporting_snapshot["content_hash"] = hashlib.sha256(
+        json.dumps(
+            reporting_snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+    reporting_snapshot_path = out_dir / "reporting_snapshot.json"
+    reporting_snapshot_path.write_text(
+        json.dumps(reporting_snapshot, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
     checksum_manifest = _write_checksum_manifest(
         out_dir,
         root,
@@ -788,7 +1003,9 @@ def build_portfolio_history(
             "positions": pos_path,
             "nav": nav_path,
             "attribution": attr_path,
+            "sleeve_ownership": sleeve_path,
             "summary": summary_path,
+            "reporting_snapshot": reporting_snapshot_path,
         },
     )
 
@@ -798,6 +1015,8 @@ def build_portfolio_history(
         "positions": positions,
         "nav": nav_rows,
         "attribution": attribution,
+        "sleeve_ownership": sleeve_ownership,
+        "reporting_snapshot": reporting_snapshot,
         "checksum_manifest": checksum_manifest,
     }
 
@@ -810,8 +1029,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build canonical portfolio history artifacts for the dashboard.")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--trade-date", default=None)
+    parser.add_argument("--require-causal-valuation", action="store_true")
     args = parser.parse_args(argv)
-    payload = build_portfolio_history(args.repo_root, report_date=args.trade_date)
+    payload = build_portfolio_history(
+        args.repo_root,
+        report_date=args.trade_date,
+        require_causal_valuation=args.require_causal_valuation,
+    )
     print(json.dumps({"summary": payload["summary"]}, indent=2, sort_keys=True))
     return 0
 

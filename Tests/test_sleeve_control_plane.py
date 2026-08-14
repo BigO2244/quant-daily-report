@@ -167,6 +167,56 @@ def test_dispatcher_emits_terminal_envelope_for_every_non_frozen_sleeve(
     assert envelopes["caerus_polaris"]["universe"]["snapshot_hash"]
 
 
+def test_shadow_benchmark_stale_cache_is_explicitly_unavailable(tmp_path: Path) -> None:
+    snapshot = _runtime_fixture(tmp_path)
+    performance_path = (
+        tmp_path
+        / "outputs"
+        / "shadow_candidates"
+        / "2026-08-12"
+        / "shadow_performance.json"
+    )
+    payload = json.loads(performance_path.read_text(encoding="utf-8"))
+    payload.update({"data_status": "NO_DATA", "data_reason": "PRICE_CACHE_STALE"})
+    _write_json(performance_path, payload)
+
+    result = dispatch_all_sleeves(
+        trade_date="2026-08-12",
+        run_id="stale-benchmark",
+        daily_snapshot=snapshot,
+        runtime_root=tmp_path,
+    )
+
+    benchmark = _by_id(result)["spy_benchmark"]
+    assert benchmark["evaluation"]["status"] == "FAILED"
+    assert "PRICE_CACHE_STALE" in benchmark["reason_codes"]
+
+
+def test_shadow_source_cannot_fall_back_beyond_prior_trading_day(tmp_path: Path) -> None:
+    snapshot = _runtime_fixture(tmp_path)
+    current = (
+        tmp_path
+        / "outputs"
+        / "shadow_candidates"
+        / "2026-08-12"
+        / "caerus_lyra.json"
+    )
+    old = current.parent.parent / "2026-08-10" / current.name
+    old.parent.mkdir(parents=True)
+    current.replace(old)
+
+    result = dispatch_all_sleeves(
+        trade_date="2026-08-12",
+        run_id="old-shadow-source",
+        daily_snapshot=snapshot,
+        runtime_root=tmp_path,
+    )
+
+    lyra = _by_id(result)["caerus_lyra"]
+    assert lyra["evaluation"]["status"] == "BLOCKED"
+    assert "SOURCE_DEPENDENCY_BLOCKED" in lyra["reason_codes"]
+
+
 def test_missing_runner_is_visible_as_blocked_envelope(tmp_path: Path) -> None:
     payload, path = _copy_registry(tmp_path)
     payload["sleeve_control_plane"]["strategy_overrides"]["caerus_phoenix"][
@@ -320,11 +370,43 @@ def test_registry_manifest_parity_corruption_fails_closed(tmp_path: Path) -> Non
         )
 
 
-def test_second_capital_eligible_sleeve_is_registry_corruption(tmp_path: Path) -> None:
+def test_partially_configured_second_capital_sleeve_is_registry_corruption(tmp_path: Path) -> None:
     payload, path = _copy_registry(tmp_path)
     lyra = payload["sleeve_control_plane"]["strategy_overrides"]["caerus_lyra"]
     lyra["capital_eligible"] = True
     _write_json(path, payload)
 
-    with pytest.raises(SleeveRegistryIntegrityError, match="sole capital-eligible"):
+    with pytest.raises(SleeveRegistryIntegrityError, match="eligibility must match"):
         SleeveControlRegistry.from_path(path, enforce_manifest_parity=False)
+
+
+def test_governed_multi_sleeve_capital_configuration_needs_no_code_change(
+    tmp_path: Path,
+) -> None:
+    payload, path = _copy_registry(tmp_path)
+    lyra_override = payload["sleeve_control_plane"]["strategy_overrides"][
+        "caerus_lyra"
+    ]
+    lyra_override.update(
+        {
+            "capital_eligible": True,
+            "execution_eligible": True,
+            "evaluation_only": False,
+        }
+    )
+    lyra_row = next(
+        row for row in payload["strategies"] if row["strategy_id"] == "caerus_lyra"
+    )
+    lyra_row.update({"status": "paper", "execution_impact": "PAPER"})
+    payload["sleeve_control_plane"]["paper_allocation_policy"][
+        "sleeve_risk_budgets"
+    ] = {"caerus_orion": 0.6, "caerus_lyra": 0.4}
+    _write_json(path, payload)
+
+    registry = SleeveControlRegistry.from_path(
+        path, enforce_manifest_parity=False
+    )
+
+    assert {
+        item.sleeve_id for item in registry.definitions if item.capital_eligible
+    } == {"caerus_orion", "caerus_lyra"}

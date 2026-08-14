@@ -21,6 +21,7 @@ echo "[cron_broker_ledger] start $(date -u +%FT%TZ)"
 
 rc=0
 python3 scripts/build_broker_truth_ledger.py --account both || rc=$?
+python3 scripts/build_causal_paper_ledger.py || rc=$?
 python3 scripts/broker_ledger_report.py || rc=$?
 
 # Refresh the intended target-book NAV (read-only artifact builder), then TCA.

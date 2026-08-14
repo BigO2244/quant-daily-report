@@ -2,11 +2,10 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-08-14 (owner-approved single sealed Orion precompute target,
-deterministic whole-share PAPER attainment policy, broker-truth-only actual NAV,
-first-clean comparison epoch, and strict universal-GREEN propagation; live
-remains blocked.)
-Governance Label: PAPER_AUTHORITY_MIGRATION
+Last Updated: 2026-08-14 (owner-approved immutable session, complete sleeve
+decision fan-out, configured portfolio allocator, causal PAPER ownership,
+single-as-of valuation, and strict end-of-day audit; live remains blocked.)
+Governance Label: PORTFOLIO_OPERATING_MODEL_MIGRATION
 Execution Impact: PAPER_ONLY (no live credentials, approvals, or capital enabled)
 
 The Caerus Investment Doctrine at `docs/governance/caerus_investment_doctrine.md`
@@ -52,7 +51,7 @@ editing code or specs.
 
 ---
 
-## 1. Verified state (as of 2026-08-11)
+## 1. Verified state (as of 2026-08-14)
 
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
 - **Pre-triage deployed baseline:** `efd193dc3520e7383ced00e6e0bc6e4f0c431e78`
@@ -61,7 +60,8 @@ editing code or specs.
   forward broker/operational evidence only when explicitly approved; it is not
   production, not dynamic allocation, and not proof of promotion readiness. No
   shorting, no leverage.
-- **Active PAPER strategy:** Caerus Orion (`caerus_orion`), sourced from the
+- **Current PAPER capital allocation:** Caerus Orion (`caerus_orion`) has 100%
+  of the configured sleeve risk budget and is sourced from the
   `h2_rank_decay_exit_h6_top5` shadow snapshot for the current or immediately
   preceding XNYS session, with 5% target cash, a 2.5% hard cash floor after
   whole-share optimization, and a fixed 2-percentage-point target-attainment
@@ -69,14 +69,17 @@ editing code or specs.
   requires a hash-verified approved package for the current session. Outside
   the fixed tolerance, only exact agreement with the deterministic
   nearest-feasible proof can pass.
-- **Single target authority:** the 07:00 precompute selects Orion once from the
-  complete sleeve evaluation, seals Evidence + Decision in
-  `paper_target_package.json`, and binds every downstream projection to one
-  `approved_target_hash`. The 09:35 builder cannot re-select a snapshot or
-  substitute a strategy. Legacy `growth_engine_v4` output is research-only.
-- **Actual NAV authority:** the direct Alpaca PAPER ledger is the sole actual
-  NAV source. Portfolio history derives from it after the nightly broker pull;
-  model/overlay/shadow NAV may be compared but never substituted.
+- **Portfolio authority:** the 07:00 precompute creates one immutable session,
+  one terminal decision for every registered non-frozen sleeve, and one
+  configured risk-budget allocation. Every projection and exact order is bound
+  to session, allocation, decision, and target hashes. The 09:35 builder cannot
+  re-select a snapshot or substitute a strategy. Legacy `growth_engine_v4`
+  output is research-only.
+- **Actual NAV and ownership authority:** the direct Alpaca PAPER ledger is the
+  actual accounting source. Exact plans and broker fills produce causal sleeve
+  ownership; positions and account share one valuation as-of; portfolio history
+  is strict and the daily audit must pass. Model/overlay/shadow NAV may be
+  compared but never substituted.
 - **Execution convergence:** The Trader executes only the approved package,
   mechanically sells first, waits for confirmed PAPER proceeds, and rebuilds
   buys from the proven whole-share target. Execution equality must show the

@@ -77,16 +77,17 @@ fi
 EXIT_CODE=0
 python3 daily_quant_report.py --plan-only --write-precompute-bundle >> "${LOG_FILE}" 2>&1 || EXIT_CODE=$?
 
-# --- Seal the sole PAPER Decision target ---
+# --- Seal the governed PAPER portfolio allocation ---
 # The legacy daily planner remains available as quarantined research evidence,
-# but it cannot publish the canonical signals or execution handoff.  Orion is
-# selected once from sleeve_evaluations.json and every downstream consumer is
-# bound to that immutable Decision hash.
+# but it cannot publish the canonical signals or execution handoff. Every
+# registered sleeve produces a terminal daily decision; the configured capital
+# sleeves are allocated once and every downstream consumer is hash-bound to the
+# resulting immutable account target.
 if [[ ${EXIT_CODE} -eq 0 ]]; then
     if ! python3 -m scripts.seal_paper_precompute_target \
         --trade-date "${REPORT_DATE}" \
         --bundle-dir "${REPO_ROOT}/outputs/precompute/${REPORT_DATE}" >> "${LOG_FILE}" 2>&1; then
-        echo "ERROR: unable to seal the Orion PAPER target; precompute is non-executable" | tee -a "${LOG_FILE}"
+        echo "ERROR: unable to seal the PAPER portfolio allocation; precompute is non-executable" | tee -a "${LOG_FILE}"
         EXIT_CODE=1
     fi
 fi

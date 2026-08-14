@@ -52,8 +52,19 @@ def validate_lane_strategy_identity(
         if (
             approved == governed
             and target == governed
-            and mapping == "DIRECT_APPROVED_PACKAGE"
+            and mapping in {
+                "DIRECT_APPROVED_PACKAGE",
+                "DIRECT_ALLOCATOR_PACKAGE",
+            }
             and tracks is True
+            and (
+                mapping != "DIRECT_ALLOCATOR_PACKAGE"
+                or (
+                    governed == "caerus_paper_portfolio"
+                    and isinstance(identity.get("paper_capital_sleeves"), list)
+                    and len(identity.get("paper_capital_sleeves") or []) > 1
+                )
+            )
         ):
             result.update(
                 {

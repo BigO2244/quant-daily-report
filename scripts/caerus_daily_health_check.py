@@ -224,6 +224,45 @@ def _check_shadow_artifacts(root: Path) -> CheckResult:
     return CheckResult("Shadow artifacts", status, sorted(set(reason_codes)), summary, [str(path), str(json_path)])
 
 
+def _check_shadow_workflow(root: Path, trade_date: str) -> CheckResult:
+    path = root / "outputs" / "workflow" / trade_date / "shadow.json"
+    payload, error = _read_json(path)
+    if error:
+        return CheckResult(
+            "Shadow daily decision",
+            "YELLOW",
+            [f"SHADOW_WORKFLOW_{error}"],
+            "Current-date shadow workflow status is unavailable.",
+            [str(path)],
+        )
+    assert payload is not None
+    status = _norm_text(payload.get("status")).upper()
+    reason = _norm_text(payload.get("notes")).upper()
+    if _artifact_date(payload) != trade_date:
+        return CheckResult(
+            "Shadow daily decision",
+            "RED",
+            ["SHADOW_WORKFLOW_DATE_MISMATCH"],
+            "Shadow workflow status is not for the requested date.",
+            [str(path)],
+        )
+    if status == "OK":
+        return CheckResult(
+            "Shadow daily decision",
+            "GREEN",
+            [],
+            "Current-date shadow generation and publication are complete.",
+            [str(path)],
+        )
+    return CheckResult(
+        "Shadow daily decision",
+        "YELLOW" if status in {"UNAVAILABLE", "PARTIAL"} else "RED",
+        [reason or f"SHADOW_WORKFLOW_{status or 'UNKNOWN'}"],
+        f"Current-date shadow decision is {status or 'UNKNOWN'}; no green status is published.",
+        [str(path)],
+    )
+
+
 def _check_dashboard_refresh_health(root: Path, trade_date: str) -> CheckResult:
     path = (
         root
@@ -1102,6 +1141,7 @@ def build_health_check(root: Path = Path("."), trade_date: str | None = None) ->
         _check_vix_regime(root, resolved_trade_date),
         _check_dashboard_refresh_health(root, resolved_trade_date),
         _check_operational_drag(root, resolved_trade_date),
+        _check_shadow_workflow(root, resolved_trade_date),
         _check_shadow_artifacts(root),
         _check_shadow_performance(root),
         _check_reconciliation(root),

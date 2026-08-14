@@ -151,10 +151,13 @@ export CAERUS_LIVE_PILOT_CAPITAL_CAP="10000"
 # staging scale (it only ever TIGHTENS; unset on the live lane -> live sizes
 # against real equity, unchanged).
 export CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP}"
+# Transitional input hint for the current one-capital-sleeve configuration. The
+# plan builder replaces it with ``caerus_paper_portfolio`` automatically when
+# the sealed allocator package contains more than one capital sleeve.
 export CAERUS_LIVE_PILOT_SLEEVE_ID="${CAERUS_LIVE_PILOT_SLEEVE_ID:-caerus_orion}"
-# Empty by design. The governed PAPER lane consumes only the current or
-# immediately preceding XNYS Orion snapshot; any explicitly supplied recovery
-# policy is fail-closed by the plan builder as downstream target substitution.
+# Empty by design. The governed PAPER lane consumes only the sealed allocator
+# package; any explicitly supplied recovery policy is fail-closed as downstream
+# target substitution.
 export CAERUS_PAPER_RECOVERY_POLICY="${CAERUS_PAPER_RECOVERY_POLICY:-}"
 # Sells run through the SAME fail-closed gates as live (master flag + whitelist);
 # paper arms them with the wildcard so the full buy/sell/hold model is exercised.

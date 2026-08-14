@@ -196,11 +196,11 @@ def _sleeve_evaluation_failures(
             ):
                 failures.append(f"{item_prefix}:eligibility_mismatch")
             if (
-                sleeve_id != control.paper_capital_authority
+                not definition.capital_eligible
                 and eligibility.get("evaluation_usable_for_capital") is not False
             ):
                 failures.append(f"{item_prefix}:unauthorized_capital_use")
-            if sleeve_id == control.paper_capital_authority:
+            if definition.capital_eligible:
                 opportunity = envelope.get("opportunity")
                 source_artifacts = (
                     (envelope.get("provenance") or {}).get("source_artifacts")
@@ -232,7 +232,9 @@ def _sleeve_evaluation_failures(
             failures.append(f"{prefix}:summary_expected_count_mismatch")
         if summary.get("envelope_count") != len(envelopes):
             failures.append(f"{prefix}:summary_envelope_count_mismatch")
-        expected_capital = [control.paper_capital_authority]
+        expected_capital = [
+            item.sleeve_id for item in expected_definitions if item.capital_eligible
+        ]
         if summary.get("capital_eligible_sleeve_ids") != expected_capital:
             failures.append(f"{prefix}:capital_authority_mismatch")
         if summary.get("execution_eligible_sleeve_ids") != expected_capital:
@@ -307,11 +309,18 @@ def validate_precompute_bundle(
     contract_payload, _contract_error = _read_json(bundle_dir / "contract.json")
     sealed_contract = bool(
         isinstance(contract_payload, dict)
-        and int(contract_payload.get("schema_version") or 0) == 2
+        and int(contract_payload.get("schema_version") or 0) in {2, 3}
     )
     effective_required_files = tuple(required_files)
-    if sealed_contract and "paper_target_package.json" not in effective_required_files:
-        effective_required_files = (*effective_required_files, "paper_target_package.json")
+    if sealed_contract:
+        declared_files = contract_payload.get("files") or {}
+        declared_names = tuple(
+            str(name) for name in declared_files.values() if str(name).strip()
+        )
+        if declared_names:
+            effective_required_files = tuple(dict.fromkeys(declared_names))
+        elif "paper_target_package.json" not in effective_required_files:
+            effective_required_files = (*effective_required_files, "paper_target_package.json")
     present: list[str] = []
     missing: list[str] = []
     invalid_json: list[dict[str, str]] = []

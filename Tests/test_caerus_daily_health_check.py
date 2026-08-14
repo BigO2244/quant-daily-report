@@ -98,6 +98,14 @@ def _write_base_artifacts(root: Path, *, reconciliation: dict | None = None, vix
         },
     )
     _write_json(
+        root / "outputs" / "workflow" / TRADE_DATE / "shadow.json",
+        {
+            "trade_date": TRADE_DATE,
+            "status": "OK",
+            "notes": "current-date shadow complete",
+        },
+    )
+    _write_json(
         root / "outputs" / "vix_regime" / "regime_current.json",
         vix or {"date": TRADE_DATE, "vix": 21.5, "regime": "ELEVATED", "source": "fixture", "fallback_used": False},
     )
@@ -206,6 +214,25 @@ def _with_content_hash(payload: dict) -> dict:
         ).encode("utf-8")
     ).hexdigest()
     return hashed
+
+
+def test_shadow_workflow_unavailable_prevents_green_health(tmp_path: Path) -> None:
+    _write_base_artifacts(tmp_path)
+    _write_json(
+        tmp_path / "outputs" / "workflow" / TRADE_DATE / "shadow.json",
+        {
+            "trade_date": TRADE_DATE,
+            "status": "UNAVAILABLE",
+            "notes": "PRICE_CACHE_STALE",
+        },
+    )
+    payload = build_health_check(root=tmp_path, trade_date=TRADE_DATE)
+    check = next(
+        row for row in payload["checks"] if row["name"] == "Shadow daily decision"
+    )
+    assert check["status"] == "YELLOW"
+    assert "PRICE_CACHE_STALE" in check["reason_codes"]
+    assert payload["overall_status"] != "GREEN"
 
 
 def _write_choice2_artifacts(root: Path) -> None:
