@@ -742,11 +742,11 @@ def discover_plan_snapshots(repo_root: Path | str, trade_date: str) -> list[Plan
             if snapshot is not None and not any(existing.date == snapshot.date for existing in snapshots):
                 snapshots.append(snapshot)
     # A sealed exact plan is the only execution intent for its run.  Once an
-    # exact-v3 no-trade has independently reconciled, the same-day precompute
+    # exact-v3 outcome has independently reconciled, the same-day precompute
     # target book is lineage, not a set of unsubmitted orders.  Replace only
     # that date; historical target snapshots retain their existing semantics.
-    exact_no_trade = _validated_exact_no_trade_evidence(repo, trade_date)
-    exact_snapshot = _plan_from_exact_no_trade(exact_no_trade) if exact_no_trade else None
+    exact_evidence = _validated_exact_execution_evidence(repo, trade_date)
+    exact_snapshot = _plan_from_exact_execution(exact_evidence) if exact_evidence else None
     if exact_snapshot is not None:
         snapshots = [snapshot for snapshot in snapshots if snapshot.date != trade_date]
         snapshots.append(exact_snapshot)
@@ -790,21 +790,50 @@ def _exact_execution_payload_candidates(repo: Path, trade_date: str) -> list[Pat
     return []
 
 
-def _zero_order_artifact(path: Path) -> bool:
-    payload = _read_json(path)
-    return isinstance(payload, dict) and payload.get("orders") == []
+def _order_identity(row: Any) -> tuple[str, str, str, float] | None:
+    if not isinstance(row, dict):
+        return None
+    client_order_id = str(row.get("client_order_id") or "").strip()
+    symbol = str(row.get("symbol") or row.get("ticker") or "").strip().upper()
+    side = str(row.get("side") or "").strip().upper()
+    quantity = _safe_float(
+        row.get("quantity")
+        if row.get("quantity") is not None
+        else row.get("qty", row.get("shares"))
+    )
+    if not client_order_id or not symbol or side not in {"BUY", "SELL"} or quantity is None:
+        return None
+    return client_order_id, symbol, side, float(quantity)
 
 
-def _validated_exact_no_trade_evidence(
+def _filled_order_economics(row: Any) -> tuple[float, float] | None:
+    identity = _order_identity(row)
+    if identity is None or not isinstance(row, dict):
+        return None
+    filled_quantity = _safe_float(row.get("filled_qty"))
+    filled_price = _safe_float(row.get("filled_avg_price"))
+    if (
+        str(row.get("status") or "").upper().split(".")[-1] != "FILLED"
+        or filled_quantity is None
+        or abs(filled_quantity - identity[3]) > 1e-8
+        or filled_price is None
+        or filled_price <= 0.0
+    ):
+        return None
+    return float(filled_quantity), float(filled_price)
+
+
+def _validated_exact_execution_evidence(
     repo: Path,
     trade_date: str,
 ) -> dict[str, Any] | None:
-    """Return only cryptographically sealed, economically clean no-trade truth.
+    """Return only cryptographically sealed, economically clean execution truth.
 
     This deliberately does not trust a terminal label alone.  The exact plan
-    must re-validate, all requested/submitted counts and persisted order lists
-    must be zero, and the content-hashed canonical economic artifact must be
-    RECONCILED.  Any ambiguity falls back to the existing fail-closed analysis.
+    must re-validate, persisted order identities must match it, all submitted
+    orders must be filled, and the content-hashed canonical economic artifact
+    must be RECONCILED.  A no-trade remains valid only when every count and
+    order list is zero.  Any ambiguity falls back to fail-closed analysis.
     """
 
     from authority.exact_plan import exact_execution_plan_from_dict
@@ -818,21 +847,34 @@ def _validated_exact_no_trade_evidence(
             continue
         if str(payload.get("execution_source") or "") != "exact_execution_plan_v3":
             continue
-        if str(payload.get("terminal_status") or "").upper() != "AUTHORIZED_NO_TRADE":
+        terminal_status = str(payload.get("terminal_status") or "").upper()
+        terminal_outcome = str(payload.get("terminal_outcome") or "").upper()
+        no_trade = (
+            terminal_status == "AUTHORIZED_NO_TRADE"
+            and terminal_outcome == "AUTHORIZED_NO_TRADE"
+        )
+        submitted_success = (
+            terminal_status == "SUBMITTED"
+            and terminal_outcome == "RECONCILED_SUCCESS"
+            and str(payload.get("reconciliation_status") or "").upper() == "CLEAN"
+        )
+        if not no_trade and not submitted_success:
             continue
-        if str(payload.get("terminal_outcome") or "").upper() != "AUTHORIZED_NO_TRADE":
-            continue
-        count_values = [
-            _safe_float(payload.get(key))
+        raw_counts = {
+            key: _safe_float(payload.get(key))
             for key in (
                 "orders_requested_count",
                 "orders_submitted_count",
                 "orders_filled_count",
                 "orders_suppressed_count",
             )
-        ]
-        if any(value is None or value != 0.0 for value in count_values):
+        }
+        if any(
+            value is None or value < 0 or not float(value).is_integer()
+            for value in raw_counts.values()
+        ):
             continue
+        count_values = {key: int(value) for key, value in raw_counts.items() if value is not None}
         package = payload.get("exact_execution_plan")
         if not isinstance(package, dict):
             continue
@@ -845,15 +887,47 @@ def _validated_exact_no_trade_evidence(
             )
         except (TypeError, ValueError, OverflowError):
             continue
-        if exact.trade_date != trade_date or exact.orders:
+        if exact.trade_date != trade_date:
             continue
         if str(payload.get("exact_execution_plan_hash") or "") != exact.content_hash:
             continue
         run_root = payload_path.parent
-        intended_path = run_root / "live_pilot_orders_intended.json"
-        submitted_path = run_root / "live_pilot_orders_submitted.json"
-        if not _zero_order_artifact(intended_path) or not _zero_order_artifact(submitted_path):
+        if str(payload.get("run_id") or "") != run_root.name:
             continue
+        intended_payload = _read_json(run_root / "live_pilot_orders_intended.json")
+        submitted_payload = _read_json(run_root / "live_pilot_orders_submitted.json")
+        intended_rows = intended_payload.get("orders") if isinstance(intended_payload, dict) else None
+        submitted_rows = submitted_payload.get("orders") if isinstance(submitted_payload, dict) else None
+        if not isinstance(intended_rows, list) or not isinstance(submitted_rows, list):
+            continue
+        exact_identities = {_order_identity(dict(row)) for row in exact.orders}
+        intended_identities = {_order_identity(row) for row in intended_rows}
+        submitted_identities = {_order_identity(row) for row in submitted_rows}
+        if None in exact_identities or None in intended_identities or None in submitted_identities:
+            continue
+        order_count = len(exact.orders)
+        if no_trade:
+            if exact.orders or intended_rows or submitted_rows:
+                continue
+            if any(value != 0 for value in count_values.values()):
+                continue
+        else:
+            if count_values != {
+                "orders_requested_count": order_count,
+                "orders_submitted_count": order_count,
+                "orders_filled_count": order_count,
+                "orders_suppressed_count": 0,
+            }:
+                continue
+            if (
+                len(intended_rows) != order_count
+                or len(submitted_rows) != order_count
+                or exact_identities != intended_identities
+                or exact_identities != submitted_identities
+            ):
+                continue
+            if any(_filled_order_economics(row) is None for row in submitted_rows):
+                continue
         economic_path = run_root / "canonical_economic_verification.json"
         economic = _read_json(economic_path)
         if not economic or _payload_date(economic) != trade_date:
@@ -900,11 +974,29 @@ def _validated_exact_no_trade_evidence(
         cash = economic_recon.get("cash") or {}
         expected_cash = _safe_float(cash.get("expected"))
         actual_cash = _safe_float(cash.get("actual"))
+        if expected_cash is None or actual_cash is None:
+            continue
+        if no_trade:
+            fill_adjusted_cash = float(exact.expected_posttrade_cash)
+        else:
+            fill_adjusted_cash = float(exact.starting_cash)
+            for row in submitted_rows:
+                economics = _filled_order_economics(row)
+                if economics is None:
+                    break
+                quantity, price = economics
+                notional = quantity * price
+                if str(row.get("side") or "").upper() == "SELL":
+                    fill_adjusted_cash += notional
+                else:
+                    fill_adjusted_cash -= notional
+            fees = _safe_float((economic_recon.get("fills") or {}).get("fees")) or 0.0
+            if fees < 0.0:
+                continue
+            fill_adjusted_cash -= fees
         if (
-            expected_cash is None
-            or actual_cash is None
-            or abs(expected_cash - float(exact.expected_posttrade_cash)) > cash_tolerance
-            or abs(actual_cash - float(exact.expected_posttrade_cash)) > cash_tolerance
+            abs(expected_cash - fill_adjusted_cash) > cash_tolerance
+            or abs(actual_cash - fill_adjusted_cash) > cash_tolerance
         ):
             continue
         return {
@@ -914,11 +1006,22 @@ def _validated_exact_no_trade_evidence(
             "exact_plan": exact,
             "economic_path": economic_path,
             "economic": economic,
+            "no_trade": no_trade,
         }
     return None
 
 
-def _plan_from_exact_no_trade(evidence: dict[str, Any]) -> PlanSnapshot | None:
+def _validated_exact_no_trade_evidence(
+    repo: Path,
+    trade_date: str,
+) -> dict[str, Any] | None:
+    """Backward-compatible helper for callers that specifically require no-trade."""
+
+    evidence = _validated_exact_execution_evidence(repo, trade_date)
+    return evidence if evidence is not None and evidence.get("no_trade") is True else None
+
+
+def _plan_from_exact_execution(evidence: dict[str, Any]) -> PlanSnapshot | None:
     exact = evidence.get("exact_plan")
     economic = evidence.get("economic") or {}
     run_root = Path(evidence["run_root"])
@@ -945,7 +1048,11 @@ def _plan_from_exact_no_trade(evidence: dict[str, Any]) -> PlanSnapshot | None:
     )
     econ = economic.get("economic_reconciliation") or {}
     nav = _safe_float((econ.get("nav") or {}).get("broker_equity")) or _safe_float(exact.portfolio_nav)
-    cash_weight = (float(exact.expected_posttrade_cash) / nav) if nav and nav > 0 else 0.0
+    cash = _safe_float((econ.get("cash") or {}).get("actual"))
+    if cash is None:
+        return None
+    cash_weight = (cash / nav) if nav and nav > 0 else 0.0
+    no_trade = evidence.get("no_trade") is True
     return PlanSnapshot(
         date=exact.trade_date,
         strategy_id=str(exact.strategy_id),
@@ -953,9 +1060,25 @@ def _plan_from_exact_no_trade(evidence: dict[str, Any]) -> PlanSnapshot | None:
         cash_weight=max(0.0, min(1.0, cash_weight)),
         positions=positions,
         source_path=Path(evidence["payload_path"]),
-        plan_source="exact_authorized_no_trade_posttrade_state",
-        reason_codes=("plan_source_exact_authorized_no_trade",),
+        plan_source=(
+            "exact_authorized_no_trade_posttrade_state"
+            if no_trade
+            else "exact_authorized_reconciled_posttrade_state"
+        ),
+        reason_codes=(
+            "plan_source_exact_authorized_no_trade"
+            if no_trade
+            else "plan_source_exact_reconciled_execution",
+        ),
     )
+
+
+def _plan_from_exact_no_trade(evidence: dict[str, Any]) -> PlanSnapshot | None:
+    """Backward-compatible wrapper for the original no-trade call surface."""
+
+    if evidence.get("no_trade") is not True:
+        return None
+    return _plan_from_exact_execution(evidence)
 
 
 def _strategy_from_payload(payload: dict[str, Any] | None) -> str:
@@ -1194,7 +1317,10 @@ def build_intended_nav(
                 )
                 carry_equity = _safe_float(carry_row.get("intended_equity_value"))
             active_plan = latest_plan
-            if latest_plan.plan_source == "exact_authorized_no_trade_posttrade_state":
+            if latest_plan.plan_source in {
+                "exact_authorized_no_trade_posttrade_state",
+                "exact_authorized_reconciled_posttrade_state",
+            }:
                 # The sealed run is an observed, broker-bound state at this
                 # execution window.  Do not size it from a hypothetical prior
                 # target-book NAV carried into the day.
@@ -1638,9 +1764,9 @@ def _run_scoped_paths(repo: Path, suffix: str) -> list[Path]:
 
 def _actual_json_candidates(repo: Path, trade_date: str) -> list[Path]:
     candidates: list[Path] = []
-    exact_no_trade = _validated_exact_no_trade_evidence(repo, trade_date)
-    if exact_no_trade is not None:
-        candidates.append(Path(exact_no_trade["run_root"]) / "live_pilot_broker_snapshot_post.json")
+    exact_evidence = _validated_exact_execution_evidence(repo, trade_date)
+    if exact_evidence is not None:
+        candidates.append(Path(exact_evidence["run_root"]) / "live_pilot_broker_snapshot_post.json")
     pointer_path = repo / "outputs" / "workflow" / trade_date / "execution.json"
     if pointer_path.exists():
         pointer = _read_json(pointer_path)
@@ -2388,12 +2514,12 @@ def _select_current_reconciliation(
     trade_date: str,
 ) -> tuple[Path | None, dict[str, Any] | None, dict[str, Any]]:
     diagnostics = _new_diagnostics()
-    exact_no_trade = _validated_exact_no_trade_evidence(repo, trade_date)
-    if exact_no_trade is not None:
-        path = Path(exact_no_trade["economic_path"])
+    exact_evidence = _validated_exact_execution_evidence(repo, trade_date)
+    if exact_evidence is not None:
+        path = Path(exact_evidence["economic_path"])
         _diag_add_candidate(diagnostics, path)
         _diag_add_selected(diagnostics, path)
-        return path, dict(exact_no_trade["economic"]), diagnostics
+        return path, dict(exact_evidence["economic"]), diagnostics
     for path in _current_reconciliation_candidates(repo, trade_date):
         _diag_add_candidate(diagnostics, path)
         payload = _read_json(path)
@@ -2414,7 +2540,7 @@ def _select_current_reconciliation(
 
 
 def _has_execution_evidence(repo: Path, trade_date: str) -> bool:
-    if _validated_exact_no_trade_evidence(repo, trade_date) is not None:
+    if _validated_exact_execution_evidence(repo, trade_date) is not None:
         return True
     pointer_path = repo / "outputs" / "workflow" / trade_date / "execution.json"
     if pointer_path.exists():

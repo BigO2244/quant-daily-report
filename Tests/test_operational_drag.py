@@ -1013,6 +1013,118 @@ def _write_canonical_authorized_no_trade_run(root: Path, *, tamper_hash: bool = 
     return run_root
 
 
+def _write_canonical_reconciled_submitted_run(root: Path, *, tamper_order: bool = False) -> Path:
+    from Tests.test_exact_execution_choice2 import _plan
+
+    run_root = (
+        root
+        / "outputs"
+        / "paper_lane"
+        / "runs"
+        / f"{EXACT_NO_TRADE_DATE}_{EXACT_NO_TRADE_DATE}T0935ET_paper_cron_submit"
+    )
+    exact = _plan()
+    intended_orders = [dict(row) for row in exact.orders]
+    submitted_orders = [
+        {
+            **dict(row),
+            "status": "filled",
+            "filled_qty": str(row["quantity"]),
+            "filled_avg_price": str(row["limit_price"]),
+        }
+        for row in exact.orders
+    ]
+    if tamper_order:
+        submitted_orders[0]["quantity"] = 2.0
+    _write_json(
+        run_root / "execution_payload.json",
+        {
+            "schema_version": "caerus.execution_payload.v2",
+            "trade_date": EXACT_NO_TRADE_DATE,
+            "run_id": run_root.name,
+            "execution_source": "exact_execution_plan_v3",
+            "terminal_status": "SUBMITTED",
+            "terminal_outcome": "RECONCILED_SUCCESS",
+            "reconciliation_status": "CLEAN",
+            "orders_requested_count": len(exact.orders),
+            "orders_submitted_count": len(exact.orders),
+            "orders_filled_count": len(exact.orders),
+            "orders_suppressed_count": 0,
+            "exact_execution_plan_hash": exact.content_hash,
+            "exact_execution_plan": exact.to_dict(),
+        },
+    )
+    _write_json(run_root / "live_pilot_orders_intended.json", {"orders": intended_orders})
+    _write_json(run_root / "live_pilot_orders_submitted.json", {"orders": submitted_orders})
+    economic = {
+        "schema_version": "caerus.canonical_economic_verification.v1",
+        "trade_date": EXACT_NO_TRADE_DATE,
+        "status": "RECONCILED",
+        "reconciled": True,
+        "economic_reconciliation": {
+            "status": "RECONCILED",
+            "reconciled": True,
+            "positions": {
+                "expected": {"AAPL": 2.0},
+                "actual": {"AAPL": 2.0},
+                "quantity_deltas": {},
+            },
+            "cash": {"expected": 900.0, "actual": 900.0, "delta": 0.0},
+            "tolerance": {"quantity_abs": 1e-8, "cash_abs": 0.01},
+            "nav": {"broker_equity": 1000.0},
+        },
+        "sleeve_attribution_reconciliation": {"status": "RECONCILED", "reconciled": True},
+    }
+    economic["content_hash"] = hashlib.sha256(
+        json.dumps(
+            economic,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    _write_json(run_root / "canonical_economic_verification.json", economic)
+    _write_json(
+        run_root / "live_pilot_broker_snapshot_post.json",
+        {
+            "trade_date": EXACT_NO_TRADE_DATE,
+            "account": {"equity": "1000", "portfolio_value": "1000", "cash": "900"},
+            "positions": [
+                {"symbol": "AAPL", "qty": "2", "market_value": "100", "current_price": "50"}
+            ],
+        },
+    )
+    # This legacy-shaped surface is deliberately not independently clean.  The
+    # canonical economic artifact above is the hash-verified authority.
+    _write_json(
+        run_root / "live_pilot_reconciliation.json",
+        {
+            "trade_date": EXACT_NO_TRADE_DATE,
+            "status": "SUBMITTED",
+            "state": "SUBMITTED",
+            "terminal_outcome": "RECONCILED_SUCCESS",
+            "intended_count": len(exact.orders),
+            "submitted_count": len(exact.orders),
+            "filled_count": len(exact.orders),
+            "rejected_count": 0,
+        },
+    )
+    _write_json(
+        root / "outputs" / "workflow" / EXACT_NO_TRADE_DATE / "execution.json",
+        {
+            "trade_date": EXACT_NO_TRADE_DATE,
+            "run_id": run_root.name,
+            "run_root": str(run_root),
+            "status": "running",
+            "substatus": "paper_posttrade_verification_started",
+            "stage": "execution",
+            "mode": "PAPER",
+        },
+    )
+    return run_root
+
+
 def test_canonical_authorized_no_trade_is_clean_execution_evidence(tmp_path: Path) -> None:
     root = _fixture_repo(tmp_path)
     _write_json(
@@ -1037,6 +1149,76 @@ def test_canonical_authorized_no_trade_is_clean_execution_evidence(tmp_path: Pat
         analysis["reconciliation_drift_diagnostic"]["reconciliation_source"]
         == str(run_root / "canonical_economic_verification.json")
     )
+
+
+def test_canonical_reconciled_fill_replaces_precompute_intent_and_remains_clean(
+    tmp_path: Path,
+) -> None:
+    root = _fixture_repo(tmp_path)
+    _write_json(
+        root / "outputs" / "precompute" / EXACT_NO_TRADE_DATE / "daily_snapshot.json",
+        {
+            "asof": f"{EXACT_NO_TRADE_DATE} 00:00:00",
+            "equity": 1000.0,
+            "target_cash_weight": 0.10,
+            "orders": [
+                {"ticker": "AAPL", "target_weight": 0.50, "execution_price": 50.0},
+                {"ticker": "MSFT", "target_weight": 0.40, "execution_price": 100.0},
+            ],
+        },
+    )
+    _write_json(
+        root / "outputs" / "precompute" / EXACT_NO_TRADE_DATE / "planned_execution_payload.json",
+        {
+            "trade_date": EXACT_NO_TRADE_DATE,
+            "buys": 2,
+            "execution_eligible_trades_count": 2,
+            "submitted_count": 0,
+        },
+    )
+    _write_csv(
+        root / "outputs" / "prices" / "price_history.csv",
+        [{"date": EXACT_NO_TRADE_DATE, "symbol": "SPY", "close": 100.0}],
+    )
+    run_root = _write_canonical_reconciled_submitted_run(root)
+
+    analysis = build_operational_drag_analysis(
+        trade_date=EXACT_NO_TRADE_DATE, repo_root=root, write=False
+    )
+
+    current = analysis["current_date_reason_codes"]
+    assert "planned_buys_without_submissions" not in current
+    assert "reconciliation_not_clean" not in current
+    assert "plan_source_exact_reconciled_execution" in current
+    assert analysis["decision_grade"] is True
+    assert (
+        analysis["reconciliation_drift_diagnostic"]["reconciliation_source"]
+        == str(run_root / "canonical_economic_verification.json")
+    )
+
+
+def test_tampered_submitted_order_does_not_receive_clean_exact_execution_status(
+    tmp_path: Path,
+) -> None:
+    root = _fixture_repo(tmp_path)
+    _write_json(
+        root / "outputs" / "precompute" / EXACT_NO_TRADE_DATE / "planned_execution_payload.json",
+        {
+            "trade_date": EXACT_NO_TRADE_DATE,
+            "buys": 1,
+            "execution_eligible_trades_count": 1,
+            "submitted_count": 0,
+        },
+    )
+    _write_canonical_reconciled_submitted_run(root, tamper_order=True)
+
+    analysis = build_operational_drag_analysis(
+        trade_date=EXACT_NO_TRADE_DATE, repo_root=root, write=False
+    )
+
+    assert "planned_buys_without_submissions" in analysis["current_date_reason_codes"]
+    assert "reconciliation_not_clean" in analysis["current_date_reason_codes"]
+    assert analysis["decision_grade"] is False
 
 
 def test_current_pointer_cannot_fall_back_to_older_clean_no_trade(tmp_path: Path) -> None:
