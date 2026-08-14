@@ -88,8 +88,12 @@ Benchmark:
 - SPY
 
 Execution:
-- Decision consumes the same-day Orion shadow snapshot and is the sole author
-  of PAPER targets; Risk may constrain but may not invent alpha
+- Precompute selects the decision-eligible Orion snapshot from the current or
+  immediately preceding XNYS session exactly once and seals one Decision hash
+- The legacy daily allocator is research evidence only and is quarantined below
+  the dated precompute bundle; it cannot publish canonical PAPER signals/trades
+- The 09:35 builder reuses the sealed Evidence + Decision packages; Risk may
+  constrain but may not invent alpha
 - Trader consumes only the hash-verified approved execution package
 - Auditor is read-only and preserves Decision → Risk → Execution lineage
 - Live capital remains blocked; the PAPER promotion does not arm FR-104 or
@@ -184,6 +188,8 @@ Five phases run on the VM weekdays. Install with `crontab scripts/crontab.txt`.
 | 9:35 AM | 2 — Order execution | `scripts/cron_execute.sh` | Alpaca paper equity orders + gated protective-put options |
 | 10:00 AM | 3 — Confirmation + email | `scripts/cron_confirm.sh` | Email report |
 | 6:30 PM | Post-close price hydration | `python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts --strict` | `outputs/price_hydration/YYYY-MM-DD/status.json` + refreshed Shadow scorecard artifacts |
+| 7:15 PM | Broker-truth ledger | `scripts/cron_broker_ledger.sh` | Sole actual-PAPER NAV/accounting source under `outputs/ledger/paper/` |
+| 7:45 PM | Canonical portfolio history | `scripts/build_portfolio_history.py` + freshness escalation | Broker-ledger-derived append-only `outputs/portfolio_history/nav.csv` |
 | 9:00 PM | Shadow CIO report | `python3 -m scripts.send_shadow_cio_report` | Daily Shadow scorecard/reporting email |
 | Monday 8 AM | Weekly model review | `scripts/cron_weekly_review.sh` | Review artifacts |
 
@@ -215,8 +221,10 @@ Self-heal execution recovery is fail-closed:
 - Self-heal precompute suppresses precompute email, shadow generation, latest
   shadow publication, and shadow reconciliation.
 - Execution continues only when `core/precompute_bundle_validation.py` confirms
-  `contract.json`, `daily_snapshot.json`, `signals.json`, and
-  `planned_execution_payload.json`.
+  the schema-2 hash manifest for `contract.json`, `daily_snapshot.json`,
+  `signals.json`, `planned_execution_payload.json`, `sleeve_evaluations.json`,
+  and `paper_target_package.json`, including one matching
+  `approved_target_hash`.
 - Recovery writes:
   - `outputs/workflow/YYYY-MM-DD/execution_bundle_validation.json`
   - `outputs/workflow/YYYY-MM-DD/execution_self_heal.json`
@@ -813,8 +821,9 @@ Runtime separation:
 - The VM cron is the production scheduler for precompute/live execution; GitHub
   daily precompute/live schedules are dispatch-only to avoid duplicate runs
 - Successful precompute triggers `scripts/run_shadow_candidates_daily.sh` for
-  Polaris / Orion / Lyra. Orion's same-day artifact is a mandatory, fail-closed
-  input to PAPER Decision; the other shadow reporting remains non-blocking.
+  Polaris / Orion / Lyra. The morning Orion source is already sealed from the
+  current/prior-session policy before that best-effort refresh; later shadow
+  output cannot mutate PAPER Decision. Other shadow reporting is non-blocking.
 - Missing or invalid precompute bundles trigger `SELF_HEAL_PRECOMPUTE_ONLY=1`;
   execution continues only after full bundle validation passes
 - If a `SELF_HEAL` pretrade reconciliation occurs, the wrapper re-runs reconciliation

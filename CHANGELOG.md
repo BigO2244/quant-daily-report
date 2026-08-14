@@ -9,6 +9,22 @@ This log covers material architectural and process changes. Routine bug fixes an
 
 ## Recent Major Changes (Early 2026)
 
+### Single Orion Decision Line and Broker-Truth NAV — August 14, 2026
+
+- Replaced the split PAPER morning authority with one sealed Orion Decision
+  target selected from the current/immediately-prior XNYS sleeve evaluation.
+- Added schema-2 bundle hashes and one `approved_target_hash` across the target
+  package, signals, handoff, 09:35 plan, and exact authorization.
+- Quarantined the legacy `growth_engine_v4` precompute signals/trades as
+  content-hashed research evidence with no execution authority.
+- Made readiness certify target lineage/assets/connectivity instead of
+  presenting stale pre-open share counts as expected broker submissions.
+- Made canonical actual PAPER NAV derive only from the direct Alpaca
+  broker-truth ledger; rescheduled the ledger to 19:15 ET and portfolio-history
+  projection/freshness escalation to 19:45 ET.
+- PAPER/live boundaries remain unchanged: no live credentials, approvals,
+  limits, or capital were enabled.
+
 ### Shadow Scorecard Publication Integrity Gates (FR-085) — June 24, 2026
 
 - The daily Shadow CIO Model Scorecard (`scripts/send_shadow_cio_report.py`) now withholds publication instead of printing a leaderboard from stale or internally inconsistent research artifacts.

@@ -9,8 +9,10 @@ from scripts.build_portfolio_history import build_portfolio_history
 def test_portfolio_history_prefers_broker_fills_and_positions(tmp_path: Path) -> None:
     snapshot_dir = tmp_path / "outputs" / "broker_snapshot"
     perf_dir = tmp_path / "outputs" / "perf"
+    ledger_dir = tmp_path / "outputs" / "ledger" / "paper"
     snapshot_dir.mkdir(parents=True)
     perf_dir.mkdir(parents=True)
+    ledger_dir.mkdir(parents=True)
 
     (snapshot_dir / "broker_snapshot_2026-04-08.json").write_text(
         json.dumps(
@@ -62,10 +64,22 @@ def test_portfolio_history_prefers_broker_fills_and_positions(tmp_path: Path) ->
         + "\n",
         encoding="utf-8",
     )
-    (perf_dir / "live_overlay_nav_series.csv").write_text(
-        "date,equity,cash,gross_exposure,net_exposure,return_1d,turnover_dollars,turnover_pct,turnover\n"
-        "2026-04-07,9900,2600,0.70,0.70,,,,\n"
-        "2026-04-08,10000,2500,0.75,0.75,,,,\n",
+    (ledger_dir / "daily_nav.csv").write_text(
+        "date,equity,profit_loss,profit_loss_pct,base_value,source,pulled_at_utc\n"
+        "2026-04-07,9900,,,,alpaca_portfolio_history,2026-04-08T23:15:00Z\n"
+        "2026-04-08,10000,,,,alpaca_portfolio_history,2026-04-08T23:15:00Z\n",
+        encoding="utf-8",
+    )
+    (ledger_dir / "daily_state_latest.json").write_text(
+        json.dumps(
+            {
+                "days": [
+                    {"date": "2026-04-07", "cash": 2600, "positions_market_value": 7300},
+                    {"date": "2026-04-08", "cash": 2500, "positions_market_value": 7500},
+                ]
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -87,7 +101,7 @@ def test_portfolio_history_prefers_broker_fills_and_positions(tmp_path: Path) ->
     assert (out_dir / "positions.csv").exists()
     assert (out_dir / "nav.csv").exists()
     assert (out_dir / "attribution.csv").exists()
-    assert json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))["paths"]["nav_source"] == "outputs/perf/live_overlay_nav_series.csv"
+    assert json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))["paths"]["nav_source"] == "outputs/ledger/paper/daily_nav.csv"
 
 
 # --------------------------------------------------------------------------- #
@@ -95,12 +109,14 @@ def test_portfolio_history_prefers_broker_fills_and_positions(tmp_path: Path) ->
 # --------------------------------------------------------------------------- #
 def _seed_perf(tmp_path: Path) -> None:
     perf_dir = tmp_path / "outputs" / "perf"
+    ledger_dir = tmp_path / "outputs" / "ledger" / "paper"
     perf_dir.mkdir(parents=True, exist_ok=True)
-    (perf_dir / "live_overlay_nav_series.csv").write_text(
-        "date,equity,cash,return_1d\n"
-        "2026-03-03,10000,2000,\n"
-        "2026-03-04,10100,2000,0.01\n"
-        "2026-03-05,10050,2000,-0.00495\n",
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    (ledger_dir / "daily_nav.csv").write_text(
+        "date,equity,profit_loss,profit_loss_pct,base_value,source,pulled_at_utc\n"
+        "2026-03-03,10000,,,,alpaca_portfolio_history,2026-03-05T23:15:00Z\n"
+        "2026-03-04,10100,,,,alpaca_portfolio_history,2026-03-05T23:15:00Z\n"
+        "2026-03-05,10050,,,,alpaca_portfolio_history,2026-03-05T23:15:00Z\n",
         encoding="utf-8",
     )
     (perf_dir / "live_overlay_benchmark_close_history.csv").write_text(
@@ -171,4 +187,3 @@ def test_append_only_can_be_disabled(tmp_path: Path) -> None:
     payload = build_portfolio_history(tmp_path, report_date="2026-03-05", append_only=False)
     nav_dates = {row["date"] for row in payload["nav"]}
     assert "2026-02-27" not in nav_dates  # not merged when append_only is off
-

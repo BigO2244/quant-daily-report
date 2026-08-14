@@ -6,8 +6,8 @@
 # the python script from the canonical repository .env (paper) and
 # ~/.caerus/live_pilot.env (live). Touches no trading gate or lane parameter.
 #
-# Scheduled after the 19:15 ET canonical NAV build so the day's EOD equity bar
-# is final at Alpaca. Idempotent: safe to rerun any number of times.
+# Scheduled at 19:15 ET as the sole actual-PAPER accounting source. The 19:45
+# canonical NAV projection consumes this ledger. Idempotent and read-only.
 
 set -uo pipefail
 

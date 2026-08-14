@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from core.sleeve_control_plane import dispatch_all_sleeves, load_sleeve_control_registry
+from core.paper_target_authority import seal_paper_target_bundle
 
 from scripts.live_pilot_build_plan_from_precompute import (
     TARGET_PORTFOLIO_SCHEMA,
@@ -90,6 +91,29 @@ def _bundle(
         + "\n",
         encoding="utf-8",
     )
+    (bundle / "contract.json").write_text(
+        json.dumps(
+            {
+                "artifact_type": "alpaca_precompute_bundle",
+                "schema_version": 1,
+                "trade_date": trade_date,
+                "mode": "PAPER",
+                "source_run_id": payload["run_id"],
+                "status": "complete",
+                "validated_for_execution": True,
+                "files": {
+                    "daily_snapshot": "daily_snapshot.json",
+                    "signals": "signals.json",
+                    "planned_execution_payload": "planned_execution_payload.json",
+                    "sleeve_evaluations": "sleeve_evaluations.json",
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return bundle / "planned_execution_payload.json"
 
 
@@ -108,6 +132,19 @@ def _build(tmp_path: Path, payload_path: Path, *, prices: dict[str, float], **kw
         "sleeve_evaluations.json"
     ).exists():
         _write_sleeve_evaluations(payload_path, tmp_path)
+    if defaults.get("lane") == "paper" and not payload_path.with_name(
+        "paper_target_package.json"
+    ).exists():
+        try:
+            seal_paper_target_bundle(
+                bundle_dir=payload_path.parent,
+                trade_date=payload_path.parent.name,
+                repo_root=tmp_path,
+                sealed_at="2026-01-01T00:00:00+00:00",
+            )
+        except Exception:
+            # Fail-closed cases are asserted through the builder's BLOCKED plan.
+            pass
     return build_live_pilot_plan(payload_path=payload_path, **defaults)
 
 
@@ -184,7 +221,7 @@ def test_paper_lane_uses_exact_governed_orion_snapshot(tmp_path: Path) -> None:
 
     assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
     assert {row["symbol"] for row in plan["target_portfolio"]} == {"AAPL", "MSFT", "JNJ", "PNC", "SPG"}
-    assert plan["decision_source_artifact"]["path"] == str(source_path)
+    assert plan["decision_source_artifact"]["path"] == str(source_path.relative_to(tmp_path))
     assert len(plan["decision_source_artifact"]["sha256"]) == 64
     assert plan["cash_target_weight"] == pytest.approx(0.05)
     assert plan["strategy_identity_validation"]["status"] == "PASS"
@@ -206,11 +243,9 @@ def test_paper_lane_uses_exact_governed_orion_snapshot(tmp_path: Path) -> None:
     assert "ALPACA_BASE_URL=https://api.alpaca.markets" not in plan["required_live_command"]
     decision_path = Path(plan["source_signals"])
     decision_input = json.loads(decision_path.read_text(encoding="utf-8"))
-    assert decision_input["schema_version"] == "caerus.decision_input.v1"
-    assert decision_input["source_strategy_artifact"]["sha256"] == plan["decision_source_artifact"]["sha256"]
-    assert decision_input["source_strategy_artifact"]["source_trade_date"] == "2026-06-22"
-    assert decision_input["source_strategy_artifact"]["decision_trade_date"] == "2026-06-22"
-    assert decision_input["source_strategy_artifact"]["source_trading_session_lag"] == 0
+    assert decision_input["schema_version"] == "caerus.paper_target_signals.v1"
+    assert decision_input["approved_target_hash"] == plan["approved_target_hash"]
+    assert plan["source_paper_target_package_sha256"]
     assert sum(
         row["target_weight"]
         for row in decision_input["signals"]
@@ -236,7 +271,7 @@ def test_paper_lane_uses_immediately_previous_trading_session_snapshot(
 
     assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
     source = plan["decision_source_artifact"]
-    assert source["path"] == str(source_path)
+    assert source["path"] == str(source_path.relative_to(tmp_path))
     assert source["source_trade_date"] == "2026-08-07"
     assert source["source_effective_trade_date"] == "2026-08-07"
     assert source["decision_trade_date"] == trade_date
@@ -245,8 +280,8 @@ def test_paper_lane_uses_immediately_previous_trading_session_snapshot(
     assert source["source_session_policy"] == "SAME_OR_PREVIOUS_TRADING_SESSION"
     assert len(source["sha256"]) == 64
     identity = json.loads(Path(plan["source_signals"]).read_text())["strategy_identity"]
-    assert identity["execution_target_source"] == str(source_path)
-    assert identity["shadow_baseline_source"] == str(source_path)
+    assert identity["execution_target_source"] == str(source_path.relative_to(tmp_path))
+    assert identity["shadow_baseline_source"] == str(source_path.relative_to(tmp_path))
     assert identity["shadow_baseline_source_sha256"] == source["sha256"]
     assert identity["shadow_baseline_source_trade_date"] == "2026-08-07"
 
@@ -284,7 +319,7 @@ def test_paper_lane_skips_current_preclose_reporting_snapshot(
     )
 
     assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
-    assert plan["decision_source_artifact"]["path"] == str(prior_path)
+    assert plan["decision_source_artifact"]["path"] == str(prior_path.relative_to(tmp_path))
     assert plan["decision_source_artifact"]["source_trading_session_lag"] == 1
     policy = plan["target_attainment_policy"]
     assert policy["target_cash_weight"] == 0.05
@@ -377,13 +412,9 @@ def test_paper_market_state_identity_is_idempotent_and_source_sensitive(
         encoding="utf-8",
     )
     changed = _build(tmp_path, payload_path, **kwargs)
-    changed_state = changed["risk_controls"]["market_state"]
-    assert changed_state["observed_state"] == "HIGH_VOLATILITY"
-    assert changed_state["market_state_id"] != first_state["market_state_id"]
-    assert (
-        changed["approved_execution_package"]["content_hash"]
-        != first["approved_execution_package"]["content_hash"]
-    )
+    assert changed["status"] == "BLOCKED"
+    assert changed["reason_code"] == "paper_sealed_target_invalid"
+    assert "file_hash_mismatch:daily_snapshot" in changed["block_diagnostics"]["error"]
 
 
 def test_paper_market_state_rejects_missing_precompute_run_lineage(
@@ -438,8 +469,8 @@ def test_paper_lane_rejects_provisional_previous_session_snapshot(
     )
 
     assert plan["status"] == "BLOCKED"
-    assert plan["reason_code"] == "paper_governed_decision_source_invalid"
-    assert "not Decision-eligible" in plan["block_diagnostics"]["error"]
+    assert plan["reason_code"] == "paper_sealed_target_invalid"
+    assert "unsealed_precompute_contract" in plan["block_diagnostics"]["error"]
 
 
 def test_paper_lane_rejects_snapshot_older_than_previous_trading_session(
@@ -459,8 +490,8 @@ def test_paper_lane_rejects_snapshot_older_than_previous_trading_session(
     )
 
     assert plan["status"] == "BLOCKED"
-    assert plan["reason_code"] == "paper_governed_decision_source_invalid"
-    assert "2026-08-07" in plan["block_diagnostics"]["error"]
+    assert plan["reason_code"] == "paper_sealed_target_invalid"
+    assert "unsealed_precompute_contract" in plan["block_diagnostics"]["error"]
 
 
 def test_paper_lane_previous_session_rule_skips_exchange_holiday(
@@ -480,7 +511,7 @@ def test_paper_lane_previous_session_rule_skips_exchange_holiday(
     )
 
     assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
-    assert plan["decision_source_artifact"]["path"] == str(source_path)
+    assert plan["decision_source_artifact"]["path"] == str(source_path.relative_to(tmp_path))
     assert plan["decision_source_artifact"]["source_trade_date"] == "2026-09-04"
     assert plan["decision_source_artifact"]["source_trading_session_lag"] == 1
 

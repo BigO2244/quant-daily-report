@@ -447,6 +447,7 @@ RECOVERY_FINISHED_AT=""
 if ! python3 -m core.precompute_bundle_validation \
     --bundle-dir "${BUNDLE_DIR}" \
     --trade-date "${REPORT_DATE}" \
+    --require-sealed-paper-target \
     --json-output "${BUNDLE_VALIDATION_PATH}"; then
     echo "WARN: precompute bundle validation failed; details=${BUNDLE_VALIDATION_PATH}"
     echo "WARN: attempting self-heal by rebuilding today's precompute bundle before giving up."
@@ -463,10 +464,12 @@ if ! python3 -m core.precompute_bundle_validation \
     if ! python3 -m core.precompute_bundle_validation \
         --bundle-dir "${BUNDLE_DIR}" \
         --trade-date "${REPORT_DATE}" \
+        --require-sealed-paper-target \
         --json-output "${BUNDLE_VALIDATION_PATH}"; then
         python3 -m core.precompute_bundle_validation \
             --bundle-dir "${BUNDLE_DIR}" \
             --trade-date "${REPORT_DATE}" \
+            --require-sealed-paper-target \
             --json-output "${BUNDLE_VALIDATION_PATH}" \
             --recovery-status-output "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
             --previous-recovery-status "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
@@ -484,6 +487,7 @@ if ! python3 -m core.precompute_bundle_validation \
     python3 -m core.precompute_bundle_validation \
         --bundle-dir "${BUNDLE_DIR}" \
         --trade-date "${REPORT_DATE}" \
+        --require-sealed-paper-target \
         --json-output "${BUNDLE_VALIDATION_PATH}" \
         --recovery-status-output "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
         --previous-recovery-status "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
@@ -497,10 +501,10 @@ fi
 echo "OK: precompute bundle validated at ${BUNDLE_DIR}"
 echo "bundle_validation=${BUNDLE_VALIDATION_PATH}"
 
-# The 07:00 bundle is opportunity evidence, not executable authority.  It is
-# intentionally not labeled/certified as execution-ready.  Fresh broker state
-# below is required before Decision may publish exact orders.
-echo "precompute_authority=OPPORTUNITY_EVIDENCE_ONLY"
+# The 07:00 bundle carries one immutable Decision target, never exact orders.
+# Fresh broker and market state below remain mandatory before Risk and Trader
+# can publish the exact broker-ready plan.
+echo "precompute_authority=SEALED_DECISION_TARGET_ONLY"
 
 # --- Resolve the capital cap (same resolver as the live lane) ---
 # For paper the PAPER account's portfolio value is tightened by the $10k staging

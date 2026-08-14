@@ -77,13 +77,20 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
     activate_runtime_venv "${VALIDATION_WORKTREE}"
     python3 -m py_compile daily_quant_report.py core/live_pilot_guardrails.py \
         core/live_pilot_sha_guard.py core/precompute_contract.py \
+        core/paper_target_authority.py core/precompute_bundle_validation.py \
         scripts/finalize_deployment.py scripts/live_pilot_execute.py \
-        scripts/live_pilot_build_plan_from_precompute.py
+        scripts/live_pilot_build_plan_from_precompute.py \
+        scripts/seal_paper_precompute_target.py \
+        scripts/certify_execution_readiness.py \
+        scripts/build_portfolio_history.py
     python3 -m pytest \
         Tests/test_live_pilot_guardrails.py \
         Tests/test_live_pilot_client_order_id.py \
         Tests/test_live_pilot_sha_guard.py \
         Tests/test_cron_live_pilot.py \
+        Tests/test_paper_target_authority.py \
+        Tests/test_paper_execution_real_chain.py \
+        Tests/test_portfolio_history_builder.py \
         -q
     python3 scripts/finalize_deployment.py \
         --repo-root "${VALIDATION_WORKTREE}" \

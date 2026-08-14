@@ -1030,6 +1030,33 @@ def authorize_exact_execution_plan(
         trade_date=str(plan.get("trade_date") or ""),
         required_source_hash=sleeve_hash,
     )
+    sealed_builder_plan = (
+        str(plan.get("schema_version") or "")
+        == "live_pilot_plan_from_precompute.v2"
+    )
+    declared_target_hash = str(plan.get("approved_target_hash") or "")
+    if sealed_builder_plan and declared_target_hash != _decision.content_hash:
+        raise RuntimeError("exact plan Decision diverges from sealed precompute target hash")
+    if declared_target_hash and declared_target_hash != _decision.content_hash:
+        raise RuntimeError("declared target hash diverges from persisted Decision")
+    target_package_raw = str(plan.get("source_paper_target_package") or "").strip()
+    target_package_hash = str(
+        plan.get("source_paper_target_package_sha256") or ""
+    ).strip().lower()
+    if sealed_builder_plan and (not target_package_raw or not target_package_hash):
+        raise RuntimeError("sealed precompute target package lineage is required")
+    target_package_path: Path | None = None
+    if target_package_raw or target_package_hash:
+        if not target_package_raw or not target_package_hash:
+            raise RuntimeError("sealed precompute target package lineage is incomplete")
+        target_package_path = Path(target_package_raw)
+        if not target_package_path.is_absolute():
+            target_package_path = REPO_ROOT / target_package_path
+        if (
+            not target_package_path.is_file()
+            or _hash_file(target_package_path) != target_package_hash
+        ):
+            raise RuntimeError("sealed precompute target package hash is invalid")
     governed_risk_controls = _plain(_risk.constraints)
     governed_outer_controls = dict(governed_risk_controls)
     governed_outer_controls.pop("target_attainment_policy", None)
@@ -1468,6 +1495,9 @@ def authorize_exact_execution_plan(
         if source_path.exists():
             source_hashes[str(source_path)] = _hash_file(source_path)
     source_hashes["approved_target_package"] = governed_execution.content_hash
+    if target_package_path is not None:
+        source_hashes[str(target_package_path)] = target_package_hash
+        source_hashes["sealed_precompute_decision_target"] = _decision.content_hash
     source_hashes[str(sleeve_path)] = sleeve_hash
     source_hashes["authorization_market_state"] = str(
         market_state_evidence["content_hash"]

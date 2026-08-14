@@ -78,6 +78,22 @@ Duplicate-protection artifacts:
 4. Inspect `outputs/runs/<RUN_ID>/trading_day_summary.json`.
 5. If drift exists, inspect `outputs/runs/<RUN_ID>/broker/recon_posttrade_<DATE>.json`.
 
+Before those run-level checks, verify the morning authority line:
+
+- `outputs/precompute/<DATE>/contract.json` has `schema_version: 2` and
+  `authority_model: orion_single_sealed_target_v1`.
+- `approved_target_hash` matches across `contract.json`,
+  `paper_target_package.json`, `signals.json`, and
+  `planned_execution_payload.json`.
+- `planned_execution_payload.json` has an empty `trades` list,
+  `precompute_execution_authority: false`, and
+  `exact_orders_deferred_to_0935: true`.
+- The 09:35 plan carries the same `approved_target_hash` and the exact
+  authorizer binds the `paper_target_package.json` file hash.
+
+Any mismatch is an authority-line incident. Do not bypass the bundle gate or
+manually copy a target into the 09:35 plan.
+
 Key fields to check:
 
 - `duplicate_guard_status`

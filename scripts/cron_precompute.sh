@@ -77,6 +77,20 @@ fi
 EXIT_CODE=0
 python3 daily_quant_report.py --plan-only --write-precompute-bundle >> "${LOG_FILE}" 2>&1 || EXIT_CODE=$?
 
+# --- Seal the sole PAPER Decision target ---
+# The legacy daily planner remains available as quarantined research evidence,
+# but it cannot publish the canonical signals or execution handoff.  Orion is
+# selected once from sleeve_evaluations.json and every downstream consumer is
+# bound to that immutable Decision hash.
+if [[ ${EXIT_CODE} -eq 0 ]]; then
+    if ! python3 -m scripts.seal_paper_precompute_target \
+        --trade-date "${REPORT_DATE}" \
+        --bundle-dir "${REPO_ROOT}/outputs/precompute/${REPORT_DATE}" >> "${LOG_FILE}" 2>&1; then
+        echo "ERROR: unable to seal the Orion PAPER target; precompute is non-executable" | tee -a "${LOG_FILE}"
+        EXIT_CODE=1
+    fi
+fi
+
 # --- Verify bundle was written ---
 BUNDLE_DIR="${REPO_ROOT}/outputs/precompute/${REPORT_DATE}"
 if [[ ${EXIT_CODE} -eq 0 ]]; then
@@ -84,6 +98,7 @@ if [[ ${EXIT_CODE} -eq 0 ]]; then
     if ! python3 -m core.precompute_bundle_validation \
         --bundle-dir "${BUNDLE_DIR}" \
         --trade-date "${REPORT_DATE}" \
+        --require-sealed-paper-target \
         --json-output "${BUNDLE_VALIDATION_PATH}" >> "${LOG_FILE}" 2>&1; then
         echo "ERROR: precompute completed but bundle validation failed; details=${BUNDLE_VALIDATION_PATH}" | tee -a "${LOG_FILE}"
         EXIT_CODE=1

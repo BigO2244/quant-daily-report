@@ -50,8 +50,8 @@ Review this before 9:35 AM ET each trading day.
 
 ### Strategy Naming
 
-- `Caerus Polaris` = current paper baseline / operational control
-- `Caerus Orion` = primary shadow candidate
+- `Caerus Polaris` = historical research baseline / operational comparison control
+- `Caerus Orion` = sole PAPER execution authority and shadow-observed strategy
 - `Caerus Lyra` = secondary shadow challenger
 - `SPY` = benchmark
 
@@ -60,6 +60,9 @@ Review this before 9:35 AM ET each trading day.
 - SSH to the VM and inspect `logs/precompute_<DATE>.log`.
 - Confirm `outputs/precompute/<DATE>/contract.json` and companion bundle files exist.
 - Confirm `outputs/workflow/<DATE>/precompute_bundle_validation.json` reports `status: OK`.
+- Confirm `contract.json` is schema 2 and its `approved_target_hash` matches
+  `paper_target_package.json`, `signals.json`, and
+  `planned_execution_payload.json`.
 
 ### 2. Check research digest (~7:00 AM ET)
 
@@ -95,9 +98,11 @@ Or trigger the workflow and watch the "Alpaca smoke test" and "Diag Alpaca auth"
 |---|---|---|---|
 | 1:00 AM | VM cron | Overnight agents | `scripts/cron_overnight.sh` writes overnight signals. |
 | 6:30 AM | VM cron | Research digest | `scripts/cron_research.sh` writes research digest. |
-| 7:00 AM | VM cron | Precompute | `scripts/cron_precompute.sh` writes the precompute bundle and then non-blocking shadow artifacts. |
-| 9:35 AM | VM cron | Execution | `scripts/cron_execute.sh` validates the bundle, self-heals if needed, then executes from the validated bundle. |
+| 7:00 AM | VM cron | Precompute | `scripts/cron_precompute.sh` evaluates all sleeves, seals one Orion Decision target, quarantines the legacy research frame, and then writes non-blocking shadow artifacts. |
+| 9:35 AM | VM cron | Execution | `scripts/cron_execute.sh` validates the sealed target, self-heals if needed, applies fresh Risk/broker state, and creates exact orders from the same Decision hash. |
 | 10:00 AM | VM cron | Confirmation | `scripts/cron_confirm.sh` sends confirmation/reporting email. |
+| 7:15 PM | VM cron | Broker truth | `scripts/cron_broker_ledger.sh` pulls the sole actual-PAPER NAV authority from Alpaca. |
+| 7:45 PM | VM cron | Portfolio history | Canonical append-only portfolio history derives from the broker ledger and escalates freshness failures. |
 
 GitHub daily precompute/live workflows are dispatch-only safety paths. They are
 not the normal production scheduler.
@@ -136,6 +141,11 @@ files are:
 - `outputs/precompute/<DATE>/daily_snapshot.json`
 - `outputs/precompute/<DATE>/signals.json`
 - `outputs/precompute/<DATE>/planned_execution_payload.json`
+- `outputs/precompute/<DATE>/sleeve_evaluations.json`
+- `outputs/precompute/<DATE>/paper_target_package.json`
+
+The legacy allocator's proposed trades may exist only below the content-hashed
+`research/growth_engine_v4/` subdirectory. They have no execution authority.
 
 If validation fails, `scripts/cron_execute.sh` runs a self-heal precompute with
 `SELF_HEAL_PRECOMPUTE_ONLY=1`. That recovery suppresses:

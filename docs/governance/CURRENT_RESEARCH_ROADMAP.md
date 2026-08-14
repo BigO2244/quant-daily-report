@@ -2,9 +2,10 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-08-11 (owner-approved deterministic whole-share PAPER
-attainment policy, 5% target / 2.5% hard cash floor, first-clean comparison
-epoch, and strict universal-GREEN propagation; live remains blocked.)
+Last Updated: 2026-08-14 (owner-approved single sealed Orion precompute target,
+deterministic whole-share PAPER attainment policy, broker-truth-only actual NAV,
+first-clean comparison epoch, and strict universal-GREEN propagation; live
+remains blocked.)
 Governance Label: PAPER_AUTHORITY_MIGRATION
 Execution Impact: PAPER_ONLY (no live credentials, approvals, or capital enabled)
 
@@ -68,6 +69,14 @@ editing code or specs.
   requires a hash-verified approved package for the current session. Outside
   the fixed tolerance, only exact agreement with the deterministic
   nearest-feasible proof can pass.
+- **Single target authority:** the 07:00 precompute selects Orion once from the
+  complete sleeve evaluation, seals Evidence + Decision in
+  `paper_target_package.json`, and binds every downstream projection to one
+  `approved_target_hash`. The 09:35 builder cannot re-select a snapshot or
+  substitute a strategy. Legacy `growth_engine_v4` output is research-only.
+- **Actual NAV authority:** the direct Alpaca PAPER ledger is the sole actual
+  NAV source. Portfolio history derives from it after the nightly broker pull;
+  model/overlay/shadow NAV may be compared but never substituted.
 - **Execution convergence:** The Trader executes only the approved package,
   mechanically sells first, waits for confirmed PAPER proceeds, and rebuilds
   buys from the proven whole-share target. Execution equality must show the

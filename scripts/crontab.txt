@@ -42,15 +42,16 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # Post-close artifact-only price cache hydration for shadow/reporting reads
 30 18 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts --strict >> logs/price_hydration.cron.log 2>&1
 
-# FR-066: canonical NAV daily build + fail-loud freshness escalation — 7:15 PM ET,
-# after price hydration. Read-only telemetry builder; NON_EXECUTIONAL. The
+# Broker-truth ledger — 7:15 PM ET, after price hydration. This direct Alpaca
+# pull is the sole actual-PAPER accounting authority used by canonical NAV.
+15 19 * * 1-5 $HOME/quant-daily-report/scripts/cron_broker_ledger.sh >> $HOME/quant-daily-report/logs/cron_broker_ledger.log 2>&1
+
+# FR-066: canonical NAV projection + fail-loud freshness escalation — 7:45 PM ET,
+# after the broker-truth ledger. Read-only telemetry builder; NON_EXECUTIONAL. The
 # escalation step always runs (even if the build fails) so silence is never a
 # valid state. Installed on the VM 2026-06-10 after owner approval; output is
 # captured in logs/portfolio_history.cron.log.
-15 19 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && ( python3 scripts/build_portfolio_history.py --trade-date $(TZ=America/New_York date +\%F) ; python3 -m core.portfolio_history_escalation --trade-date $(TZ=America/New_York date +\%F) --send ) >> logs/portfolio_history.cron.log 2>&1
-
-# Broker-truth ledger + realized performance + TCA (GET-only broker reads).
-45 19 * * 1-5 $HOME/quant-daily-report/scripts/cron_broker_ledger.sh >> $HOME/quant-daily-report/logs/cron_broker_ledger.log 2>&1
+45 19 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && ( python3 scripts/build_portfolio_history.py --trade-date $(TZ=America/New_York date +\%F) ; python3 -m core.portfolio_history_escalation --trade-date $(TZ=America/New_York date +\%F) --send ) >> logs/portfolio_history.cron.log 2>&1
 
 # Weekly Model Review (Monday 8:00 AM ET)
 0 8 * * 1 $HOME/quant-daily-report/scripts/cron_weekly_review.sh >> $HOME/quant-daily-report/logs/weekly_review.log 2>&1

@@ -361,6 +361,55 @@ def _build_paper_decision_input(
     return decision_path, dict(decision_input["source_strategy_artifact"])
 
 
+def _load_sealed_paper_decision(
+    *, payload_path: Path, trade_date: str, approved_sleeve: str
+) -> tuple[Path, dict[str, Any], Any, Any, dict[str, Any]]:
+    """Load the one pre-open Decision seal; never re-select an Orion snapshot."""
+
+    from authority.pipeline import decision_package_from_dict, evidence_package_from_dict
+    from core.paper_target_authority import validate_sealed_paper_target_bundle
+
+    if _canonical_strategy_id(approved_sleeve) != "caerus_orion":
+        raise ValueError("sealed PAPER Decision authority is solely caerus_orion")
+    bundle_dir = payload_path.parent
+    repo_root = payload_path.resolve().parents[3]
+    failures = validate_sealed_paper_target_bundle(
+        bundle_dir=bundle_dir,
+        trade_date=trade_date,
+        repo_root=repo_root,
+    )
+    if failures:
+        raise ValueError("sealed PAPER target validation failed: " + ",".join(failures[:5]))
+    package_path = bundle_dir / "paper_target_package.json"
+    package = _read_json(package_path)
+    if not isinstance(package, Mapping):
+        raise ValueError("sealed PAPER target package must be a JSON object")
+    evidence_raw = package.get("evidence_package")
+    decision_raw = package.get("decision_package")
+    if not isinstance(evidence_raw, Mapping) or not isinstance(decision_raw, Mapping):
+        raise ValueError("sealed PAPER target lacks Evidence and Decision packages")
+    evidence = evidence_package_from_dict(evidence_raw)
+    decision = decision_package_from_dict(decision_raw)
+    source = dict(package.get("source_strategy_artifact") or {})
+    source.update(
+        {
+            "effective_trade_date": trade_date,
+            "target_attainment_tolerance": float(
+                (package.get("target_attainment_policy") or {}).get(
+                    "fixed_drift_tolerance", 0.02
+                )
+            ),
+            "target_attainment_policy": dict(
+                package.get("target_attainment_policy") or {}
+            ),
+            "approved_target_hash": decision.content_hash,
+            "paper_target_package_path": str(package_path),
+            "paper_target_package_sha256": _file_sha256(package_path),
+        }
+    )
+    return bundle_dir / "signals.json", source, evidence, decision, dict(package)
+
+
 def _safe_float(value: object) -> float | None:
     try:
         numeric = float(str(value).strip())
@@ -614,6 +663,9 @@ def build_live_pilot_plan(
 
     signals_path = _resolve_signals_path(payload_path, payload)
     decision_source_artifact: dict[str, Any] | None = None
+    sealed_evidence = None
+    sealed_decision = None
+    sealed_target_package: dict[str, Any] | None = None
     lane_id = str(lane or "").strip().lower()
     governed_market_state: dict[str, Any] | None = None
     market_state_source_refs: tuple[str, ...] = ()
@@ -652,12 +704,16 @@ def build_live_pilot_plan(
         )
     if lane_id == "paper":
         try:
-            signals_path, decision_source_artifact = _build_paper_decision_input(
+            (
+                signals_path,
+                decision_source_artifact,
+                sealed_evidence,
+                sealed_decision,
+                sealed_target_package,
+            ) = _load_sealed_paper_decision(
+                payload_path=payload_path,
                 trade_date=trade_date,
                 approved_sleeve=approved_sleeve,
-                output_dir=output_dir,
-                shadow_root=Path(shadow_root),
-                strategy_registry_path=Path(strategy_registry_path),
             )
         except Exception as exc:
             return _emit_blocked_plan(
@@ -668,8 +724,8 @@ def build_live_pilot_plan(
                 capital_cap=float(capital_cap),
                 max_orders=int(max_orders),
                 allow_fractional=bool(allow_fractional),
-                reason_code="paper_governed_decision_source_invalid",
-                diagnostics={"error": str(exc), "shadow_root": str(shadow_root)},
+                reason_code="paper_sealed_target_invalid",
+                diagnostics={"error": str(exc), "bundle_dir": str(payload_path.parent)},
             )
     elif not signals_path.exists():
         return _emit_blocked_plan(
@@ -927,43 +983,54 @@ def build_live_pilot_plan(
     decision_target_rows = [
         {
             "symbol": _clean_symbol(row.get("ticker")),
+            "ticker": _clean_symbol(row.get("ticker")),
             "sleeve": str(row.get("sleeve") or ""),
             "target_weight": float(row.get("target_weight") or 0.0),
         }
         for _, row in targets.iterrows()
     ]
-    evidence = build_evidence_package(
-        package_id=f"evidence:{authority_stem}",
-        trade_date=trade_date,
-        source_refs=(
-            str(signals_path),
-            str(payload_path),
-            *sleeve_authority_refs,
-            *(
-                (f"sha256:{decision_source_artifact['sha256']}",)
-                if decision_source_artifact
-                else ()
+    if lane_id == "paper":
+        if sealed_evidence is None or sealed_decision is None or sealed_target_package is None:
+            raise ValueError("sealed PAPER Evidence and Decision authority is unresolved")
+        evidence = sealed_evidence
+        decision = sealed_decision
+        if decision_target_rows != list(decision.target_rows):
+            raise ValueError("09:35 target projection diverges from sealed PAPER Decision")
+        if abs(float(cash_target_weight) - float(decision.target_cash_weight)) > 1e-12:
+            raise ValueError("09:35 cash target diverges from sealed PAPER Decision")
+    else:
+        evidence = build_evidence_package(
+            package_id=f"evidence:{authority_stem}",
+            trade_date=trade_date,
+            source_refs=(
+                str(signals_path),
+                str(payload_path),
+                *sleeve_authority_refs,
+                *(
+                    (f"sha256:{decision_source_artifact['sha256']}",)
+                    if decision_source_artifact
+                    else ()
+                ),
             ),
-        ),
-        observations=decision_target_rows,
-    )
-    decision = build_decision_package(
-        package_id=f"decision:{authority_stem}",
-        trade_date=trade_date,
-        evidence=evidence,
-        target_rows=decision_target_rows,
-        target_cash_weight=float(cash_target_weight),
-        source_refs=(
-            str(signals_path),
-            str(payload_path),
-            *sleeve_authority_refs,
-            *(
-                (f"sha256:{decision_source_artifact['sha256']}",)
-                if decision_source_artifact
-                else ()
+            observations=decision_target_rows,
+        )
+        decision = build_decision_package(
+            package_id=f"decision:{authority_stem}",
+            trade_date=trade_date,
+            evidence=evidence,
+            target_rows=decision_target_rows,
+            target_cash_weight=float(cash_target_weight),
+            source_refs=(
+                str(signals_path),
+                str(payload_path),
+                *sleeve_authority_refs,
+                *(
+                    (f"sha256:{decision_source_artifact['sha256']}",)
+                    if decision_source_artifact
+                    else ()
+                ),
             ),
-        ),
-    )
+        )
     risk_constraints = dict(result.to_artifact())
     if lane_id == "paper":
         if not governed_market_state:
@@ -1052,6 +1119,17 @@ def build_live_pilot_plan(
                 else None
             ),
             "approved_execution_package": execution.to_dict(),
+            "approved_target_hash": decision.content_hash,
+            "source_paper_target_package": (
+                str((decision_source_artifact or {}).get("paper_target_package_path") or "")
+                if lane_id == "paper"
+                else None
+            ),
+            "source_paper_target_package_sha256": (
+                str((decision_source_artifact or {}).get("paper_target_package_sha256") or "")
+                if lane_id == "paper"
+                else None
+            ),
             "source_sleeve_evaluations": str(sleeve_evaluations_path),
             "source_sleeve_evaluations_sha256": (
                 _file_sha256(sleeve_evaluations_path)

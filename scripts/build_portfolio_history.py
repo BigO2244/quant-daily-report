@@ -337,13 +337,27 @@ def _build_positions(repo_root: Path, report_date: str | None) -> tuple[list[dic
 
 
 def _build_nav(repo_root: Path, report_date: str | None) -> tuple[list[dict[str, Any]], str | None, list[str]]:
-    candidates = [
-        repo_root / "outputs" / "perf" / "live_overlay_nav_series.csv",
-        repo_root / "outputs" / "perf" / "nav_timeseries.csv",
-    ]
-    source_path = next((path for path in candidates if _read_csv_rows(path)), None)
-    if source_path is None:
-        return [], None, ["No NAV history CSV was available."]
+    # There is one actual-PAPER accounting authority: the direct Alpaca ledger.
+    # Model/overlay NAV series remain research comparisons and can never be
+    # silently promoted into the canonical realized performance record.
+    source_path = repo_root / "outputs" / "ledger" / "paper" / "daily_nav.csv"
+    if not _read_csv_rows(source_path):
+        return [], None, [
+            "Canonical broker-truth PAPER daily_nav.csv is unavailable; no model NAV fallback was used."
+        ]
+    state_payload = _read_json(
+        repo_root / "outputs" / "ledger" / "paper" / "daily_state_latest.json"
+    )
+    state_days = (
+        (state_payload.get("days") or [])
+        if isinstance(state_payload, dict)
+        else []
+    )
+    state_by_date = {
+        str(row.get("date") or ""): row
+        for row in state_days
+        if isinstance(row, dict)
+    }
 
     rows: list[dict[str, Any]] = []
     for raw in _read_csv_rows(source_path):
@@ -352,16 +366,24 @@ def _build_nav(repo_root: Path, report_date: str | None) -> tuple[list[dict[str,
             continue
         if report_date and date > report_date:
             continue
+        state = state_by_date.get(date) or {}
+        equity = _to_float(raw.get("equity") or raw.get("portfolio_value"))
+        positions_value = _to_float(state.get("positions_market_value"))
+        gross_exposure = (
+            abs(float(positions_value)) / float(equity)
+            if positions_value is not None and equity not in (None, 0)
+            else None
+        )
         rows.append(
             {
                 "date": date,
-                "equity": _to_float(raw.get("equity") or raw.get("portfolio_value")),
-                "cash": _to_float(raw.get("cash")),
-                "gross_exposure": _to_float(raw.get("gross_exposure")),
-                "net_exposure": _to_float(raw.get("net_exposure")),
-                "return_1d": _to_float(raw.get("return_1d")),
-                "turnover_dollars": _to_float(raw.get("turnover_dollars")),
-                "turnover_pct": _to_float(raw.get("turnover_pct") or raw.get("turnover")),
+                "equity": equity,
+                "cash": _to_float(state.get("cash")),
+                "gross_exposure": gross_exposure,
+                "net_exposure": gross_exposure,
+                "return_1d": None,
+                "turnover_dollars": None,
+                "turnover_pct": None,
                 "source": _relative(repo_root, source_path),
             }
         )
@@ -723,7 +745,7 @@ def build_portfolio_history(
         "source_priority": [
             "broker_fills",
             "broker_positions",
-            "live_overlay_nav_series",
+            "broker_truth_paper_daily_nav",
             "model_ledger_fallback",
         ],
         "counts": {

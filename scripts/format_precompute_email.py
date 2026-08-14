@@ -35,6 +35,35 @@ def _number_or_zero(value: object) -> float:
         return 0.0
 
 
+def _render_sealed_target(payload: dict, daily_snapshot: dict, trade_date: str) -> str:
+    rows = payload.get("target_portfolio") or []
+    lines = [
+        f"Caerus Orion — Sealed PAPER Target for {trade_date}",
+        "",
+        "ONE DECISION TARGET",
+        f"  Approved target hash: {payload.get('approved_target_hash') or 'MISSING'}",
+        f"  Cash target:          {_number_or_zero(payload.get('cash_target_weight')):.1%}",
+        "  Exact orders:         Deferred to 09:35 ET broker-state Decision",
+        "  Precompute authority: Target weights only; no order submission authority",
+        "",
+        "TARGET PORTFOLIO",
+    ]
+    for row in sorted(rows, key=lambda item: (-_number_or_zero(item.get("target_weight")), str(item.get("ticker") or item.get("symbol") or ""))):
+        symbol = str(row.get("ticker") or row.get("symbol") or "")
+        lines.append(f"  {symbol:<6} {_number_or_zero(row.get('target_weight')):>7.2%}")
+    lines.extend(
+        [
+            "",
+            "At 09:35 ET the workflow will price this same hashed target against fresh",
+            "broker holdings and cash, apply Risk constraints, and seal exact whole-share",
+            "orders. The 09:35 workflow cannot re-select a strategy, snapshot, or ticker.",
+        ]
+    )
+    dynamic_sections = render_dynamic_email_sections(Path.cwd(), trade_date)
+    lines.append(dynamic_sections["text"].rstrip())
+    return "\n".join(lines)
+
+
 def main() -> None:
     trade_date = os.environ.get("REPORT_DATE") or __import__("datetime").date.today().isoformat()
     payload_path = Path(f"outputs/precompute/{trade_date}/planned_execution_payload.json")
@@ -59,6 +88,9 @@ def main() -> None:
 
     p = _load_json(payload_path)
     daily_snapshot = _load_json(daily_snapshot_path)
+    if p.get("schema_version") == "caerus.paper_precompute_handoff.v1":
+        print(_render_sealed_target(p, daily_snapshot, trade_date))
+        return
     strategy_identity = p.get("strategy_identity") or daily_snapshot.get("strategy_identity") or {}
     live_strategy_id = strategy_identity.get("live_strategy_id") or p.get("live_strategy_id") or "growth_engine_v4"
     shadow_baseline = strategy_identity.get("shadow_baseline_strategy") or p.get("shadow_baseline_strategy") or "caerus_polaris"

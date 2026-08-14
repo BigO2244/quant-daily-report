@@ -301,8 +301,17 @@ def validate_precompute_bundle(
     *,
     trade_date: str | None = None,
     required_files: tuple[str, ...] = BUNDLE_REQUIRED_FILES,
+    require_sealed_paper_target: bool = False,
 ) -> dict[str, Any]:
     bundle_dir = Path(bundle_dir)
+    contract_payload, _contract_error = _read_json(bundle_dir / "contract.json")
+    sealed_contract = bool(
+        isinstance(contract_payload, dict)
+        and int(contract_payload.get("schema_version") or 0) == 2
+    )
+    effective_required_files = tuple(required_files)
+    if sealed_contract and "paper_target_package.json" not in effective_required_files:
+        effective_required_files = (*effective_required_files, "paper_target_package.json")
     present: list[str] = []
     missing: list[str] = []
     invalid_json: list[dict[str, str]] = []
@@ -310,7 +319,7 @@ def validate_precompute_bundle(
     semantic_failures: list[str] = []
     file_summaries: dict[str, dict[str, Any]] = {}
 
-    for name in required_files:
+    for name in effective_required_files:
         path = bundle_dir / name
         if not path.is_file():
             missing.append(name)
@@ -335,6 +344,19 @@ def validate_precompute_bundle(
             semantic_failures.extend(
                 _sleeve_evaluation_failures(payload, trade_date=trade_date)
             )
+
+    if require_sealed_paper_target and not sealed_contract:
+        semantic_failures.append("paper_target:unsealed_precompute_contract")
+    if sealed_contract:
+        from core.paper_target_authority import validate_sealed_paper_target_bundle
+
+        semantic_failures.extend(
+            validate_sealed_paper_target_bundle(
+                bundle_dir=bundle_dir,
+                trade_date=str(trade_date or contract_payload.get("trade_date") or ""),
+                repo_root=bundle_dir.resolve().parents[2],
+            )
+        )
 
     trade_date_mismatches: list[dict[str, str]] = []
     if trade_date:
@@ -364,7 +386,7 @@ def validate_precompute_bundle(
         "bundle_dir": str(bundle_dir),
         "trade_date": str(trade_date) if trade_date is not None else None,
         "validated_at": _utc_now(),
-        "required_files": list(required_files),
+        "required_files": list(effective_required_files),
         "present_files": present,
         "missing_files": missing,
         "invalid_json": invalid_json,
@@ -373,7 +395,7 @@ def validate_precompute_bundle(
         "trade_date_mismatches": trade_date_mismatches,
         "validation_failures": failures,
         "integrity_summary": {
-            "required_count": len(required_files),
+            "required_count": len(effective_required_files),
             "present_count": len(present),
             "missing_count": len(missing),
             "invalid_json_count": len(invalid_json),
@@ -447,6 +469,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Validate Alpaca precompute bundle integrity.")
     parser.add_argument("--bundle-dir", required=True)
     parser.add_argument("--trade-date", required=True)
+    parser.add_argument("--require-sealed-paper-target", action="store_true")
     parser.add_argument("--json-output")
     parser.add_argument("--recovery-status-output")
     parser.add_argument("--previous-recovery-status")
@@ -460,7 +483,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    validation = validate_precompute_bundle(Path(args.bundle_dir), trade_date=args.trade_date)
+    validation = validate_precompute_bundle(
+        Path(args.bundle_dir),
+        trade_date=args.trade_date,
+        require_sealed_paper_target=bool(args.require_sealed_paper_target),
+    )
     if args.json_output:
         _write_json(Path(args.json_output), validation)
     else:

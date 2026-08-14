@@ -51,6 +51,7 @@ READINESS_PASS = "PASS"
 READINESS_WARN = "WARN"
 READINESS_FAIL = "FAIL"
 ALLOWED_PAYLOAD_STATUSES = {"PLANNED", "EXECUTABLE"}
+SEALED_TARGET_HANDOFF_SCHEMA = "caerus.paper_precompute_handoff.v1"
 
 
 def _utc_now() -> dt.datetime:
@@ -307,6 +308,133 @@ def _load_account_snapshot(path: str | Path) -> dict[str, object]:
     return dict(account)
 
 
+def _certify_sealed_target(
+    *,
+    repo: Path,
+    trade_date: str,
+    payload_path: Path,
+    payload: Mapping[str, object],
+    artifact_path: Path,
+    timestamp: str,
+    no_submit: bool,
+    write_artifact: bool,
+    account_snapshot: Mapping[str, object] | None,
+    account_snapshot_path: str | Path | None,
+    broker: object | None,
+) -> dict[str, object]:
+    """Certify target lineage/connectivity without pretending exact orders exist."""
+
+    from core.paper_target_authority import validate_sealed_paper_target_bundle
+
+    fail_reasons: list[str] = []
+    warning_reasons: list[str] = []
+    if not no_submit:
+        fail_reasons.append("no_submit_flag_required")
+    bundle_dir = payload_path.parent
+    fail_reasons.extend(
+        validate_sealed_paper_target_bundle(
+            bundle_dir=bundle_dir,
+            trade_date=trade_date,
+            repo_root=repo,
+        )
+    )
+    rows = payload.get("target_portfolio")
+    if not isinstance(rows, list) or not rows:
+        fail_reasons.append("sealed_target_rows_missing_or_malformed")
+        rows = []
+    symbols = sorted(
+        {
+            str(row.get("symbol") or row.get("ticker") or "").strip().upper()
+            for row in rows
+            if isinstance(row, Mapping)
+        }
+        - {""}
+    )
+
+    active_broker = broker
+    if active_broker is None and account_snapshot is None and account_snapshot_path is None:
+        try:
+            active_broker = _build_broker()
+        except Exception as exc:
+            fail_reasons.append(f"broker_initialization_failed:{type(exc).__name__}:{exc}")
+
+    asset_validation: dict[str, object] = {}
+    if active_broker is not None and symbols and not fail_reasons:
+        synthetic = [
+            {"ticker": symbol, "side": "BUY", "quantity": 1.0, "price": 1.0}
+            for symbol in symbols
+        ]
+        try:
+            asset_validation = _validate_alpaca_assets(active_broker, synthetic)  # type: ignore[arg-type]
+        except Exception as exc:
+            fail_reasons.append(f"asset_validation_exception:{type(exc).__name__}:{exc}")
+        if str(asset_validation.get("asset_validation_status") or "").upper() != "PASS":
+            fail_reasons.append(
+                f"asset_validation_failure:{asset_validation.get('asset_validation_reason') or 'unknown'}"
+            )
+    elif symbols and not fail_reasons:
+        fail_reasons.append("broker_asset_lookup_unavailable")
+
+    account: dict[str, object] = {}
+    if account_snapshot is not None:
+        account = dict(account_snapshot)
+    elif account_snapshot_path:
+        try:
+            account = _load_account_snapshot(account_snapshot_path)
+        except Exception as exc:
+            fail_reasons.append(f"account_snapshot_load_failed:{type(exc).__name__}:{exc}")
+    elif active_broker is not None:
+        getter = getattr(active_broker, "get_account", None)
+        if not callable(getter):
+            fail_reasons.append("account_snapshot_unavailable:get_account_missing")
+        else:
+            try:
+                account = dict(getter() or {})
+            except Exception as exc:
+                fail_reasons.append(f"account_snapshot_unavailable:{type(exc).__name__}:{exc}")
+    else:
+        fail_reasons.append("account_snapshot_unavailable:no_broker")
+    account_status = _normalize_account_status(account) if account else ""
+    if account and account_status != "ACTIVE":
+        fail_reasons.append(f"account_not_active:{account_status or 'UNKNOWN'}")
+
+    readiness_status = READINESS_FAIL if fail_reasons else (
+        READINESS_WARN if warning_reasons else READINESS_PASS
+    )
+    artifact: dict[str, object] = {
+        "schema_version": "execution_readiness_certification.v2",
+        "trade_date": trade_date,
+        "run_timestamp": timestamp,
+        "run_timestamp_utc": timestamp,
+        "source_payload_path": str(payload_path),
+        "payload_status": str(payload.get("execution_status") or "") or None,
+        "mode": "paper",
+        "no_submit": bool(no_submit),
+        "approved_target_hash": payload.get("approved_target_hash"),
+        "target_name_count": len(symbols),
+        "target_symbols": symbols,
+        "exact_orders_deferred_to_0935": True,
+        "expected_submissions": None,
+        "broker_submission_invoked": False,
+        "readiness_scope": "sealed_target_lineage_assets_and_broker_connectivity",
+        "readiness_status": readiness_status,
+        "fail_reasons": list(dict.fromkeys(fail_reasons)),
+        "warning_reasons": list(dict.fromkeys(warning_reasons)),
+        "asset_validation": asset_validation,
+        "account_status": str(account.get("status") or "") if account else None,
+        "normalized_account_status": account_status or None,
+    }
+    artifact = _json_safe(artifact)
+    artifact["artifact_path"] = str(artifact_path)
+    if write_artifact:
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text(
+            json.dumps(artifact, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return artifact
+
+
 def _build_broker() -> AlpacaBroker:
     return AlpacaBroker.from_env()
 
@@ -344,6 +472,20 @@ def certify_execution_readiness(
     else:
         try:
             payload = _load_payload(payload_path)
+            if payload.get("schema_version") == SEALED_TARGET_HANDOFF_SCHEMA:
+                return _certify_sealed_target(
+                    repo=repo,
+                    trade_date=resolved_trade_date,
+                    payload_path=payload_path,
+                    payload=payload,
+                    artifact_path=artifact_path,
+                    timestamp=timestamp,
+                    no_submit=no_submit,
+                    write_artifact=write_artifact,
+                    account_snapshot=account_snapshot,
+                    account_snapshot_path=account_snapshot_path,
+                    broker=broker,
+                )
             trades, payload_failures = _validate_payload(payload, trade_date=resolved_trade_date)
             fail_reasons.extend(payload_failures)
         except Exception as exc:

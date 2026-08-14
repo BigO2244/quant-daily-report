@@ -28,6 +28,14 @@ artifacts and an explicit research-to-production promotion ladder.
   current or immediately preceding XNYS session while preserving the exact
   source date/path/hash. Risk may only constrain, and Trader consumes only the
   approved package.
+- The owner-approved 2026-08-14 authority migration is implemented: precompute
+  selects Orion once, seals one immutable Decision target, and publishes the
+  same `approved_target_hash` through contract, signals, handoff, 09:35 plan,
+  and exact authorization. The legacy allocator output is quarantined as
+  research and cannot rejoin PAPER execution.
+- Actual PAPER NAV has one authority: `outputs/ledger/paper/daily_nav.csv`,
+  pulled directly from Alpaca at 19:15 ET. The 19:45 portfolio-history build is
+  a derived append-only view and has no model-NAV fallback.
 - Polaris remains the historical research baseline and daily shadow comparison control.
 - Lyra is the shadow challenger.
 - SPY is the benchmark anchor.
@@ -77,7 +85,7 @@ artifacts and an explicit research-to-production promotion ladder.
 
 ## Current Priority Stack
 
-1. Observe the first governed Orion PAPER convergence run and require clean
+1. Observe the first post-migration sealed-target Orion PAPER run and require clean
    fills/rejections, reconciliation, 2% target attainment, immutable lineage,
    and universal GREEN health before declaring migration complete.
 2. FR-069 research lab modular sleeve architecture is the next major
