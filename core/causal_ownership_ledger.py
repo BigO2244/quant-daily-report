@@ -241,7 +241,12 @@ def build_causal_ownership(
         side = str(fill.get("side") or "").strip().lower()
         quantity = float(fill.get("qty") or 0.0)
         timestamp = _parse_timestamp(fill.get("transaction_time_utc"))
-        if not activity_id or not symbol or side not in {"buy", "sell"} or quantity <= 0.0:
+        if (
+            not activity_id
+            or not symbol
+            or side not in {"buy", "sell", "sell_short"}
+            or quantity <= 0.0
+        ):
             raise CausalOwnershipError("broker fill row is malformed")
         broker_order_id = str(fill.get("order_id") or "").strip()
         broker_order = broker_orders.get(broker_order_id) or {}
@@ -287,6 +292,20 @@ def build_causal_ownership(
                 inventory_effects.append(
                     {"sleeve_id": owner, "signed_quantity": assigned}
                 )
+        elif side == "sell_short":
+            # Historical PAPER activity includes a small number of pre-cutover
+            # short sales. Preserve their actual signed legacy inventory; later
+            # broker BUY fills naturally cover that negative quantity. Governed
+            # post-cutover plans remain long-only and cannot match this side.
+            if matched:
+                raise CausalOwnershipError(
+                    f"causal exact plan cannot authorize a short sale: {activity_id}"
+                )
+            owners = ownership.setdefault(symbol, {})
+            owners[LEGACY_OWNER] = owners.get(LEGACY_OWNER, 0.0) - quantity
+            inventory_effects = [
+                {"sleeve_id": LEGACY_OWNER, "signed_quantity": -quantity}
+            ]
         else:
             inventory_effects = _consume_inventory(ownership, symbol, quantity)
 

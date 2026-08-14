@@ -31,6 +31,36 @@ def _fixture(tmp_path: Path, *, unmatched_after_epoch: bool = False) -> tuple[Pa
     ledger.mkdir()
     fills = [
         {
+            "activity_id": "legacy-short",
+            "transaction_time_utc": "2026-08-12T14:00:00Z",
+            "trade_date_et": "2026-08-12",
+            "symbol": "HCA",
+            "side": "sell_short",
+            "qty": 1,
+            "price": 100,
+            "multiplier": 1,
+            "notional": 100,
+            "order_id": "broker-legacy-short",
+            "fill_type": "fill",
+            "cum_qty": 1,
+            "leaves_qty": 0,
+        },
+        {
+            "activity_id": "legacy-cover",
+            "transaction_time_utc": "2026-08-12T15:00:00Z",
+            "trade_date_et": "2026-08-12",
+            "symbol": "HCA",
+            "side": "buy",
+            "qty": 1,
+            "price": 99,
+            "multiplier": 1,
+            "notional": 99,
+            "order_id": "broker-legacy-cover",
+            "fill_type": "fill",
+            "cum_qty": 1,
+            "leaves_qty": 0,
+        },
+        {
             "activity_id": "legacy-buy",
             # Alpaca history may emit fractional widths that Python 3.10's
             # datetime parser does not accept without normalization.
