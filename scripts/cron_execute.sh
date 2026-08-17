@@ -610,9 +610,10 @@ EXACT_PLAN_PATH="${PAPER_PLANS_DIR}/exact_execution_plan_${REPORT_DATE}.json"
 if [[ -n "${CAERUS_PAPER_DRILL_EPOCH:-}" ]]; then
     AUTHORITY_RUN_ID="${REPORT_DATE}_${CAERUS_PAPER_DRILL_EPOCH}_paper_authority"
     EXACT_PLAN_PATH="${PAPER_PLANS_DIR}/exact_execution_plan_${CAERUS_PAPER_DRILL_EPOCH}.latest.json"
+    DRILL_POLICY_PATH="${REPO_ROOT}/config/paper_intraday_drill_policy_${REPORT_DATE}.json"
     DRILL_AUTH_ARGS+=(
         --drill-epoch "${CAERUS_PAPER_DRILL_EPOCH}"
-        --drill-policy-config "${REPO_ROOT}/config/paper_intraday_drill_policy_2026-08-13.json"
+        --drill-policy-config "${DRILL_POLICY_PATH}"
     )
 fi
 set +e

@@ -686,16 +686,17 @@ def test_choice2_cron_has_one_authority_and_terminal_verification_order() -> Non
 def test_cron_execute_uses_governed_intraday_paper_epoch_without_live_eligibility() -> None:
     text = (REPO_ROOT / "scripts" / "cron_execute.sh").read_text(encoding="utf-8")
     policy = json.loads(
-        (REPO_ROOT / "config" / "paper_intraday_drill_policy_2026-08-13.json").read_text(
+        (REPO_ROOT / "config" / "paper_intraday_drill_policy_2026-08-17.json").read_text(
             encoding="utf-8"
         )
     )
     assert "CAERUS_PAPER_DRILL_EPOCH" in text
     assert "--drill-epoch" in text
-    assert "paper_intraday_drill_policy_2026-08-13.json" in text
+    assert "paper_intraday_drill_policy_${REPORT_DATE}.json" in text
+    assert policy["trade_date"] == "2026-08-17"
     assert policy["paper_only"] is True
     assert policy["live_eligible"] is False
-    assert "2026-08-13T1230ET" in policy["allowed_epochs"]
+    assert "2026-08-17T1030ET" in policy["allowed_epochs"]
 
 
 def test_cron_execute_pins_two_minute_confirmed_proceeds_rotation() -> None:
