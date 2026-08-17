@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import scripts.refresh_quant_dashboard as rqd
@@ -212,3 +213,32 @@ def test_dashboard_publish_exception_writes_failed_service_health(
     assert payload["dashboard"] is None
     assert health["status"] == "FAILED"
     assert "dashboard_publish_missing" in health["reason_codes"]
+
+
+def test_refresh_health_concurrent_writers_use_independent_atomic_temps(tmp_path):
+    result = {
+        "live_status": {"status": "ok", "reason_codes": []},
+        "live_telemetry_staleness": {
+            "report_date": REPORT_DATE,
+            "reason_codes": [],
+        },
+        "dashboard": {"dashboard_json": "dashboard-data.json"},
+    }
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        paths = list(
+            pool.map(
+                lambda _index: rqd._write_refresh_health(
+                    repo_root=tmp_path,
+                    report_date=REPORT_DATE,
+                    result=result,
+                    exit_code=0,
+                ),
+                range(24),
+            )
+        )
+
+    assert len(set(paths)) == 1
+    health = json.loads(paths[0].read_text(encoding="utf-8"))
+    assert health["status"] == "SUCCESS"
+    assert list(paths[0].parent.glob("*.tmp")) == []

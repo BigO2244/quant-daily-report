@@ -11,6 +11,7 @@ import sys
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 from zoneinfo import ZoneInfo
@@ -523,8 +524,17 @@ def _write_refresh_health(
         / "refresh_status.json"
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=output_path.parent,
+        prefix=f".{output_path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+        temporary = Path(handle.name)
     temporary.replace(output_path)
     return output_path
 
