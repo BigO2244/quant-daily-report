@@ -528,6 +528,13 @@ def _prepare_result(
     ]
     if matching_observation:
         event = matching_observation[0]
+        # A governed observation is the immutable market source bar plus the
+        # regime inputs below.  The enclosing Risk package also contains fresh
+        # account metrics (equity, drawdown, positions), so its hash can change
+        # when the same source bar is authorized again against newer broker
+        # truth.  That must not manufacture another regime bar or make the
+        # original observation unusable.  The current Risk package remains
+        # independently hash-bound in the exact plan's market/risk state.
         same_payload = (
             event.observed_state == _normalized_state(observed_state)
             and event.confidence == _confidence(confidence)
@@ -535,8 +542,6 @@ def _prepare_result(
             and event.minimum_dwell_bars == int(minimum_dwell_bars)
             and event.confirmation_bars == int(confirmation_bars)
             and event.confidence_threshold == _confidence(confidence_threshold)
-            and event.risk_package_id == str(risk_package_id)
-            and event.risk_package_hash == str(risk_package_hash)
         )
         if not same_payload:
             raise RegimeStateConflictError(

@@ -172,6 +172,35 @@ def test_same_governed_observation_is_idempotent_across_different_run_ids(
     assert len(list(first.event_path.parent.glob("*.json"))) == 1
 
 
+def test_same_governed_observation_reuses_state_when_fresh_account_metrics_change_risk_hash(
+    tmp_path: Path,
+):
+    first = _persist(tmp_path, "run-1")
+    refreshed = persist_regime_authority(
+        tmp_path,
+        account_scope="PAPER",
+        account_id="paper-account",
+        sleeve_id="caerus_orion",
+        authorization_run_id="corrective-current-account-run",
+        trade_date="2026-08-12",
+        recorded_at="2026-08-12T14:00:00Z",
+        observed_state="LOW",
+        confidence=0.9,
+        acute_risk=False,
+        risk_package_id="risk:current-account-refresh",
+        risk_package_hash="f" * 64,
+        market_state_id="market:run-1",
+        minimum_dwell_bars=3,
+        confirmation_bars=2,
+    )
+
+    assert refreshed.created is False
+    assert refreshed.committed is True
+    assert refreshed.event.content_hash == first.event.content_hash
+    assert refreshed.event.authorization_run_id == "run-1"
+    assert len(list(first.event_path.parent.glob("*.json"))) == 1
+
+
 def test_same_source_bar_key_with_conflicting_payload_fails_closed(tmp_path: Path):
     first = _persist(tmp_path, "run-1")
     with pytest.raises(RegimeStateConflictError, match="conflicting payload"):
