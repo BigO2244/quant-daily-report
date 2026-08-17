@@ -9,6 +9,26 @@ This log covers material architectural and process changes. Routine bug fixes an
 
 ## Recent Major Changes (Early 2026)
 
+### Exact PAPER execution control plane and August 17 remediation
+
+- August 10–17 delivered 29 commits covering prior-session Orion authority,
+  nearest-feasible whole-share target proof, immutable v3 exact plans,
+  append-only submission recovery, typed failure/economic reconciliation,
+  schema-3 portfolio operating-model migration, causal ownership, health
+  alignment, and refresh idempotency.
+- The August 17 incident was caused by a synthetic $10,000 planning/capital
+  basis inside an otherwise full-account broker snapshot. The invalid plan sold
+  LRCX even though the same target priced against the full $11,822.55 account
+  required only buys.
+- PAPER now rejects any cap that reduces broker-authoritative NAV and validates
+  NAV, cash, cap, whole-share proof, and exact posttrade quantities before
+  creating a WAL intent or submitting an order. Recovery of a pre-existing
+  invalid intent is lookup-only.
+- Complete commit-level index, incident chain, rollback notes, and validation:
+  `docs/governance/change_index/2026-08-10_to_2026-08-17.md`.
+- Forward blocker/readiness review:
+  `docs/governance/operational_reviews/2026-08-17_paper_execution_readiness.md`.
+
 ### Institutional Portfolio Operating Model — August 14, 2026
 
 - Replaced the split PAPER morning authority with one immutable session, one

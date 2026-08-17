@@ -32,6 +32,13 @@ artifacts and an explicit research-to-production promotion ladder.
   ownership, valuation, and daily audit retain immutable hash lineage. Risk may
   only constrain. Recovery target substitution and downstream strategy
   reconstruction are rejected. Legacy planner output is quarantined research.
+- The first scheduled schema-3 PAPER session ran on 2026-08-17. Its sealed
+  target was valid, but the first 09:35 exact plan incorrectly sized against a
+  synthetic $10,000 planning basis while broker-authoritative NAV was
+  $11,822.55. A governed correction reconciled the final portfolio. Commit
+  `5c0a2cd` now rejects any shrinking PAPER cap and independently validates the
+  full-account basis before WAL or broker submission. The original artifact is
+  retained as incident evidence.
 - Actual PAPER accounting comes directly from Alpaca at 19:15 ET. Broker fills
   are mapped to exact decisions, positions reconcile to causal ownership, and
   account/position valuation shares one `pulled_at_utc`. The strict 19:45 build
@@ -85,10 +92,10 @@ artifacts and an explicit research-to-production promotion ladder.
 
 ## Current Priority Stack
 
-1. Observe the first scheduled schema-3 allocator PAPER session and require
+1. Keep execution semantics frozen while observing the next scheduled
+   post-remediation schema-3 PAPER session. Require the full-account invariant,
    clean fills/rejections, reconciliation, causal ownership, same-as-of
-   valuation, daily audit, and universal GREEN health before declaring the
-   production observation complete.
+   valuation, daily audit, and universal GREEN health before expanding work.
 2. FR-069 research lab modular sleeve architecture is the next major
    architecture workstream; it remains research-only unless a separately
    governed implementation phase is approved.

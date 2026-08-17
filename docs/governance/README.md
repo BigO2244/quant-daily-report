@@ -37,6 +37,14 @@ Start here before creating or editing any governance/strategy/FR document.
 `caerus_strategic_backlog.md`, `fr_governance_model.md`, `governance_taxonomy.md`,
 `operational_lessons.md`, `repo_artifact_policy.md`, `change_lineage_standard.md`.
 
+**Operational change and readiness history:**
+
+- `change_index/README.md` — searchable, commit-level operational change indexes.
+- `change_index/2026-08-10_to_2026-08-17.md` — complete index for the Orion
+  PAPER / exact-execution / schema-3 migration and August 17 incident.
+- `operational_reviews/2026-08-17_paper_execution_readiness.md` — forward
+  blocker register, evidence, recovery stages, and next-session checklist.
+
 **Canonical doctrine:** `docs/governance/caerus_investment_doctrine.md` is the
 strategic doctrine for strategy, sleeve, promotion, and portfolio-construction
 work. New governance or research references should defer to it unless an

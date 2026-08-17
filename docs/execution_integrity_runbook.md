@@ -6,6 +6,27 @@ Use this runbook when the paper trading workflow reports duplicate-submission pr
 
 This is an operator response guide only. It does not change trading logic.
 
+## Current governed PAPER path (schema 3)
+
+The canonical PAPER path is now:
+
+```text
+outputs/precompute/<DATE>/session_manifest.json
+  -> sleeve_decisions.json
+  -> portfolio_allocation.json
+  -> paper_target_package.json
+  -> planned_execution_payload.json (weights only; no submit authority)
+  -> outputs/paper_lane/plans/authority/<DATE>/plan_<DATE>_<id>.json
+  -> outputs/paper_lane/runs/<RUN_ID>/
+  -> outputs/paper_lane/execution_attempts/<DATE>/selection.json
+```
+
+Broker mutation is performed only by an immutable `caerus.execution_plan.v3`
+exact plan through the WAL-aware executor. The older `outputs/runs/<RUN_ID>/`
+and `orders_sent.csv` surfaces documented below may still exist for historical
+or legacy-lane evidence, but they are not the primary authority for current
+schema-3 PAPER execution.
+
 ## Where To Look
 
 Primary operator surfaces:
@@ -80,8 +101,11 @@ Duplicate-protection artifacts:
 
 Before those run-level checks, verify the morning authority line:
 
-- `outputs/precompute/<DATE>/contract.json` has `schema_version: 2` and
-  `authority_model: orion_single_sealed_target_v1`.
+- `outputs/precompute/<DATE>/contract.json` has `schema_version: 3` and status
+  `complete`.
+- `session_manifest.json`, `sleeve_decisions.json`,
+  `portfolio_allocation.json`, `paper_target_package.json`, and
+  `audit_manifest.json` are present and hash-valid.
 - `approved_target_hash` matches across `contract.json`,
   `paper_target_package.json`, `signals.json`, and
   `planned_execution_payload.json`.
@@ -93,6 +117,18 @@ Before those run-level checks, verify the morning authority line:
 
 Any mismatch is an authority-line incident. Do not bypass the bundle gate or
 manually copy a target into the 09:35 plan.
+
+For the exact run, also verify:
+
+- `risk_state.decision_nav_reconstruction.authoritative_account_nav` equals
+  planning equity, exact-plan `portfolio_nav`, capital authority, and the
+  whole-share proof equity basis within one cent;
+- `planning_equity_cap` is absent or does not reduce authoritative NAV;
+- proof target quantities equal `expected_posttrade_positions`;
+- the same symbol is not sold and repurchased on the same date unless the
+  immutable exact transition proves a necessary fractional cleanup;
+- `execution_attempts/<DATE>/selection.json` is `RESOLVED` for a successful
+  terminal run.
 
 Key fields to check:
 

@@ -72,3 +72,47 @@ patching behavior.
 5. Brett approves merge or deployment when needed.
 6. VM fast-forward or production deployment happens only after explicit
    instruction.
+
+## Execution change control
+
+Execution-adjacent work uses an incident/release discipline in addition to the
+normal task flow:
+
+1. **Freeze intent first.** Capture broker truth, artifacts, deployed SHA, and
+   the exact failure before editing code or authorizing a correction.
+2. **One root cause per patch.** Do not combine sizing, recovery, dashboard,
+   hydration, and documentation changes in one rollback unit merely because
+   they were discovered in one incident.
+3. **Prove the historical incident.** Add the exact holdings, cash, prices,
+   authority, and expected delta as a permanent adversarial replay.
+4. **Validate before mutation.** Exact target, current account NAV, current
+   holdings, cash, order delta, and no-round-trip checks must be visible before
+   submission authority.
+5. **Deploy atomically.** Candidate tests, VM validation, attestation, then a
+   read-only production smoke. A raw pull is never deployment.
+6. **Observe before expanding.** After an execution-semantic deployment, freeze
+   further execution changes until the next scheduled run reconciles or the
+   owner explicitly declares a new incident.
+7. **Close the record.** Update the weekly change index, incident/readiness
+   review, runbook, and rollback notes before starting unrelated work.
+
+### Change budget
+
+- Default: one execution-semantic release train per trading day.
+- Maximum patch scope: one independently reversible behavior plus its tests and
+  required documentation.
+- Two hot fixes to the same workflow trigger stop-the-line review and a
+  consolidated root-cause plan before a third patch.
+- Reporting, dashboard, hydration, and documentation fixes may proceed in
+  separate rollback units when they do not touch broker mutation semantics.
+
+### Minimum owner-visible execution preview
+
+Before a new or corrective PAPER mutation, show:
+
+- sealed target hash and weights;
+- broker cash, holdings, and authoritative NAV;
+- exact sell and buy delta;
+- expected posttrade holdings and cash;
+- any same-symbol same-day reversal;
+- all active safety gates and whether recovery is fresh or lookup-only.

@@ -96,3 +96,7 @@ If these conflict, stop and reconcile before changing production-adjacent code.
   changes.
 - Review documentation drift after incidents, reconciliation events, or emergency
   SCP hotfixes.
+- Publish a searchable weekly change index whenever more than five production
+  commits land in seven days, an execution incident occurs, or the same workflow
+  requires multiple hot fixes. Link each commit to operational impact,
+  validation, rollback, and canonical documents.

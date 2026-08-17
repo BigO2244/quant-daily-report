@@ -53,6 +53,23 @@ State whether generated outputs should be committed or only used for validation.
 - Unrelated dirty worktree changes were preserved.
 - Final response includes files changed, behavior impact, tests run, and risks.
 
+## Additional fields for execution-adjacent tasks
+
+- **Sealed target:** hash, weights, cash target, and authority source.
+- **Broker starting truth:** account scope, cash, holdings, authoritative NAV,
+  open orders, and snapshot time.
+- **Expected exact delta:** sells, buys, posttrade holdings, and posttrade cash.
+- **Mutation authority:** dry-run/read-only, PAPER submit, corrective epoch, or
+  lookup-only recovery.
+- **No-round-trip assertion:** identify any symbol sold and bought on the same
+  trade date and explain why it is unavoidable.
+- **Incident replay:** fixture reproducing the original failure before the fix
+  and proving it cannot reach broker submission afterward.
+- **Rollback unit:** the exact commit or feature boundary that can be reverted
+  without weakening unrelated safety gates.
+- **Observation window:** the next scheduled artifact/run that must be reviewed
+  before more execution behavior changes.
+
 ## Final Response Format
 
 - Summary of diagnosis and implementation.
