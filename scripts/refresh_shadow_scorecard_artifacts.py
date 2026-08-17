@@ -149,6 +149,29 @@ def _append_nav_series(*, output_root: Path, shadow_performance: dict[str, Any])
                 if date:
                     rows[date] = dict(existing)
     if trade_date in rows:
+        existing_row = rows[trade_date]
+        identical = True
+        for field in ("date", *MODEL_SLUGS):
+            existing_value = str(existing_row.get(field) or "")
+            candidate_value = str(row.get(field) or "")
+            if existing_value == candidate_value:
+                continue
+            try:
+                identical = float(existing_value) == float(candidate_value)
+            except (TypeError, ValueError):
+                identical = False
+            if not identical:
+                break
+        if identical:
+            return {
+                "status": "OK",
+                "reason_code": "SHADOW_EXISTING_DATE_IDENTICAL",
+                "reason": f"shadow_nav_series already contains the identical row for {trade_date}",
+                "path": str(path),
+                "rows": len(rows),
+                "latest_date": max(rows) if rows else None,
+                "idempotent": True,
+            }
         return {
             "status": "REJECTED",
             "reason_code": "SHADOW_EXISTING_DATE_RESTATEMENT_BLOCKED",

@@ -150,6 +150,39 @@ def test_append_rejects_existing_date_without_restatement_mode(tmp_path: Path) -
     assert nav_path.read_text(encoding="utf-8") == before
 
 
+def test_append_accepts_identical_existing_date_as_idempotent_refresh(tmp_path: Path) -> None:
+    output_root = tmp_path / "shadow"
+    nav_path = output_root / "performance" / "shadow_nav_series.csv"
+    _write_nav(
+        nav_path,
+        [
+            {
+                "date": "2026-06-04",
+                "caerus_polaris": "1.0",
+                "caerus_orion": "1.0",
+                "caerus_lyra": "1.0",
+                "spy_benchmark": "1.0",
+            }
+        ],
+    )
+    before = nav_path.read_text(encoding="utf-8")
+
+    status = _append_nav_series(
+        output_root=output_root,
+        shadow_performance=_performance_payload(
+            "2026-06-04",
+            nav=1.0,
+            previous_nav=1.0,
+            daily_return=0.0,
+        ),
+    )
+
+    assert status["status"] == "OK"
+    assert status["reason_code"] == "SHADOW_EXISTING_DATE_IDENTICAL"
+    assert status["idempotent"] is True
+    assert nav_path.read_text(encoding="utf-8") == before
+
+
 def test_append_rejects_existing_history_with_missing_strategy_column(tmp_path: Path) -> None:
     output_root = tmp_path / "shadow"
     nav_path = output_root / "performance" / "shadow_nav_series.csv"
