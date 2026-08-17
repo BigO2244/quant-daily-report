@@ -264,8 +264,12 @@ RUN_TS="$(date +%Y%m%dT%H%M%S%z)"
 DRY_RUN_ID="${REPORT_DATE}T${RUN_TS}_paper_cron_dry"
 SUBMIT_RUN_ID="${REPORT_DATE}T${RUN_TS}_paper_cron_submit"
 if [[ -n "${CAERUS_PAPER_DRILL_EPOCH:-}" ]]; then
-    DRY_RUN_ID="${REPORT_DATE}_${CAERUS_PAPER_DRILL_EPOCH}_paper_drill_dry"
-    SUBMIT_RUN_ID="${REPORT_DATE}_${CAERUS_PAPER_DRILL_EPOCH}_paper_drill_submit"
+    # The epoch owns the immutable plan/WAL namespace; the invocation timestamp
+    # owns append-only run and attempt artifacts.  A failed preauthorization
+    # invocation must not reserve the filenames needed to record a later
+    # idempotent recovery of the same epoch.
+    DRY_RUN_ID="${REPORT_DATE}_${CAERUS_PAPER_DRILL_EPOCH}_${RUN_TS}_paper_drill_dry"
+    SUBMIT_RUN_ID="${REPORT_DATE}_${CAERUS_PAPER_DRILL_EPOCH}_${RUN_TS}_paper_drill_submit"
 fi
 
 write_paper_pointer() {

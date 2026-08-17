@@ -693,6 +693,10 @@ def test_cron_execute_uses_governed_intraday_paper_epoch_without_live_eligibilit
     assert "CAERUS_PAPER_DRILL_EPOCH" in text
     assert "--drill-epoch" in text
     assert "paper_intraday_drill_policy_${REPORT_DATE}.json" in text
+    assert (
+        'SUBMIT_RUN_ID="${REPORT_DATE}_${CAERUS_PAPER_DRILL_EPOCH}_${RUN_TS}_paper_drill_submit"'
+        in text
+    )
     assert policy["trade_date"] == "2026-08-17"
     assert policy["paper_only"] is True
     assert policy["live_eligible"] is False
