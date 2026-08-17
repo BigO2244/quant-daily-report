@@ -4534,7 +4534,11 @@ def _run_exact_execution_path(
         final_reconciliation_status = "FAILED_RECONCILIATION"
     elif (
         not target_attainment_ok
-        and outcome.terminal_outcome is not TerminalOutcome.SUBMISSION_UNKNOWN
+        and outcome.terminal_outcome
+        in {
+            TerminalOutcome.RECONCILED_SUCCESS,
+            TerminalOutcome.AUTHORIZED_NO_TRADE,
+        }
     ):
         terminal_status = "BLOCKED" if dry_run else "FAILED_RECONCILIATION"
         final_terminal_outcome = TerminalOutcome.SYSTEM_FAILURE

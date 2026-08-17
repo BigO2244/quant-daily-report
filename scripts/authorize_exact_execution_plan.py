@@ -34,6 +34,7 @@ from brokers.alpaca_broker import AlpacaBroker
 from core.broker_retry_policy import is_retryable_broker_read_error
 from core.economic_reconciliation import DEFAULT_MARK_TIMING_TOLERANCE_BPS
 from core.live_pilot_guardrails import resolve_dynamic_cap
+from core.paper_full_account_invariant import governed_full_account_policy
 from core.precompute_bundle_validation import validate_sleeve_evaluation_payload
 from core.paper_drill_epoch import scoped_wal_root, validate_drill_epoch
 from core.regime_state_store import (
@@ -1127,6 +1128,12 @@ def authorize_exact_execution_plan(
                     "sealed Decision target diverges from portfolio allocation"
                 )
     governed_risk_controls = _plain(_risk.constraints)
+    governed_target_attainment_policy = governed_risk_controls.get(
+        "target_attainment_policy"
+    )
+    full_current_account_required = governed_full_account_policy(
+        governed_target_attainment_policy
+    )
     governed_outer_controls = dict(governed_risk_controls)
     governed_outer_controls.pop("target_attainment_policy", None)
     outer_risk_controls = (
@@ -1361,6 +1368,23 @@ def authorize_exact_execution_plan(
         market_state_evidence
     )
     decision_nav = float(nav_evidence["authoritative_account_nav"])
+    if full_current_account_required and (
+        not math.isclose(
+            float(nav_evidence["planning_equity"]),
+            decision_nav,
+            rel_tol=1e-9,
+            abs_tol=0.01,
+        )
+        or not math.isclose(
+            float(nav_evidence["planning_cash"]),
+            float(cash),
+            rel_tol=1e-9,
+            abs_tol=0.01,
+        )
+    ):
+        raise RuntimeError(
+            "governed PAPER target-attainment requires the full broker account basis"
+        )
     settled, _history, availability = _settled_cash_context(
         broker,
         broker_cash=float(cash),
@@ -1374,6 +1398,13 @@ def authorize_exact_execution_plan(
     cap, cap_source = resolve_dynamic_cap(decision_nav, env)
     if cap is None or cap <= 0:
         raise RuntimeError("dynamic capital cap is unresolved at Decision")
+    if full_current_account_required and not math.isclose(
+        float(cap), decision_nav, rel_tol=1e-9, abs_tol=0.01
+    ):
+        raise RuntimeError(
+            "governed PAPER target-attainment requires capital authority equal to "
+            "the full broker account NAV"
+        )
     max_orders = int(float(env.get("CAERUS_LIVE_PILOT_MAX_ORDERS") or 50))
     min_trade = float(env.get("CAERUS_LIVE_PILOT_MIN_TRADE_USD") or 10)
     config = live_pilot_execution_config(
@@ -1726,6 +1757,10 @@ def authorize_exact_execution_plan(
             "max_orders": max_orders,
             "capital_cap_usd": float(cap),
             "capital_cap_source": cap_source,
+            "full_current_account_required": bool(full_current_account_required),
+            "full_current_account_invariant": (
+                "PASS" if full_current_account_required else "NOT_APPLICABLE"
+            ),
             "allow_fractional": bool(plan.get("allow_fractional", False)),
             "sell_first": True,
             "post_sell_rebudgeting": "FORBIDDEN",

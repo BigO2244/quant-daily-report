@@ -35,6 +35,7 @@ from core.live_pilot_guardrails import (
     validate_live_pilot_submission_guardrails,
 )
 from core.paper_drill_epoch import claim_namespace, plan_drill_epoch, scoped_wal_root
+from core.paper_full_account_invariant import full_account_plan_invariant_error
 from paper.trading_calendar import ET_TZ, market_session_status
 from core.submission_wal import (
     BrokerOrderEvidence,
@@ -1422,6 +1423,19 @@ def _execute_exact_plan_locked(
             reconciliation="FAILED_PRE_SUBMIT",
             failure_class=FailureClass.AUTHORIZATION_FAILURE,
         )
+    full_account_invariant_error = full_account_plan_invariant_error(plan)
+    if full_account_invariant_error and not durable_intents:
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="BLOCKED",
+            reason=(
+                "full_account_execution_invariant_failed:"
+                f"{full_account_invariant_error}"
+            ),
+            reconciliation="FAILED_PRE_SUBMIT",
+            failure_class=FailureClass.AUTHORIZATION_FAILURE,
+        )
     orders_by_client = {str(order["client_order_id"]): order for order in plan.orders}
     durable_intents_by_client = {
         intent.client_order_id: intent for intent in durable_intents
@@ -1572,6 +1586,25 @@ def _execute_exact_plan_locked(
             final_positions=positions,
             final_cash=cash,
             reconciliation="FAILED_PRE_SUBMIT",
+            failure_class=FailureClass.AUTHORIZATION_FAILURE,
+        )
+    if full_account_invariant_error:
+        # Existing durable intents mean the broker may already have mutated.
+        # Recovery is lookup-only: preserve the observed evidence, but never
+        # create or submit another intent from an internally contradictory plan.
+        return _outcome(
+            plan,
+            terminal=TerminalOutcome.SYSTEM_FAILURE,
+            status="FAILED_RECONCILIATION",
+            reason=(
+                "full_account_execution_invariant_failed_after_prior_intent:"
+                f"{full_account_invariant_error}"
+            ),
+            submitted=recovered_evidence,
+            filled=[row for row in recovered_evidence if _has_fill(row)],
+            final_positions=positions,
+            final_cash=cash,
+            reconciliation="FAILED_RECONCILIATION",
             failure_class=FailureClass.AUTHORIZATION_FAILURE,
         )
     try:

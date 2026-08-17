@@ -3167,6 +3167,12 @@ def test_exact_executor_fails_terminal_verification_for_wrong_equity_basis(
         risk_state={
             **dict(exact_payload["risk_state"]),
             "trade_meta": {"whole_share_feasibility": proof},
+            "decision_nav_reconstruction": {
+                "authoritative_account_nav": 1000.0,
+                "planning_equity": 1000.0,
+                "planning_equity_cap": None,
+                "planning_cash": 900.0,
+            },
         },
     )
     handoff = _handoff(exact)
@@ -3195,15 +3201,40 @@ def test_exact_executor_fails_terminal_verification_for_wrong_equity_basis(
         ).read_text()
     )
 
-    assert broker.submit_calls == 2
-    assert result["terminal_status"] == "FAILED_RECONCILIATION"
+    assert broker.submit_calls == 0
+    assert result["terminal_status"] in {"BLOCKED", "FAILED_RECONCILIATION"}
     assert result["terminal_outcome"] == "SYSTEM_FAILURE"
-    assert result["reason_code"].startswith(
-        "target_attainment_failed:fail_feasibility_proof_invalid:"
-    )
+    assert "full_account_execution_invariant_failed" in result["reason_code"]
+    assert "whole_share_proof_equity_not_authoritative_account_nav" in result[
+        "reason_code"
+    ]
     assert attainment["whole_share_feasibility_equity_basis"] == 500.0
     assert attainment["expected_execution_equity_basis"] == 1000.0
     assert attainment["whole_share_feasibility_equity_basis_valid"] is False
+
+    recovery_broker = TrackingPaperBroker()
+    recovery_wal = tmp_path / "invalid-plan-recovery-wal"
+    _seed_legacy_durable_orders(
+        plan=exact,
+        broker=recovery_broker,
+        wal_root=recovery_wal,
+        count=1,
+    )
+    accepted_calls = recovery_broker.submit_calls
+    recovered = execute_exact_plan(
+        plan_payload=exact.to_dict(),
+        broker=recovery_broker,
+        env=_execution_env(tmp_path / "invalid-plan-recovery"),
+        wal_root=recovery_wal,
+        attempt_id="invalid-full-account-proof-recovery",
+        dry_run=False,
+    )
+
+    assert recovery_broker.submit_calls == accepted_calls
+    assert len(recovered.orders_submitted) == 1
+    assert recovered.reason_code.startswith(
+        "full_account_execution_invariant_failed_after_prior_intent:"
+    )
 
 
 def test_exact_orders_are_blocked_after_market_close_before_submission(tmp_path: Path):
@@ -3852,6 +3883,187 @@ def test_authorizer_sizes_target_from_full_current_broker_account(tmp_path: Path
     assert broker.positions == [
         {"symbol": "AAPL", "qty": "23.0", "market_value": "1161.5"}
     ]
+
+
+def test_august_17_full_account_replay_has_no_avoidable_round_trip(
+    tmp_path: Path,
+):
+    class August17Broker(TrackingPaperBroker):
+        prices = {
+            "INTC": 103.12,
+            "LRCX": 335.83,
+            "MU": 1006.775,
+            "STX": 985.09,
+            "WDC": 528.075,
+        }
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.cash = 1855.38
+            quantities = {"INTC": 18, "LRCX": 6, "MU": 2, "STX": 2, "WDC": 4}
+            self.positions = [
+                {
+                    "symbol": symbol,
+                    "qty": str(quantity),
+                    "market_value": str(quantity * self.prices[symbol]),
+                }
+                for symbol, quantity in quantities.items()
+            ]
+
+        def get_latest_trades(self, symbols):
+            return {
+                str(symbol): {
+                    "symbol": str(symbol),
+                    "price": str(self.prices[str(symbol)]),
+                    "timestamp": "2026-08-12T13:35:00+00:00",
+                    "feed": "AUGUST_17_REPLAY",
+                }
+                for symbol in symbols
+            }
+
+    broker = August17Broker()
+    target_rows = [
+        {"symbol": symbol, "target_weight": 0.19, "price": price}
+        for symbol, price in broker.prices.items()
+    ]
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.05,
+        "minimum_cash_weight": 0.025,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    source = tmp_path / "august-17-replay.json"
+    source.write_text("{}\n", encoding="utf-8")
+    sleeve_path, sleeve_hash = _write_orion_sleeve_authority(tmp_path)
+    approved_package, authority_paths = _write_authority_chain(
+        tmp_path,
+        target_rows=target_rows,
+        sleeve_hash=sleeve_hash,
+        constraints={"regime": "NORMAL", "target_attainment_policy": policy},
+        target_cash_weight=0.05,
+    )
+    plan = {
+        "trade_date": "2026-08-12",
+        "execution_lane": "paper",
+        "approved_sleeve": "caerus_orion",
+        "allow_fractional": False,
+        "target_portfolio": target_rows,
+        "approved_execution_package": approved_package,
+        "authority_package_paths": authority_paths,
+        "cash_target_weight": 0.05,
+        "risk_controls": {"regime": "NORMAL"},
+        "source_precompute_payload": "precompute.json",
+        "source_signals": "signals.json",
+        "source_sleeve_evaluations": sleeve_path,
+        "source_sleeve_evaluations_sha256": sleeve_hash,
+    }
+    env = _env()
+    env.pop("CAERUS_LIVE_PILOT_CAPITAL_CAP", None)
+    env.pop("CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP", None)
+
+    authorized = authorize_exact_execution_plan(
+        plan=plan,
+        broker=broker,
+        env=env,
+        run_id="august-17-full-account-replay",
+        plan_path=source,
+        created_at="2026-08-12T13:35:01+00:00",
+        regime_state_root=tmp_path / "regime-state",
+    )
+    authorized = _finalize_direct_authorization(
+        tmp_path / "regime-state", authorized
+    )
+    exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
+
+    assert exact.portfolio_nav == pytest.approx(11822.55)
+    assert not exact.sell_orders
+    assert [(row["symbol"], row["quantity"]) for row in exact.buy_orders] == [
+        ("INTC", 4.0),
+        ("LRCX", 1.0),
+        ("WDC", 1.0),
+    ]
+    assert exact.expected_posttrade_positions == (
+        {"quantity": 22.0, "symbol": "INTC"},
+        {"quantity": 7.0, "symbol": "LRCX"},
+        {"quantity": 2.0, "symbol": "MU"},
+        {"quantity": 2.0, "symbol": "STX"},
+        {"quantity": 5.0, "symbol": "WDC"},
+    )
+    assert exact.constraints["full_current_account_invariant"] == "PASS"
+
+
+@pytest.mark.parametrize(
+    "cap_env",
+    [
+        {"CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+        {"CAERUS_LIVE_PILOT_CAPITAL_CAP": "1000"},
+        {"CAERUS_LIVE_PILOT_CAP_PCT": "0.85"},
+    ],
+)
+def test_governed_full_account_authorization_rejects_synthetic_caps_before_plan(
+    tmp_path: Path,
+    cap_env: dict[str, str],
+):
+    broker = TrackingPaperBroker()
+    broker.cash = 1100.0
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.05,
+        "minimum_cash_weight": 0.025,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    rows = [{"symbol": "AAPL", "target_weight": 0.95, "price": 50.0}]
+    sleeve_path, sleeve_hash = _write_orion_sleeve_authority(tmp_path)
+    approved_package, authority_paths = _write_authority_chain(
+        tmp_path,
+        target_rows=rows,
+        sleeve_hash=sleeve_hash,
+        constraints={"regime": "NORMAL", "target_attainment_policy": policy},
+        target_cash_weight=0.05,
+    )
+    env = _env()
+    env.pop("CAERUS_LIVE_PILOT_CAPITAL_CAP", None)
+    env.pop("CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP", None)
+    env.update(cap_env)
+
+    with pytest.raises(RuntimeError, match="governed PAPER target-attainment"):
+        authorize_exact_execution_plan(
+            plan={
+                "trade_date": "2026-08-12",
+                "execution_lane": "paper",
+                "approved_sleeve": "caerus_orion",
+                "allow_fractional": False,
+                "target_portfolio": rows,
+                "approved_execution_package": approved_package,
+                "authority_package_paths": authority_paths,
+                "cash_target_weight": 0.05,
+                "risk_controls": {"regime": "NORMAL"},
+                "source_precompute_payload": "precompute.json",
+                "source_signals": "signals.json",
+                "source_sleeve_evaluations": sleeve_path,
+                "source_sleeve_evaluations_sha256": sleeve_hash,
+            },
+            broker=broker,
+            env=env,
+            run_id="synthetic-cap-rejected",
+            plan_path=tmp_path / "synthetic-cap.json",
+            created_at="2026-08-12T13:35:01+00:00",
+            regime_state_root=tmp_path / "regime-state",
+        )
+
+    assert broker.submit_calls == 0
 
 
 def test_fresh_broker_decision_preserves_explicit_zero_weight_exit(
@@ -4598,7 +4810,6 @@ def test_authorizer_accepts_real_governed_paper_target_attainment_package(tmp_pa
     broker = TrackingPaperBroker()
     execution_env = {
         **_env(),
-        "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000",
         "CAERUS_REQUIRE_EXACT_EXECUTION_PLAN": "1",
     }
     authorized = authorize_exact_execution_plan(
