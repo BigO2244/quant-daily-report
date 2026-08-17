@@ -74,7 +74,7 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, numbers.Real):
         numeric = float(value)
         return numeric if math.isfinite(numeric) else None
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
@@ -4400,6 +4400,74 @@ def _run_exact_execution_path(
             },
         )
 
+    approved_package = (
+        plan.get("approved_execution_package")
+        if isinstance(plan.get("approved_execution_package"), Mapping)
+        else {}
+    )
+    approved_constraints = (
+        approved_package.get("constraints")
+        if isinstance(approved_package.get("constraints"), Mapping)
+        else {}
+    )
+    target_attainment_required = isinstance(
+        approved_constraints.get("target_attainment_policy"), Mapping
+    ) and bool(approved_constraints.get("target_attainment_policy"))
+    try:
+        from core.lane_target_attainment import build_lane_target_attainment
+
+        exact_risk_state = (
+            bound.risk_state if isinstance(bound.risk_state, Mapping) else {}
+        )
+        exact_trade_meta = (
+            exact_risk_state.get("trade_meta")
+            if isinstance(exact_risk_state.get("trade_meta"), Mapping)
+            else {}
+        )
+        target_attainment = build_lane_target_attainment(
+            plan=plan,
+            post_snapshot=post_snapshot,
+            reconciliation=reconciliation,
+            run_id=run_id,
+            trade_date=trade_date,
+            mode="paper",
+            dry_run=bool(dry_run),
+            drift_tolerance=float(
+                _finite_float(plan.get("target_attainment_tolerance")) or 0.02
+            ),
+            feasibility_evidence=_json_safe(
+                exact_trade_meta.get("whole_share_feasibility")
+            ),
+        )
+    except Exception as exc:
+        target_attainment = {
+            "schema_version": "caerus_lane_target_attainment_v2",
+            "run_id": run_id,
+            "trade_date": trade_date,
+            "account_scope": "PAPER",
+            "status": "UNKNOWN_INSUFFICIENT_ARTIFACTS",
+            "reason_code": f"target_attainment_build_failed:{exc}",
+        }
+    target_attainment["required_for_terminal_success"] = bool(
+        target_attainment_required
+    )
+    audit_dir = run_root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(
+        audit_dir / f"execution_target_attainment_{trade_date}.json",
+        target_attainment,
+    )
+    from core.target_attainment_policy import target_status_passes
+
+    target_attainment_status = str(
+        target_attainment.get("status") or "UNKNOWN_INSUFFICIENT_ARTIFACTS"
+    ).upper()
+    target_attainment_ok = bool(
+        dry_run
+        or not target_attainment_required
+        or target_status_passes(target_attainment_status)
+    )
+
     dry_validation_suppressions = bool(dry_run) and all(
         str((row.get("suppression") or {}).get("reason_code") or "")
         == "DRY_RUN_VALIDATION_ONLY"
@@ -4464,6 +4532,20 @@ def _run_exact_execution_path(
         final_failure_class = FailureClass.RECONCILIATION_FAILURE
         final_reason = economic_reason or "canonical_economic_verification_failed"
         final_reconciliation_status = "FAILED_RECONCILIATION"
+    elif (
+        not target_attainment_ok
+        and outcome.terminal_outcome is not TerminalOutcome.SUBMISSION_UNKNOWN
+    ):
+        terminal_status = "BLOCKED" if dry_run else "FAILED_RECONCILIATION"
+        final_terminal_outcome = TerminalOutcome.SYSTEM_FAILURE
+        from core.failure_semantics import FailureClass
+
+        final_failure_class = FailureClass.RECONCILIATION_FAILURE
+        final_reason = (
+            f"target_attainment_failed:{target_attainment_status.lower()}:"
+            f"{target_attainment.get('reason_code') or 'unknown'}"
+        )
+        final_reconciliation_status = "FAILED_RECONCILIATION"
     summary = {
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
@@ -4488,6 +4570,9 @@ def _run_exact_execution_path(
         "reconciliation_status": final_reconciliation_status,
         "canonical_economic_verification_status": economic_status,
         "canonical_economic_verification_reason": economic_reason,
+        "execution_target_attainment_required": target_attainment_required,
+        "execution_target_attainment_status": target_attainment_status,
+        "execution_target_attainment_reason": target_attainment.get("reason_code"),
         "execution_equality_status": equality["decision"],
         "run_root": str(run_root),
     }
@@ -4565,15 +4650,25 @@ def _run_exact_execution_path(
                 if isinstance(plan.get("decision_source_artifact"), Mapping)
                 else None
             ),
+            "target_attainment_policy": approved_constraints.get(
+                "target_attainment_policy"
+            ),
+            "whole_share_feasibility": target_attainment.get(
+                "whole_share_feasibility"
+            ),
+            "execution_target_attainment_required": target_attainment_required,
+            "execution_target_attainment_status": target_attainment_status,
+            "execution_target_attainment_reason": target_attainment.get(
+                "reason_code"
+            ),
         },
     )
-    audit_dir = run_root / "audit"
-    audit_dir.mkdir(parents=True, exist_ok=True)
     integrity_ok = (
         equality_ok
         and outcome.terminal_outcome
         in {TerminalOutcome.RECONCILED_SUCCESS, TerminalOutcome.AUTHORIZED_NO_TRADE}
         and economic_status == "RECONCILED"
+        and target_attainment_ok
     )
     if dry_run:
         integrity_ok = equality_ok and economic_status != "FAILED_RECONCILIATION"
@@ -4590,6 +4685,8 @@ def _run_exact_execution_path(
             "terminal_outcome": final_terminal_outcome.value,
             "reconciliation_status": final_reconciliation_status,
             "canonical_economic_verification_status": economic_status,
+            "target_attainment_required": target_attainment_required,
+            "target_attainment_status": target_attainment_status,
             "equality_gate_status": equality["decision"],
             "findings": [] if integrity_ok else [final_reason],
         },
@@ -5006,6 +5103,11 @@ def _run_exact_execution_path(
                 final_failure_class.value if final_failure_class is not None else None
             ),
             "reconciliation_status": final_reconciliation_status,
+            "execution_target_attainment_required": target_attainment_required,
+            "execution_target_attainment_status": target_attainment_status,
+            "execution_target_attainment_reason": target_attainment.get(
+                "reason_code"
+            ),
             "run_root": str(run_root),
         },
     )
@@ -5021,10 +5123,13 @@ def _run_exact_execution_path(
                     TerminalOutcome.RECONCILED_SUCCESS,
                     TerminalOutcome.AUTHORIZED_NO_TRADE,
                 }
+                and target_attainment_ok
                 else "FAIL"
             ),
             "terminal_outcome": final_terminal_outcome.value,
             "reconciliation_status": final_reconciliation_status,
+            "target_attainment_required": target_attainment_required,
+            "target_attainment_status": target_attainment_status,
             "findings": (
                 []
                 if terminal_status in {"SUBMITTED", "AUTHORIZED_NO_TRADE", "DRY_RUN"}

@@ -181,3 +181,61 @@ def test_governed_policy_fails_closed_without_complete_quantity_proof() -> None:
 
     assert payload["status"] == "FAIL_FEASIBILITY_PROOF_INVALID"
     assert payload["whole_share_feasibility_valid"] is False
+
+
+def test_nearest_feasible_proof_cannot_use_a_smaller_account_denominator() -> None:
+    package_hash = "approved-package-hash"
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.05,
+        "minimum_cash_weight": 0.025,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    plan = {
+        "approved_execution_package": {
+            "content_hash": package_hash,
+            "approved_cash_weight": 0.05,
+            "approved_target_rows": [
+                {"symbol": "AAA", "target_weight": 0.95},
+            ],
+            "constraints": {"target_attainment_policy": policy},
+        },
+        "exact_execution_plan": {"portfolio_nav": 1200.0},
+    }
+    proof = seal_whole_share_proof(
+        {
+            "schema_version": "caerus.whole_share_feasibility.v1",
+            "status": "PASS",
+            "approved_execution_package_hash": package_hash,
+            "equity_basis": 1000.0,
+            "allocation": [{"symbol": "AAA", "target_quantity": 10}],
+        }
+    )
+
+    payload = build_lane_target_attainment(
+        plan=plan,
+        post_snapshot={
+            "account": {"equity": "1200", "cash": "200"},
+            "positions": [
+                {"symbol": "AAA", "qty": "10", "market_value": "1000"},
+            ],
+        },
+        reconciliation={"status": "CLEAN"},
+        run_id="wrong-denominator",
+        trade_date="2026-08-17",
+        mode="paper",
+        dry_run=False,
+        feasibility_evidence=proof,
+    )
+
+    assert payload["status"] == "FAIL_FEASIBILITY_PROOF_INVALID"
+    assert payload["expected_execution_equity_basis"] == 1200.0
+    assert payload["whole_share_feasibility_equity_basis"] == 1000.0
+    assert payload["whole_share_feasibility_equity_basis_valid"] is False
+    assert payload["nearest_feasible_verified"] is False

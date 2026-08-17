@@ -103,13 +103,20 @@ else
     exit 1
 fi
 
+# PAPER's governed target already carries its cash reserve (5% for Orion).
+# Use the complete current account as the independent submission ceiling so the
+# same reserve is not applied a second time by the shared live-lane cap default.
+export CAERUS_LIVE_PILOT_CAP_PCT="1.0"
+
 # --- Shared lane behavior params (shared defaults; single source for both lanes) ---
 # Sourced AFTER .env. lane_params.sh provides SHARED DEFAULTS with env-wins
-# semantics for the execution knobs (MIN_TRADE_USD, MAX_ORDERS, CAP_PCT) and
-# the concentrated-alpha per-name ceiling (CONCENTRATED_MAX_WEIGHT — always-on,
-# no flag; must match cron_precompute so RiskControls does not re-clip the book):
-# an operator-set value in .env is never silently overridden. Divergence between
-# lanes shows up as different lane_params_fingerprint values in the two cron logs.
+# semantics for MIN_TRADE_USD, MAX_ORDERS, and the concentrated-alpha per-name
+# ceiling (CONCENTRATED_MAX_WEIGHT — always-on, no flag).
+# PAPER's CAP_PCT is deliberately lane-owned at 1.0 above because target cash is
+# already governed by the sealed portfolio; the live lane retains its own value.
+# CONCENTRATED_MAX_WEIGHT must match cron_precompute so RiskControls does not
+# re-clip the book. All other operator-set values in .env are never silently
+# overridden. Divergence between lanes appears in their parameter fingerprints.
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/scripts/lane_params.sh"
 
@@ -138,19 +145,13 @@ if [[ "${ALPACA_BASE_URL}" != "https://paper-api.alpaca.markets" ]]; then
     exit 1
 fi
 
-# --- Paper-lane pins ---
-# Staging scale: pin the plan/exec capital cap to $10k so paper exercises the
-# engine at a fixed, comparable scale regardless of the paper account's drifting
-# portfolio value (resolve_dynamic_cap only ever TIGHTENS to this value).
-export CAERUS_LIVE_PILOT_CAPITAL_CAP="10000"
-# The cap alone is NOT enough: the executor sizes target shares against the
-# broker account's REAL equity (weight * total_equity / price), so a paper
-# account far above $10k would compute needs that exceed the approved cap and
-# hard-block with live_pilot_total_notional_exceeds_cap before the dry pass.
-# PLANNING_EQUITY_CAP clamps the executor's planning equity to the same $10k
-# staging scale (it only ever TIGHTENS; unset on the live lane -> live sizes
-# against real equity, unchanged).
-export CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP}"
+# --- Paper-lane account scope ---
+# PAPER is a full-current-account target lane.  Stale environment values must
+# never shrink the broker account into a synthetic staging account.  The exact
+# 09:35 authorizer reconstructs NAV from fresh broker cash, positions, and marks;
+# the sealed target's cash weight supplies the reserve independently.
+unset CAERUS_LIVE_PILOT_CAPITAL_CAP
+unset CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP
 # Transitional input hint for the current one-capital-sleeve configuration. The
 # plan builder replaces it with ``caerus_paper_portfolio`` automatically when
 # the sealed allocator package contains more than one capital sleeve.
@@ -252,7 +253,7 @@ echo "mode=${MODE} trading_mode=${TRADING_MODE} alpaca_paper=${ALPACA_PAPER}"
 echo "alpaca_base_url=${ALPACA_BASE_URL}"
 echo "engine=live_pilot_build_plan_from_precompute+live_pilot_execute"
 echo "lane_params_fingerprint=${CAERUS_LANE_PARAMS_FINGERPRINT}"
-echo "capital_cap_pin=${CAERUS_LIVE_PILOT_CAPITAL_CAP}"
+echo "paper_account_scope=FULL_CURRENT_ACCOUNT"
 echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 echo "min_trade_usd=${CAERUS_LIVE_PILOT_MIN_TRADE_USD}"
 echo "paper_fractional_exit_enabled=${CAERUS_PAPER_FRACTIONAL_EXIT_ENABLED}"
@@ -509,9 +510,9 @@ echo "bundle_validation=${BUNDLE_VALIDATION_PATH}"
 # can publish the exact broker-ready plan.
 echo "precompute_authority=SEALED_DECISION_TARGET_ONLY"
 
-# --- Resolve the capital cap (same resolver as the live lane) ---
-# For paper the PAPER account's portfolio value is tightened by the $10k staging
-# pin above, so plan sizing and execution agree at the pinned scale.
+# --- Resolve the capital cap from the current broker account ---
+# This is a submission ceiling, not a planning-equity substitute. Exact target
+# quantities are calculated later from the authorizer's fresh reconstructed NAV.
 CAP_RESOLVE="$(
     "${PYTHON_BIN}" - <<'PY'
 import os, sys
@@ -524,11 +525,12 @@ try:
 except Exception as exc:  # fail-closed: any error -> unresolved -> block
     print("", f"error:{exc}", sep="\t")
     sys.exit(0)
-print("" if cap is None else f"{cap:.2f}", src, sep="\t")
+print("" if cap is None else f"{cap:.2f}", src, "" if pv is None else str(pv), sep="\t")
 PY
 )"
 PLAN_CAP="$(printf '%s' "${CAP_RESOLVE}" | cut -f1)"
 CAP_SOURCE="$(printf '%s' "${CAP_RESOLVE}" | cut -f2)"
+BROKER_ACCOUNT_VALUE="$(printf '%s' "${CAP_RESOLVE}" | cut -f3)"
 if [[ -z "${PLAN_CAP}" ]]; then
     echo "FATAL: could not resolve paper capital cap (source=${CAP_SOURCE})"
     CAP_FAILURE_REASON="$(
@@ -546,7 +548,8 @@ PY
     )"
     fail_lane "${CAP_FAILURE_REASON}"
 fi
-echo "resolved_capital_cap=${PLAN_CAP} (source=${CAP_SOURCE})"
+echo "current_broker_account_value=${BROKER_ACCOUNT_VALUE}"
+echo "resolved_submission_cap=${PLAN_CAP} (source=${CAP_SOURCE})"
 
 # --- Mark execution running for the confirm flow ---
 write_paper_pointer \
@@ -671,39 +674,43 @@ if [[ -z "${REPORTED_SUBMIT_RUN_ROOT}" || "${REPORTED_SUBMIT_RUN_ROOT}" != "${EX
     SUBMIT_REASON="exact_execution_run_root_identity_mismatch"
 fi
 
-# The canonical pointer remains nonterminal while mandatory reconciliation and
-# health verification run. Confirmation must never observe success early.
-write_paper_pointer \
-    "${SUBMIT_RUN_ID}" \
-    "${SUBMIT_RUN_ROOT}" \
-    "running" \
-    "paper_posttrade_verification_started"
-
 EXIT_CODE=0
 if [[ "${SUBMIT_STATUS}" -ne 0 ]] || [[ "${SUBMIT_TERMINAL}" != "SUBMITTED" && "${SUBMIT_TERMINAL}" != "AUTHORIZED_NO_TRADE" ]]; then
     EXIT_CODE=1
 fi
+FINAL_TERMINAL="${SUBMIT_TERMINAL:-failed_unknown}"
+FINAL_REASON="${SUBMIT_REASON}"
+if ! write_paper_pointer \
+    "${SUBMIT_RUN_ID}" \
+    "${SUBMIT_RUN_ROOT}" \
+    "${FINAL_TERMINAL}" \
+    "${FINAL_REASON}"; then
+    EXIT_CODE=1
+    echo "ERROR: canonical terminal execution pointer publication failed" >&2
+fi
 
-# Reconcile the exact approved package against broker truth, then require the
-# complete daily health surface to be green before terminal publication.
+# Exact-plan equality, broker fills, quantities, cash, economics, and governed
+# target attainment are terminal checks inside live_pilot_execute.py.  The daily
+# shadow/analytics surface remains observable, but it is reporting health and
+# cannot retroactively rewrite a reconciled broker execution.
+SHADOW_REPORT_STATUS="SKIPPED"
+OPERATIONAL_DRAG_STATUS="SKIPPED"
+DAILY_HEALTH_COMMAND_STATUS="SKIPPED"
+HEALTH_STATUS="MISSING"
 if [[ ${EXIT_CODE} -eq 0 ]]; then
+    SHADOW_REPORT_STATUS=0
     "${PYTHON_BIN}" -m scripts.live_vs_shadow_reconciliation \
         --trade-date "${REPORT_DATE}" \
-        --broker-positions-path "${SUBMIT_RUN_ROOT}/live_pilot_broker_snapshot_post.json" || EXIT_CODE=$?
-fi
-# Rebuild the current-date economic/intent surface from this exact attempt.
-# Health must never certify a stale pre-attempt operational-drag artifact.
-if [[ ${EXIT_CODE} -eq 0 ]]; then
+        --broker-positions-path "${SUBMIT_RUN_ROOT}/live_pilot_broker_snapshot_post.json" \
+        || SHADOW_REPORT_STATUS=$?
+    OPERATIONAL_DRAG_STATUS=0
     "${PYTHON_BIN}" scripts/run_operational_drag_analysis.py \
         --date "${REPORT_DATE}" \
-        --repo-root "${REPO_ROOT}" || EXIT_CODE=$?
-fi
-if [[ ${EXIT_CODE} -eq 0 ]]; then
+        --repo-root "${REPO_ROOT}" || OPERATIONAL_DRAG_STATUS=$?
+    DAILY_HEALTH_COMMAND_STATUS=0
     "${PYTHON_BIN}" -m scripts.caerus_daily_health_check \
         --trade-date "${REPORT_DATE}" \
-        --root "${REPO_ROOT}" || EXIT_CODE=$?
-fi
-if [[ ${EXIT_CODE} -eq 0 ]]; then
+        --root "${REPO_ROOT}" || DAILY_HEALTH_COMMAND_STATUS=$?
     HEALTH_STATUS="$(
         HEALTH_PATH="${REPO_ROOT}/outputs/health/caerus_daily_health_check/${REPORT_DATE}/health_check.json" \
             "${PYTHON_BIN}" - <<'PY'
@@ -716,82 +723,50 @@ payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 print(str(payload.get("overall_status") or "MISSING"))
 PY
     )"
-    if [[ "${HEALTH_STATUS}" != "GREEN" ]]; then
-        echo "ERROR: universal health gate is ${HEALTH_STATUS}, expected GREEN"
-        EXIT_CODE=1
+    if [[ "${SHADOW_REPORT_STATUS}" != "0" || "${OPERATIONAL_DRAG_STATUS}" != "0" || "${DAILY_HEALTH_COMMAND_STATUS}" != "0" || "${HEALTH_STATUS}" != "GREEN" ]]; then
+        echo "WARNING: non-blocking posttrade reporting is degraded (shadow=${SHADOW_REPORT_STATUS}, drag=${OPERATIONAL_DRAG_STATUS}, health_command=${DAILY_HEALTH_COMMAND_STATUS}, health=${HEALTH_STATUS})"
     fi
 fi
-
-FINAL_TERMINAL="${SUBMIT_TERMINAL:-failed_unknown}"
-FINAL_REASON="${SUBMIT_REASON}"
-if [[ ${EXIT_CODE} -ne 0 ]]; then
-    FINAL_TERMINAL="FAILED_RECONCILIATION"
-    FINAL_REASON="paper_posttrade_verification_failed:${SUBMIT_REASON:-unknown}"
-    set +e
-    POSTTRADE_RUN_ROOT="${SUBMIT_RUN_ROOT}" POSTTRADE_REASON="${FINAL_REASON}" REPORT_DATE="${REPORT_DATE}" PAPER_LANE_ROOT="${PAPER_LANE_ROOT}" "${PYTHON_BIN}" - <<'PY'
+REPORTING_ARTIFACT="${WORKFLOW_DIR}/paper_posttrade_reporting.json"
+REPORTING_ARTIFACT="${REPORTING_ARTIFACT}" \
+SHADOW_REPORT_STATUS="${SHADOW_REPORT_STATUS}" \
+OPERATIONAL_DRAG_STATUS="${OPERATIONAL_DRAG_STATUS}" \
+DAILY_HEALTH_COMMAND_STATUS="${DAILY_HEALTH_COMMAND_STATUS}" \
+HEALTH_STATUS="${HEALTH_STATUS}" \
+FINAL_TERMINAL="${FINAL_TERMINAL}" \
+FINAL_REASON="${FINAL_REASON}" \
+    "${PYTHON_BIN}" - <<'PY' || echo "WARNING: could not persist non-blocking posttrade reporting artifact" >&2
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from core.execution_attempt_registry import AttemptRecord, append_attempt, read_attempts, select_from_registry, write_selection_pointer
-from core.failure_semantics import FailureClass, TerminalOutcome
 
-run_root = Path(os.environ["POSTTRADE_RUN_ROOT"])
-reason = os.environ["POSTTRADE_REASON"]
-trade_date = os.environ["REPORT_DATE"]
-def update(relative, changes):
-    path = run_root / relative
-    payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    payload.update(changes)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-terminal = {
-    "terminal_status": "FAILED_RECONCILIATION",
-    "terminal_outcome": "SYSTEM_FAILURE",
-    "reason_code": reason,
-    "failure_class": "RECONCILIATION_FAILURE",
-    "reconciliation_status": "FAILED_RECONCILIATION",
+path = Path(os.environ["REPORTING_ARTIFACT"])
+component_statuses = {
+    "live_vs_shadow_exit": os.environ["SHADOW_REPORT_STATUS"],
+    "operational_drag_exit": os.environ["OPERATIONAL_DRAG_STATUS"],
+    "daily_health_command_exit": os.environ["DAILY_HEALTH_COMMAND_STATUS"],
+    "daily_health_status": os.environ["HEALTH_STATUS"],
 }
-for relative in ("operator_summary.json", "live_pilot_operator_summary.json"):
-    update(relative, terminal)
-update("execution_results.json", {**terminal, "status": "FAILED_RECONCILIATION"})
-update("live_pilot_reconciliation.json", {**terminal, "status": "FAILED_RECONCILIATION", "state": "FAILED_RECONCILIATION"})
-update("execution_timeline.json", terminal)
-update("audit/execution_integrity.json", {**terminal, "status": "FAIL", "findings": [reason]})
-registry = Path(os.environ["PAPER_LANE_ROOT"]) / "execution_attempts"
-prior = read_attempts(registry, trade_date=trade_date)
-record = AttemptRecord(
-    attempt_id=f"{run_root.name}.posttrade_failure",
-    trade_date=trade_date,
-    run_id=run_root.name,
-    lane="paper",
-    sequence=len(prior) + 1,
-    terminal_outcome=TerminalOutcome.SYSTEM_FAILURE,
-    recorded_at=datetime.now(timezone.utc).isoformat(),
-    run_root=str(run_root),
-    submitted_count=int((json.loads((run_root / "execution_results.json").read_text())).get("orders_submitted_count") or 0),
-    filled_count=int((json.loads((run_root / "execution_results.json").read_text())).get("orders_filled_count") or 0),
-    failure_class=FailureClass.RECONCILIATION_FAILURE,
-    reason_code=reason,
-    source_artifacts=(str(run_root / "execution_results.json"),),
-)
-append_attempt(registry, record)
-write_selection_pointer(registry, select_from_registry(registry, trade_date=trade_date))
+healthy = all(value == "0" for key, value in component_statuses.items() if key.endswith("_exit")) and component_statuses["daily_health_status"] == "GREEN"
+payload = {
+    "schema_version": "caerus.paper_posttrade_reporting.v1",
+    "generated_at": datetime.now(timezone.utc).isoformat(),
+    "status": "OK" if healthy else "DEGRADED",
+    "execution_terminal_status": os.environ["FINAL_TERMINAL"],
+    "execution_reason_code": os.environ["FINAL_REASON"],
+    "non_blocking": True,
+    "components": component_statuses,
+}
+path.parent.mkdir(parents=True, exist_ok=True)
+with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False) as handle:
+    json.dump(payload, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+    temporary = Path(handle.name)
+temporary.replace(path)
 PY
-    POSTTRADE_ARTIFACT_STATUS=$?
-    set -e
-    if [[ ${POSTTRADE_ARTIFACT_STATUS} -ne 0 ]]; then
-        echo "ERROR: run-local posttrade failure rewrite failed; canonical pointer remains failed" >&2
-    fi
-fi
-if ! write_paper_pointer \
-    "${SUBMIT_RUN_ID}" \
-    "${SUBMIT_RUN_ROOT}" \
-    "${FINAL_TERMINAL}" \
-    "${FINAL_REASON}"; then
-    EXIT_CODE=1
-    echo "ERROR: canonical terminal execution pointer publication failed" >&2
-fi
+echo "posttrade_reporting=${REPORTING_ARTIFACT} (non_blocking=true)"
 
 echo "options_execution_authority=DISABLED_PENDING_EXACT_PLAN_INTEGRATION"
 if [[ ${EXIT_CODE} -ne 0 ]]; then

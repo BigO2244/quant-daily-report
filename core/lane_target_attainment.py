@@ -166,6 +166,32 @@ def build_lane_target_attainment(
             policy_error = str(exc)
 
     proof = dict(feasibility_evidence or {})
+    exact_plan_payload = (
+        plan.get("exact_execution_plan")
+        if isinstance(plan.get("exact_execution_plan"), Mapping)
+        else {}
+    )
+    expected_equity_basis = _number(
+        plan.get("execution_equity_basis")
+        if plan.get("execution_equity_basis") is not None
+        else exact_plan_payload.get("portfolio_nav")
+        if exact_plan_payload
+        else plan.get("portfolio_nav")
+    )
+    proof_equity_basis = _number(proof.get("equity_basis"))
+    equity_basis_required = expected_equity_basis is not None
+    equity_basis_valid = bool(
+        not equity_basis_required
+        or (
+            proof_equity_basis is not None
+            and math.isclose(
+                float(proof_equity_basis),
+                float(expected_equity_basis),
+                rel_tol=1e-9,
+                abs_tol=0.01,
+            )
+        )
+    )
     proof_allocation = proof.get("allocation")
     proof_quantities = {
         str(row.get("symbol") or "").strip().upper(): _number(
@@ -230,6 +256,7 @@ def build_lane_target_attainment(
         and set(proof_quantities) == set(target)
         and proof_hash_valid
         and proof_lineage_valid
+        and equity_basis_valid
     )
     nearest_feasible_verified = bool(
         proof_valid
@@ -301,6 +328,10 @@ def build_lane_target_attainment(
         "whole_share_feasibility_valid": proof_valid,
         "whole_share_feasibility_hash_valid": proof_hash_valid,
         "whole_share_feasibility_lineage_valid": proof_lineage_valid,
+        "whole_share_feasibility_equity_basis": proof_equity_basis,
+        "expected_execution_equity_basis": expected_equity_basis,
+        "whole_share_feasibility_equity_basis_required": equity_basis_required,
+        "whole_share_feasibility_equity_basis_valid": equity_basis_valid,
         "posttrade_market_values_complete": market_values_complete,
         "approved_execution_package_hash": expected_package_hash or None,
         "nearest_feasible_verified": nearest_feasible_verified,

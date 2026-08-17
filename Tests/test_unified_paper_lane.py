@@ -654,13 +654,16 @@ def test_planning_equity_pin_sizes_paper_lane_at_staging_scale(tmp_path: Path) -
     assert float(orders[0].get("qty") or orders[0].get("shares")) == pytest.approx(25.0)
 
 
-def test_cron_execute_pins_planning_equity_to_capital_cap() -> None:
+def test_cron_execute_sizes_paper_against_full_current_account() -> None:
     text = (REPO_ROOT / "scripts" / "cron_execute.sh").read_text(encoding="utf-8")
-    assert 'export CAERUS_LIVE_PILOT_CAPITAL_CAP="10000"' in text
-    assert (
-        'export CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP="${CAERUS_LIVE_PILOT_CAPITAL_CAP}"' in text
-    ), "paper lane must pin the executor's planning equity to the same staging scale as the cap"
-    # The live lane must NOT pin planning equity (live sizes against real equity).
+    assert 'export CAERUS_LIVE_PILOT_CAPITAL_CAP="10000"' not in text
+    assert "unset CAERUS_LIVE_PILOT_CAPITAL_CAP" in text
+    assert "unset CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP" in text
+    assert 'export CAERUS_LIVE_PILOT_CAP_PCT="1.0"' in text
+    assert "paper_account_scope=FULL_CURRENT_ACCOUNT" in text
+    assert "current_broker_account_value=" in text
+    # Neither execution lane may replace broker equity with synthetic planning
+    # equity. The exact authorizer is the current-account sizing authority.
     live = (REPO_ROOT / "scripts" / "cron_live_pilot_execute.sh").read_text(encoding="utf-8")
     assert "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP" not in live
 
@@ -676,6 +679,8 @@ def test_choice2_cron_has_one_authority_and_terminal_verification_order() -> Non
     assert "execute_options_review.py" not in text
     assert "execute_options_orders.py" not in text
     assert "options_execution_authority=DISABLED_PENDING_EXACT_PLAN_INTEGRATION" in text
+    assert "paper_posttrade_verification_failed" not in text
+    assert '"non_blocking": True' in text
 
 
 def test_cron_execute_uses_governed_intraday_paper_epoch_without_live_eligibility() -> None:

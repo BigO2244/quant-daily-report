@@ -1403,8 +1403,28 @@ def authorize_exact_execution_plan(
         planning_account=request.planning_account,
         config=config,
     )
+    whole_share_proof = trade_meta.get("whole_share_feasibility")
+    governed_whole_share_target = isinstance(whole_share_proof, Mapping) and bool(
+        whole_share_proof
+    )
+    # The governed integer optimizer has already selected the exact quantity
+    # vector subject to the policy cash floor, order count, and minimum notional.
+    # A generic live-pilot cash buffer must not silently resize that vector after
+    # its proof is sealed. PAPER affordability is checked explicitly below using
+    # settled cash plus only this plan's sell proceeds and protective limit marks.
+    exact_trade_frame = raw if governed_whole_share_target else executable
+    if governed_whole_share_target:
+        capital_budget = {
+            **dict(capital_budget),
+            "governed_whole_share_quantity_vector_preserved": True,
+            "generic_capital_clipping_applied": False,
+        }
+        filter_stats = {
+            **dict(filter_stats),
+            "governed_whole_share_quantity_vector_preserved": True,
+        }
     exact_rows = _protective_day_limit_orders(
-        _core_rows_from_frame(executable, plan=plan)
+        _core_rows_from_frame(exact_trade_frame, plan=plan)
     )
     for row in exact_rows:
         if plan.get("session_id"):
@@ -1417,6 +1437,38 @@ def authorize_exact_execution_plan(
     buys = [dict(row) for row in exact_rows if str(row.get("side")).upper() == "BUY"]
     if len(sells) + len(buys) != len(exact_rows):
         raise RuntimeError("exact planning produced unsupported order sides")
+    if governed_whole_share_target:
+        policy = whole_share_proof.get("policy")
+        if not isinstance(policy, Mapping):
+            raise RuntimeError("whole-share proof omits governed cash policy")
+        minimum_cash_weight = _finite_float(policy.get("minimum_cash_weight"))
+        if minimum_cash_weight is None or not 0.0 <= minimum_cash_weight <= 1.0:
+            raise RuntimeError("whole-share proof minimum cash weight is invalid")
+        sell_proceeds = sum(float(row.get("notional") or 0.0) for row in sells)
+        buy_notional = sum(float(row.get("notional") or 0.0) for row in buys)
+        projected_cash_at_limits = float(cash) + sell_proceeds - buy_notional
+        minimum_cash_dollars = decision_nav * minimum_cash_weight
+        if projected_cash_at_limits + 0.01 < minimum_cash_dollars:
+            raise RuntimeError(
+                "protective limits violate governed whole-share cash floor"
+            )
+        paper_execution_spendable_cash = float(settled.settled_cash) + sell_proceeds
+        if buy_notional > paper_execution_spendable_cash + 0.01:
+            raise RuntimeError(
+                "governed whole-share buys exceed settled cash plus current-plan sells"
+            )
+        if buy_notional > float(cap) + 0.01:
+            raise RuntimeError("governed whole-share buys exceed dynamic capital cap")
+        capital_budget = {
+            **dict(capital_budget),
+            "governed_minimum_cash_weight": minimum_cash_weight,
+            "governed_minimum_cash_dollars": minimum_cash_dollars,
+            "projected_cash_at_protective_limits": projected_cash_at_limits,
+            "paper_execution_spendable_cash": paper_execution_spendable_cash,
+            "requested_buy_notional": buy_notional,
+            "allowed_buy_notional": buy_notional,
+            "capital_constraint_triggered": False,
+        }
 
     risk_controls = governed_outer_controls
     observed_regime, regime_confidence, acute_risk, market_state_id = (

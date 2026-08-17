@@ -428,6 +428,7 @@ def _write_authority_chain(
     sleeve_hash: str,
     constraints: dict | None = None,
     include_market_state_id: bool = True,
+    target_cash_weight: float = 0.0,
 ) -> tuple[dict, dict[str, str]]:
     from authority.contracts import build_decision_package, build_evidence_package, build_risk_package
     from authority.pipeline import execution_package_from_risk
@@ -445,6 +446,7 @@ def _write_authority_chain(
         evidence=evidence,
         target_rows=target_rows,
         source_refs=refs,
+        target_cash_weight=target_cash_weight,
     )
     governed_constraints = copy.deepcopy(constraints or {"regime": "NORMAL"})
     if include_market_state_id and not any(
@@ -461,6 +463,7 @@ def _write_authority_chain(
         approved_target_rows=target_rows,
         constraints=governed_constraints,
         source_refs=[f"decision:{decision.package_id}"],
+        approved_cash_weight=target_cash_weight,
     )
     execution = execution_package_from_risk(risk)
     authority_dir = tmp_path / "authority"
@@ -3130,6 +3133,79 @@ def test_production_entrypoint_routes_v3_directly_and_writes_canonical_artifacts
     ]
 
 
+def test_exact_executor_fails_terminal_verification_for_wrong_equity_basis(
+    tmp_path: Path,
+):
+    from core.whole_share_feasibility import seal_whole_share_proof
+
+    package_hash = "approved-package-hash"
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.90,
+        "minimum_cash_weight": 0.85,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    proof = seal_whole_share_proof(
+        {
+            "schema_version": "caerus.whole_share_feasibility.v1",
+            "status": "PASS",
+            "approved_execution_package_hash": package_hash,
+            "equity_basis": 500.0,
+            "allocation": [{"symbol": "AAPL", "target_quantity": 2}],
+            "policy": policy,
+        }
+    )
+    exact_payload = _plan().to_dict()
+    exact = _rebuild_exact(
+        exact_payload,
+        risk_state={
+            **dict(exact_payload["risk_state"]),
+            "trade_meta": {"whole_share_feasibility": proof},
+        },
+    )
+    handoff = _handoff(exact)
+    handoff["approved_execution_package"] = {
+        "content_hash": package_hash,
+        "approved_cash_weight": 0.90,
+        "approved_target_rows": [
+            {"symbol": "AAPL", "target_weight": 0.10},
+        ],
+        "constraints": {"target_attainment_policy": policy},
+    }
+    broker = TrackingPaperBroker()
+
+    result = run_live_pilot(
+        plan=handoff,
+        broker=broker,
+        env={**_env(), "CAERUS_REQUIRE_EXACT_EXECUTION_PLAN": "1"},
+        run_id="wrong-equity-basis-terminal-failure",
+        output_root=tmp_path / "outputs" / "paper_lane",
+    )
+    attainment = json.loads(
+        (
+            Path(result["run_root"])
+            / "audit"
+            / "execution_target_attainment_2026-08-12.json"
+        ).read_text()
+    )
+
+    assert broker.submit_calls == 2
+    assert result["terminal_status"] == "FAILED_RECONCILIATION"
+    assert result["terminal_outcome"] == "SYSTEM_FAILURE"
+    assert result["reason_code"].startswith(
+        "target_attainment_failed:fail_feasibility_proof_invalid:"
+    )
+    assert attainment["whole_share_feasibility_equity_basis"] == 500.0
+    assert attainment["expected_execution_equity_basis"] == 1000.0
+    assert attainment["whole_share_feasibility_equity_basis_valid"] is False
+
+
 def test_exact_orders_are_blocked_after_market_close_before_submission(tmp_path: Path):
     broker = TrackingPaperBroker()
     exact = _plan()
@@ -3683,6 +3759,99 @@ def test_fresh_broker_decision_seals_transition_before_executor(tmp_path: Path):
     assert exact.constraints["new_order_execution_style"] == (
         "protective_day_limit"
     )
+
+
+def test_authorizer_sizes_target_from_full_current_broker_account(tmp_path: Path):
+    broker = TrackingPaperBroker()
+    broker.cash = 1100.0
+    source = tmp_path / "full-account-target-plan.json"
+    source.write_text("{}\n", encoding="utf-8")
+    sleeve_path, sleeve_hash = _write_orion_sleeve_authority(tmp_path)
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.05,
+        "minimum_cash_weight": 0.025,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    target_rows = [{"symbol": "AAPL", "target_weight": 0.95, "price": 5.0}]
+    approved_package, authority_paths = _write_authority_chain(
+        tmp_path,
+        target_rows=target_rows,
+        sleeve_hash=sleeve_hash,
+        constraints={"regime": "NORMAL", "target_attainment_policy": policy},
+        target_cash_weight=0.05,
+    )
+    env = _env()
+    env.pop("CAERUS_LIVE_PILOT_CAPITAL_CAP", None)
+    env.pop("CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP", None)
+    env["CAERUS_REQUIRE_EXACT_EXECUTION_PLAN"] = "1"
+    regime_state_root = tmp_path / "regime-state"
+
+    authorized = authorize_exact_execution_plan(
+        plan={
+            "trade_date": "2026-08-12",
+            "execution_lane": "paper",
+            "approved_sleeve": "caerus_orion",
+            "allow_fractional": False,
+            "target_portfolio": target_rows,
+            "approved_execution_package": approved_package,
+            "authority_package_paths": authority_paths,
+            "cash_target_weight": 0.05,
+            "risk_controls": {"regime": "NORMAL"},
+            "source_precompute_payload": "precompute.json",
+            "source_signals": "signals.json",
+            "source_sleeve_evaluations": sleeve_path,
+            "source_sleeve_evaluations_sha256": sleeve_hash,
+        },
+        broker=broker,
+        env=env,
+        run_id="authority-full-current-account",
+        plan_path=source,
+        created_at="2026-08-12T13:35:01+00:00",
+        regime_state_root=regime_state_root,
+    )
+    authorized = _finalize_direct_authorization(regime_state_root, authorized)
+    exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
+
+    assert exact.portfolio_nav == pytest.approx(1200.0)
+    assert exact.risk_state["decision_nav_reconstruction"][
+        "authoritative_account_nav"
+    ] == pytest.approx(1200.0)
+    assert exact.buy_orders[0]["symbol"] == "AAPL"
+    assert exact.buy_orders[0]["quantity"] == pytest.approx(23.0)
+    assert exact.constraints["capital_cap_usd"] == pytest.approx(1200.0)
+
+    result = run_live_pilot(
+        plan=authorized,
+        broker=broker,
+        env=env,
+        run_id="execute-full-current-account",
+        output_root=tmp_path / "outputs" / "paper_lane",
+    )
+    run_root = Path(result["run_root"])
+    attainment = json.loads(
+        (
+            run_root
+            / "audit"
+            / "execution_target_attainment_2026-08-12.json"
+        ).read_text()
+    )
+    assert result["terminal_status"] == "SUBMITTED"
+    assert result["execution_target_attainment_status"] in {
+        "OK_TARGET_ATTAINED",
+        "OK_NEAREST_FEASIBLE",
+    }
+    assert attainment["expected_execution_equity_basis"] == pytest.approx(1200.0)
+    assert attainment["whole_share_feasibility_equity_basis_valid"] is True
+    assert broker.positions == [
+        {"symbol": "AAPL", "qty": "23.0", "market_value": "1161.5"}
+    ]
 
 
 def test_fresh_broker_decision_preserves_explicit_zero_weight_exit(
@@ -4423,8 +4592,15 @@ def test_authorizer_accepts_real_governed_paper_target_attainment_package(tmp_pa
         target_rows=rows,
         sleeve_hash=sleeve_hash,
         constraints={"regime": "NORMAL", "target_attainment_policy": policy},
+        target_cash_weight=0.05,
     )
     regime_state_root = tmp_path / "regime-state"
+    broker = TrackingPaperBroker()
+    execution_env = {
+        **_env(),
+        "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000",
+        "CAERUS_REQUIRE_EXACT_EXECUTION_PLAN": "1",
+    }
     authorized = authorize_exact_execution_plan(
         plan={
             "trade_date": "2026-08-12",
@@ -4440,8 +4616,8 @@ def test_authorizer_accepts_real_governed_paper_target_attainment_package(tmp_pa
             "source_sleeve_evaluations": sleeve_path,
             "source_sleeve_evaluations_sha256": sleeve_hash,
         },
-        broker=TrackingPaperBroker(),
-        env={**_env(), "CAERUS_LIVE_PILOT_PLANNING_EQUITY_CAP": "1000"},
+        broker=broker,
+        env=execution_env,
         run_id="authority-real-package",
         plan_path=tmp_path / "governed.json",
         created_at="2026-08-12T13:35:01+00:00",
@@ -4452,6 +4628,33 @@ def test_authorizer_accepts_real_governed_paper_target_attainment_package(tmp_pa
     assert exact.orders
     assert exact.account_scope == "PAPER"
     assert exact.account_id_hash == hashlib.sha256(b"paper-account").hexdigest()
+
+    result = run_live_pilot(
+        plan=authorized,
+        broker=broker,
+        env=execution_env,
+        run_id="execute-real-target-attainment-package",
+        output_root=tmp_path / "outputs" / "paper_lane",
+    )
+    run_root = Path(result["run_root"])
+    target_attainment = json.loads(
+        (
+            run_root
+            / "audit"
+            / "execution_target_attainment_2026-08-12.json"
+        ).read_text()
+    )
+    assert result["terminal_status"] == "SUBMITTED"
+    assert result["execution_target_attainment_required"] is True
+    assert result["execution_target_attainment_status"] in {
+        "OK_TARGET_ATTAINED",
+        "OK_NEAREST_FEASIBLE",
+    }
+    assert target_attainment["required_for_terminal_success"] is True
+    assert target_attainment["whole_share_feasibility_equity_basis_valid"] is True
+    assert target_attainment["expected_execution_equity_basis"] == pytest.approx(
+        exact.portfolio_nav
+    )
 
 
 @pytest.mark.parametrize("quote_mode", ["missing", "stale"])
