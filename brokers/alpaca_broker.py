@@ -54,6 +54,7 @@ class _GenericLiveV4Capability:
 # environment variables and legacy callers cannot authorize broker mutation.
 _EXACT_EXECUTION_CAPABILITY = _ExactExecutionCapability()
 _GENERIC_LIVE_V4_CAPABILITY = _GenericLiveV4Capability()
+_LYRA_LIVE_PORTFOLIO_CAPABILITY = _GenericLiveV4Capability()
 
 
 def _require_exact_execution_capability(value: object) -> None:
@@ -64,6 +65,11 @@ def _require_exact_execution_capability(value: object) -> None:
 def _require_generic_live_v4_capability(value: object) -> None:
     if value is not _GENERIC_LIVE_V4_CAPABILITY:
         raise PermissionError("generic_live_v4_capability_required")
+
+
+def _require_lyra_live_portfolio_capability(value: object) -> None:
+    if value is not _LYRA_LIVE_PORTFOLIO_CAPABILITY:
+        raise PermissionError("lyra_live_portfolio_capability_required")
 
 
 def _is_truthy(value: object, default: bool = False) -> bool:
@@ -1068,6 +1074,135 @@ class AlpacaBroker:
             _safe_str(out.get("status")),
         )
         return out
+
+    def submit_lyra_live_portfolio_market_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        client_order_id: str,
+        mutation_context: Mapping[str, Any],
+        qty: float | None = None,
+        notional: float | None = None,
+        _lyra_live_portfolio_capability: object | None = None,
+    ) -> Dict[str, Any]:
+        """Strict Live-only mutation boundary for an owner-approved Lyra batch."""
+
+        _require_lyra_live_portfolio_capability(_lyra_live_portfolio_capability)
+        if bool(self.paper) or str(self.base_url or "").strip().lower().rstrip("/") != "https://api.alpaca.markets":
+            raise RuntimeError("Lyra Live portfolio submission requires canonical Alpaca Live")
+        if (qty is None) == (notional is None):
+            raise RuntimeError("Lyra Live order requires exactly one of quantity or notional")
+        symbol_norm = str(symbol or "").strip().upper()
+        side_norm = str(side or "").strip().upper()
+        client_id = str(client_order_id or "").strip()
+        if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,14}", symbol_norm):
+            raise RuntimeError("Lyra Live symbol is invalid")
+        if side_norm not in {"BUY", "SELL"}:
+            raise RuntimeError("Lyra Live side is invalid")
+        if not re.fullmatch(r"cxl-[0-9a-f]{32}-[0-9]{2}", client_id):
+            raise RuntimeError("Lyra Live client order id is invalid")
+        if side_norm == "BUY" and notional is None:
+            raise RuntimeError("Lyra Live buys must be cash-notional market orders")
+        if side_norm == "SELL" and qty is None:
+            raise RuntimeError("Lyra Live sells must be fractional-quantity market orders")
+        quantity = None if qty is None else float(qty)
+        cash_notional = None if notional is None else float(notional)
+        if quantity is not None and (
+            not math.isfinite(quantity) or quantity <= 0 or abs(quantity - round(quantity, 6)) > 1e-12
+        ):
+            raise RuntimeError("Lyra Live fractional quantity is invalid")
+        if cash_notional is not None and (
+            not math.isfinite(cash_notional) or cash_notional < 1.0
+            or abs(cash_notional - round(cash_notional, 2)) > 1e-9
+        ):
+            raise RuntimeError("Lyra Live cash notional is invalid")
+        fields = {
+            "schema_version", "action", "execution_session", "mode",
+            "owner_decision_hash", "target_source_hash", "plan_hash",
+            "account_id_hash", "deployed_sha", "order_index", "maximum_orders",
+            "client_order_id", "symbol", "side", "quantity", "notional",
+            "order_type", "time_in_force", "extended_hours",
+            "fractional_shares", "factual_equity_usd", "factual_cash_usd",
+            "factual_buying_power_usd", "maximum_gross_usd",
+            "required_cash_reserve_usd", "maximum_buy_notional_usd",
+            "total_buy_notional_usd", "projected_gross_usd",
+            "content_hash", "capability_signature",
+        }
+        if not isinstance(mutation_context, Mapping) or set(mutation_context) != fields:
+            raise RuntimeError("Lyra Live mutation context fields differ")
+        body = dict(mutation_context)
+        signature = body.pop("capability_signature", None)
+        declared = body.pop("content_hash", None)
+        observed = hashlib.sha256(
+            json.dumps(body, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        ).hexdigest()
+        if (
+            declared != observed
+            or not isinstance(signature, str)
+            or not _LYRA_LIVE_PORTFOLIO_CAPABILITY.verify(declared, signature)
+        ):
+            raise RuntimeError("Lyra Live mutation context signature differs")
+        if (
+            mutation_context.get("schema_version") != "caerus.lyra_live_mutation_context.v1"
+            or mutation_context.get("action") != "SUBMIT"
+            or mutation_context.get("client_order_id") != client_id
+            or mutation_context.get("symbol") != symbol_norm
+            or mutation_context.get("side") != side_norm
+            or mutation_context.get("quantity") != quantity
+            or mutation_context.get("notional") != cash_notional
+            or mutation_context.get("order_type") != "market"
+            or mutation_context.get("time_in_force") != "day"
+            or mutation_context.get("extended_hours") is not False
+            or mutation_context.get("fractional_shares") is not True
+        ):
+            raise RuntimeError("Lyra Live mutation context does not match the order")
+        for field in ("owner_decision_hash", "target_source_hash", "plan_hash", "account_id_hash"):
+            if not re.fullmatch(r"[0-9a-f]{64}", str(mutation_context.get(field) or "")):
+                raise RuntimeError(f"Lyra Live {field} pin is invalid")
+        if not re.fullmatch(r"[0-9a-f]{40}", str(mutation_context.get("deployed_sha") or "")):
+            raise RuntimeError("Lyra Live deployment pin is invalid")
+        try:
+            equity = float(mutation_context["factual_equity_usd"])
+            cash = float(mutation_context["factual_cash_usd"])
+            buying_power = float(mutation_context["factual_buying_power_usd"])
+            gross_cap = float(mutation_context["maximum_gross_usd"])
+            reserve = float(mutation_context["required_cash_reserve_usd"])
+            maximum_buy = float(mutation_context["maximum_buy_notional_usd"])
+            total_buy = float(mutation_context["total_buy_notional_usd"])
+            projected_gross = float(mutation_context["projected_gross_usd"])
+            maximum_orders = int(mutation_context["maximum_orders"])
+            order_index = int(mutation_context["order_index"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("Lyra Live capital context is invalid") from exc
+        if not all(math.isfinite(value) for value in (
+            equity, cash, buying_power, gross_cap, reserve, maximum_buy,
+            total_buy, projected_gross,
+        )):
+            raise RuntimeError("Lyra Live capital context is non-finite")
+        if (
+            equity <= 0 or cash < 0 or buying_power < 0 or buying_power > equity + 0.01
+            or abs(gross_cap - equity * 0.95) > 1e-8
+            or abs(reserve - equity * 0.05) > 1e-8
+            or total_buy > maximum_buy + 1e-9
+            or projected_gross > gross_cap + 0.01
+            or maximum_orders not in {5, 10}
+            or order_index < 0 or order_index >= maximum_orders
+        ):
+            raise RuntimeError("Lyra Live factual NAV/cash boundary is not green")
+
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import MarketOrderRequest
+
+        request = MarketOrderRequest(
+            symbol=symbol_norm,
+            qty=quantity,
+            notional=cash_notional,
+            side=OrderSide.BUY if side_norm == "BUY" else OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+            client_order_id=client_id,
+        )
+        return _normalize_order_obj(self.trading_client.submit_order(order_data=request))
 
     def submit_generic_live_v4_limit_order(
         self,

@@ -1,0 +1,47 @@
+{
+  "schema_version": "caerus.lyra_live_owner_decision.v1",
+  "decision_id": "lyra-live-owner-decision:20260819",
+  "owner": "Brett Olson",
+  "decision": "APPROVE",
+  "decided_at": "2026-08-19T17:47:57-04:00",
+  "initialization": {
+    "execution_session": "2026-08-20",
+    "execution_time_et": "09:35",
+    "signal_as_of": "2026-08-17",
+    "target_source_path": "outputs/shadow_candidates/2026-08-17/caerus_lyra.json",
+    "target_source_sha256": "6c6378a534bf88cc6d8ef90e26688dd0694ed55bc4651bdbdcad177c3e118bf9",
+    "maximum_orders": 5,
+    "one_time_only": true
+  },
+  "recurring_cadence": {
+    "signal_timing": "MONDAY_XNYS_CLOSE",
+    "execution_timing": "IMMEDIATE_NEXT_XNYS_SESSION_09:35_ET",
+    "expected_execution_weekday": "TUESDAY",
+    "source_variant": "h1_weekly_h6_top5",
+    "maximum_orders": 10
+  },
+  "constraints": {
+    "account_basis": "FRESH_FACTUAL_BROKER_NET_LIQUIDATION_EQUITY",
+    "nominal_capital_ceiling_usd": null,
+    "maximum_gross_fraction": 0.95,
+    "minimum_cash_reserve_fraction": 0.05,
+    "minimum_order_notional_usd": 1.0,
+    "maximum_names": 5,
+    "fractional_shares_required": true,
+    "long_only": true,
+    "leverage_allowed": false,
+    "shorting_allowed": false,
+    "opportunistic_orders_allowed": false
+  },
+  "governance": {
+    "paper_behavior_changed": false,
+    "shadow_behavior_changed": false,
+    "legacy_live_executor_allowed": false,
+    "manual_trade_forcing_allowed": false,
+    "no_trade_when_no_target_delta": true,
+    "intent_must_precede_submission": true,
+    "idempotent_client_order_ids_required": true,
+    "posttrade_reconciliation_required": true
+  },
+  "content_hash": "4d553b1e56c947bc76951b33fc612a0c9aa4b8c5e1ecff0e5f58ac689c2e0f6d"
+}
