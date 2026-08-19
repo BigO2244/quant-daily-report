@@ -29,8 +29,10 @@ from core.generic_live_v1_submission import (
     execute_generic_live_v1_session,
 )
 from scripts.manage_generic_live_v1_cron import render_cron_line, update_crontab
-from scripts.run_generic_live_v1_session import _require_exact_env
-from Tests.test_generic_live_v1_activation import _decision
+from scripts.run_generic_live_v1_session import _require_exact_env, _require_source_pins
+from Tests.test_generic_live_v1_activation import (
+    EXPECTED, OBSERVATION, OWNER, _decision, _proofs,
+)
 from Tests.test_generic_live_v1_submission import Broker, _disarm, _ready
 
 
@@ -296,6 +298,27 @@ def test_runtime_pin_mismatch_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
         monkeypatch.setenv(key, value)
     with pytest.raises(RuntimeError, match="runtime path pins"):
         _require_exact_env(preflight, submit=True)
+
+
+def test_protected_source_hash_pin_mismatch_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    preflight, plan = _ready()
+    decision = _decision()
+    proofs = _proofs(
+        deployed_sha=EXPECTED, generic_schedule_installed=True,
+        generic_submission_adapter_deployed=True, rollback_rearm_proven=True,
+        order_lifecycle_pipeline_green=True, reconciliation_pipeline_green=True,
+        accounting_pipeline_green=True, reporting_pipeline_green=True,
+    )
+    monkeypatch.setenv("CAERUS_GENERIC_LIVE_OWNER_DECISION_HASH", OWNER["content_hash"])
+    monkeypatch.setenv("CAERUS_GENERIC_LIVE_ACCOUNT_OBSERVATION_HASH", OBSERVATION["content_hash"])
+    monkeypatch.setenv("CAERUS_GENERIC_LIVE_LYRA_DECISION_HASH", decision["content_hash"])
+    monkeypatch.setenv("CAERUS_GENERIC_LIVE_OPERATIONAL_PROOFS_HASH", "f" * 64)
+    monkeypatch.setenv("CAERUS_GENERIC_LIVE_PLAN_HASH", plan["content_hash"])
+    with pytest.raises(RuntimeError, match="protected source pins mismatch"):
+        _require_source_pins(
+            owner_decision=OWNER, account_observation=OBSERVATION,
+            lyra_decision=decision, operational_proofs=proofs, plan=plan,
+        )
 
 
 @pytest.mark.parametrize(

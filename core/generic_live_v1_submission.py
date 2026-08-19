@@ -380,6 +380,46 @@ def _safe_broker_order(order: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _order_status_observation(
+    *, sequence: int, phase: str, order: Mapping[str, Any], status_override: str | None = None,
+) -> dict[str, Any]:
+    safe = _safe_broker_order(order)
+    if status_override is not None:
+        safe["broker_status"] = status_override
+    body = {
+        "sequence": sequence,
+        "phase": phase,
+        "broker_order": safe,
+        "source_hash": hashlib.sha256(canonical_json(safe).encode("utf-8")).hexdigest(),
+    }
+    body["content_hash"] = _hash(body)
+    return body
+
+
+def _validate_order_status_observations(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, list) or not payload:
+        raise GenericLiveV1SubmissionError("broker receipt lacks order status observations")
+    checked: list[dict[str, Any]] = []
+    for index, raw in enumerate(payload):
+        if not isinstance(raw, Mapping) or set(raw) != {
+            "sequence", "phase", "broker_order", "source_hash", "content_hash",
+        }:
+            raise GenericLiveV1SubmissionError("order status observation fields are invalid")
+        if raw["sequence"] != index or not isinstance(raw["phase"], str) or not raw["phase"]:
+            raise GenericLiveV1SubmissionError("order status observation sequence/phase differs")
+        safe = raw["broker_order"]
+        if not isinstance(safe, Mapping) or set(safe) != {
+            "broker_order_id", "broker_client_order_id", "broker_status",
+            "symbol", "side", "quantity",
+        } or any(not isinstance(value, str) for value in safe.values()):
+            raise GenericLiveV1SubmissionError("order status observation is not safely redacted")
+        source = hashlib.sha256(canonical_json(safe).encode("utf-8")).hexdigest()
+        if raw["source_hash"] != source or raw["content_hash"] != _hash(raw):
+            raise GenericLiveV1SubmissionError("order status observation hash differs")
+        checked.append(copy.deepcopy(dict(raw)))
+    return checked
+
+
 def _acquire_session_lock(path: Path) -> int:
     if not path.is_absolute() or path.is_symlink() or path.parent.is_symlink():
         raise GenericLiveV1SubmissionError("session lock path must be absolute and non-symlink")
@@ -489,6 +529,7 @@ def _validate_existing_receipt(
         raise GenericLiveV1SubmissionError("existing broker receipt hash/intent differs")
     if payload.get("mutation_context_hash") != mutation_context_hash:
         raise GenericLiveV1SubmissionError("existing broker receipt mutation context differs")
+    _validate_order_status_observations(payload.get("order_status_observations"))
     cancellation_hash = payload.get("cancellation_context_hash")
     if (
         (cancellation_hash is not None and (
@@ -688,30 +729,51 @@ def _execute_generic_live_v1_session(
                 existing, client_id=client_id, symbol=order["symbol"],
                 side=order["side"], quantity=quantity,
             )
+            observations = [
+                _order_status_observation(
+                    sequence=0, phase="RECOVERED" if not submitted else "SUBMITTED",
+                    order=existing,
+                )
+            ]
             failure_trigger = "ORDER_BREAK"
             broker_order_id = str(existing.get("id") or "")
             open_statuses = {"accepted", "new", "pending_new", "accepted_for_bidding", "held"}
+            canceling_statuses = {"pending_cancel"}
             terminal_break_statuses = {"canceled", "cancelled", "rejected", "expired"}
+            unresolved_reason = None
             for attempt in range(poll_attempts):
                 if broker_status == "filled" or broker_status in terminal_break_statuses or broker_status == "partially_filled":
                     break
                 if broker_status not in open_statuses:
-                    failure_trigger = "ORDER_BREAK"
-                    raise GenericLiveV1SubmissionError(f"broker order status is unknown: {broker_status or 'missing'}")
+                    unresolved_reason = f"UNRESOLVED_BROKER_STATUS:{broker_status or 'missing'}"
+                    break
                 if attempt + 1 < poll_attempts and poll_interval_seconds:
                     time.sleep(float(poll_interval_seconds))
                 refreshed = broker.get_order(broker_order_id)
                 if refreshed is None:
-                    failure_trigger = "ORDER_BREAK"
-                    raise GenericLiveV1SubmissionError("broker order disappeared during lifecycle poll")
+                    unresolved_reason = "BROKER_ORDER_MISSING_DURING_POLL"
+                    observations.append(
+                        _order_status_observation(
+                            sequence=len(observations), phase="POLL",
+                            order=existing, status_override="missing_after_poll",
+                        )
+                    )
+                    break
                 existing = refreshed
                 broker_status = _validate_recovered_order(
                     existing, client_id=client_id, symbol=order["symbol"],
                     side=order["side"], quantity=quantity,
                 )
+                observations.append(
+                    _order_status_observation(
+                        sequence=len(observations), phase="POLL", order=existing,
+                    )
+                )
             cancel_performed = False
             cancellation_context_hash = None
-            if broker_status in open_statuses or broker_status == "partially_filled":
+            if unresolved_reason is None and (
+                broker_status in open_statuses or broker_status == "partially_filled"
+            ):
                 cancel_context = _cancellation_context(
                     submission_context=context, broker_order_id=broker_order_id
                 )
@@ -721,17 +783,47 @@ def _execute_generic_live_v1_session(
                     _generic_live_v4_capability=_GENERIC_LIVE_V4_CAPABILITY,
                 )
                 cancel_performed = True
-                refreshed = broker.get_order(broker_order_id)
-                if refreshed is None:
-                    failure_trigger = "ORDER_BREAK"
-                    raise GenericLiveV1SubmissionError("broker order missing after cancellation")
-                existing = refreshed
-                broker_status = _validate_recovered_order(
-                    existing, client_id=client_id, symbol=order["symbol"],
-                    side=order["side"], quantity=quantity,
-                )
+                for attempt in range(poll_attempts):
+                    refreshed = broker.get_order(broker_order_id)
+                    if refreshed is None:
+                        unresolved_reason = "BROKER_ORDER_MISSING_AFTER_CANCEL"
+                        observations.append(
+                            _order_status_observation(
+                                sequence=len(observations), phase="CANCEL_POLL",
+                                order=existing, status_override="missing_after_cancel",
+                            )
+                        )
+                        break
+                    existing = refreshed
+                    broker_status = _validate_recovered_order(
+                        existing, client_id=client_id, symbol=order["symbol"],
+                        side=order["side"], quantity=quantity,
+                    )
+                    observations.append(
+                        _order_status_observation(
+                            sequence=len(observations), phase="CANCEL_POLL", order=existing,
+                        )
+                    )
+                    if (
+                        broker_status == "filled"
+                        or broker_status in terminal_break_statuses
+                    ):
+                        break
+                    if broker_status not in open_statuses | canceling_statuses | {"partially_filled"}:
+                        unresolved_reason = f"UNRESOLVED_POST_CANCEL_STATUS:{broker_status or 'missing'}"
+                        break
+                    if attempt + 1 < poll_attempts and poll_interval_seconds:
+                        time.sleep(float(poll_interval_seconds))
+                if (
+                    unresolved_reason is None
+                    and broker_status in open_statuses | canceling_statuses | {"partially_filled"}
+                ):
+                    unresolved_reason = f"CANCEL_NOT_TERMINAL:{broker_status}"
             filled_quantity = float(existing.get("filled_qty") or (quantity if broker_status == "filled" else 0.0))
-            if broker_status == "filled" and abs(filled_quantity - quantity) <= 1e-9:
+            if unresolved_reason is not None:
+                status = "UNRESOLVED_ORDER_REARMED"
+                reasons = [unresolved_reason]
+            elif broker_status == "filled" and abs(filled_quantity - quantity) <= 1e-9:
                 status = "FILLED_REARMED" if submitted else "RECOVERED_FILLED_REARMED"
                 reasons = ["EXACT_V4_ORDER_FILLED"] if submitted else ["EXISTING_FILLED_ORDER_RECOVERED_NO_RESUBMIT"]
             elif broker_status in terminal_break_statuses or broker_status == "partially_filled":
@@ -749,26 +841,22 @@ def _execute_generic_live_v1_session(
                 "mutation_context_hash": mutation_context_hash,
                 "cancellation_context_hash": cancellation_context_hash,
                 "broker_order": broker_order,
+                "order_status_observations": observations,
                 "submission_performed": submitted,
                 "cancel_performed": cancel_performed,
             }
             receipt["content_hash"] = _hash(receipt)
             receipt_hash = receipt["content_hash"]
-            receipt_path = wal_root / f"receipt-{client_id}.json"
-            if not receipt_path.exists():
-                _write_exclusive(receipt_path, receipt)
-            else:
-                receipt = _validate_existing_receipt(
-                    receipt_path, intent_hash=intent_hash,
-                    client_id=client_id, broker_order=existing,
-                    mutation_context_hash=mutation_context_hash,
-                )
-                receipt_hash = receipt["content_hash"]
-                cancellation_context_hash = receipt["cancellation_context_hash"]
+            receipt_path = wal_root / f"receipt-{client_id}-{receipt_hash}.json"
+            _write_exclusive(receipt_path, receipt)
             terminal_rearm = _rearm(
                 preflight_hash=preflight["content_hash"], plan_hash=exact_plan["content_hash"],
                 executed_at=executed_raw,
-                trigger="ORDER_BREAK" if status == "ORDER_BREAK_REARMED" else "SESSION_COMPLETE",
+                trigger=(
+                    "ORDER_BREAK"
+                    if status in {"ORDER_BREAK_REARMED", "UNRESOLVED_ORDER_REARMED"}
+                    else "SESSION_COMPLETE"
+                ),
             )
             _atomic_rearm(rearm_path, terminal_rearm)
     except Exception:
@@ -802,6 +890,7 @@ def _execute_generic_live_v1_session(
         "order_lifecycle_status": broker_status if orders else "no_trade",
         "filled_quantity": filled_quantity if orders else 0.0,
         "cancel_performed": cancel_performed if orders else False,
+        "order_status_observations": observations if orders else [],
         "wal_written": bool(orders),
         "rearm_written": True,
         "result_written": True,
@@ -836,12 +925,15 @@ def seal_generic_live_v1_order_lifecycle(
         broker_order_id = symbol = side = None
         planned_quantity = filled_quantity = 0.0
     elif submission_status in {
-        "FILLED_REARMED", "RECOVERED_FILLED_REARMED", "ORDER_BREAK_REARMED"
+        "FILLED_REARMED", "RECOVERED_FILLED_REARMED", "ORDER_BREAK_REARMED",
+        "UNRESOLVED_ORDER_REARMED",
     } and isinstance(broker, Mapping):
         broker_status = str(broker.get("broker_status") or "").lower()
         filled_quantity = float(submission_result.get("filled_quantity") or 0.0)
         planned_quantity = float(broker.get("quantity") or 0.0)
-        if submission_status in {"FILLED_REARMED", "RECOVERED_FILLED_REARMED"}:
+        if submission_status == "UNRESOLVED_ORDER_REARMED":
+            lifecycle_status = "UNRESOLVED"
+        elif submission_status in {"FILLED_REARMED", "RECOVERED_FILLED_REARMED"}:
             lifecycle_status = "FILLED"
         elif broker_status in {"rejected"}:
             lifecycle_status = "REJECTED"
@@ -979,7 +1071,8 @@ def _validate_order_lifecycle(
     if payload.get("account_id_hash") != submission_result["account_id_hash"] or payload.get("lane_id") != "generic-live-v1":
         raise GenericLiveV1SubmissionError("order lifecycle account/lane scope differs")
     if payload.get("status") not in {
-        "FILLED", "PARTIAL_CANCELED", "REJECTED", "CANCELED", "EXPIRED", "NO_TRADE"
+        "FILLED", "PARTIAL_CANCELED", "REJECTED", "CANCELED", "EXPIRED",
+        "UNRESOLVED", "NO_TRADE",
     }:
         raise GenericLiveV1SubmissionError("order lifecycle is not a known terminal state")
     hashes = payload.get("broker_fill_evidence_hashes")
@@ -1007,12 +1100,18 @@ def _validate_order_lifecycle(
             )
         ) or float(payload.get("filled_quantity") or 0.0) != 0.0:
             raise GenericLiveV1SubmissionError("NO_TRADE lifecycle cannot carry an order/fill")
+    elif payload["status"] == "UNRESOLVED":
+        if submission_result.get("status") != "UNRESOLVED_ORDER_REARMED":
+            raise GenericLiveV1SubmissionError("unresolved lifecycle differs from submission result")
     elif submission_result.get("status") != "ORDER_BREAK_REARMED":
         raise GenericLiveV1SubmissionError("order-break lifecycle differs from submission result")
     if (float(payload.get("filled_quantity") or 0.0) > 0.0) is not bool(hashes):
         raise GenericLiveV1SubmissionError("order lifecycle quantity/fill lineage differs")
     broker = submission_result.get("broker_order")
     if payload["status"] != "NO_TRADE":
+        _validate_order_status_observations(
+            submission_result.get("order_status_observations")
+        )
         expected = {
             "exact_order_id": submission_result.get("exact_order_id"),
             "client_order_id": submission_result.get("client_order_id"),
@@ -1044,6 +1143,11 @@ def _validate_order_lifecycle(
             "REJECTED": {"rejected"},
             "CANCELED": {"canceled", "cancelled"},
             "EXPIRED": {"expired"},
+            "UNRESOLVED": {
+                "accepted", "new", "pending_new", "accepted_for_bidding", "held",
+                "pending_cancel", "partially_filled", "calculated", "stopped",
+                "suspended", "unknown", "",
+            },
         }
         if broker_status not in allowed_by_status[payload["status"]]:
             raise GenericLiveV1SubmissionError("order lifecycle status differs from broker receipt")
@@ -1073,7 +1177,7 @@ def finalize_generic_live_v1_posttrade(
     submission_result = _validate_submission_result(submission_result)
     if submission_result.get("status") not in {
         "FILLED_REARMED", "RECOVERED_FILLED_REARMED", "ORDER_BREAK_REARMED",
-        "NO_TRADE_REARMED",
+        "UNRESOLVED_ORDER_REARMED", "NO_TRADE_REARMED",
     }:
         raise GenericLiveV1SubmissionError("dry-run/nonterminal result cannot enter posttrade")
     if exact_plan.get("content_hash") != submission_result.get("plan_hash") or validate_lane_exact_execution_plan(exact_plan):
@@ -1113,6 +1217,11 @@ def finalize_generic_live_v1_posttrade(
             or reconciled["reconciled_fills"]
         ):
             raise GenericLiveV1SubmissionError("zero-fill order break is not exactly reconciled")
+        if order["status"] == "UNRESOLVED" and (
+            reconciled["status"] != "UNRESOLVED"
+            or reconciled["accounting_ready"] is not False
+        ):
+            raise GenericLiveV1SubmissionError("unresolved order is not fail-closed reconciled")
         if order["status"] == "NO_TRADE" and (
             reconciled["status"] != "PASS" or reconciled["reconciled_fills"]
         ):
@@ -1148,15 +1257,22 @@ def finalize_generic_live_v1_posttrade(
         journal = validate_accounting_journal(journal_entries)
         if reconciled["reconciled_fills"] and not journal:
             raise GenericLiveV1SubmissionError("filled reconciliation has no accounting journal")
-        if not reconciled["reconciled_fills"] and journal:
-            raise GenericLiveV1SubmissionError("zero-fill reconciliation cannot create accounting economics")
+        session_journal = [
+            row for row in journal if row["source_hash"] == reconciled["content_hash"]
+        ]
+        if reconciled["reconciled_fills"] and not session_journal:
+            raise GenericLiveV1SubmissionError("filled reconciliation has no session journal entries")
+        if not reconciled["reconciled_fills"] and session_journal:
+            raise GenericLiveV1SubmissionError("zero-fill reconciliation created session economics")
         if any(
-            row["source_hash"] != reconciled["content_hash"]
-            or row["account_id_hash"] != submission_result["account_id_hash"]
+            row["account_id_hash"] != submission_result["account_id_hash"]
             or row["lane_id"] != "generic-live-v1"
             for row in journal
         ):
             raise GenericLiveV1SubmissionError("accounting journal lineage differs")
+        reconciled_fill_ids = {row["fill_id"] for row in reconciled["reconciled_fills"]}
+        if {row["fill_id"] for row in session_journal} != reconciled_fill_ids:
+            raise GenericLiveV1SubmissionError("session journal fill coverage differs")
     except Exception:
         rearm_generic_live_v1_session(
             state_path=rearm_state_path, preflight_hash=submission_result["preflight_hash"],
@@ -1171,7 +1287,10 @@ def finalize_generic_live_v1_posttrade(
             perf["lane_id"] != "generic-live-v1"
             or perf["account_id_hash"] != submission_result["account_id_hash"]
             or perf["lane_kind"] != "LIVE"
-            or not any("generic-live-v1" in row["lane_ids"] for row in dashboard["performance_surfaces"])
+            or not any(
+                row["lane_id"] == "generic-live-v1"
+                for row in dashboard["performance_surfaces"]
+            )
         ):
             raise GenericLiveV1SubmissionError("performance/dashboard scope differs")
     except Exception:

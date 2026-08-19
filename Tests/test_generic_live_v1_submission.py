@@ -298,18 +298,73 @@ def test_partial_or_still_open_order_is_canceled_and_never_treated_as_green(
     assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
 
 
-def test_unknown_broker_status_fails_closed_and_rearms(tmp_path) -> None:
+def test_unknown_broker_status_seals_unresolved_evidence_and_rearms(tmp_path) -> None:
     preflight, plan = _ready()
     _disarm(tmp_path / "rearm.json", preflight, plan)
-    with pytest.raises(GenericLiveV1SubmissionError, match="status is unknown"):
-        execute_generic_live_v1_session(
-            activation_preflight=preflight, exact_plan=plan,
-            executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
-            broker=Broker(status="calculated"), wal_directory=tmp_path / "wal",
-            rearm_state_path=tmp_path / "rearm.json",
-            result_path=tmp_path / "result.json", poll_interval_seconds=0,
-        )
+    result = execute_generic_live_v1_session(
+        activation_preflight=preflight, exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        broker=Broker(status="calculated"), wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "rearm.json",
+        result_path=tmp_path / "result.json", poll_interval_seconds=0,
+    )
+    assert result["status"] == "UNRESOLVED_ORDER_REARMED"
+    assert result["reason_codes"] == ["UNRESOLVED_BROKER_STATUS:calculated"]
+    assert result["order_status_observations"][0]["broker_order"]["broker_status"] == "calculated"
+    assert json.loads((tmp_path / "result.json").read_text()) == result
+    receipts = list((tmp_path / "wal").glob("receipt-*.json"))
+    assert len(receipts) == 1
+    assert json.loads(receipts[0].read_text())["order_status_observations"] == result["order_status_observations"]
     assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
+
+    lifecycle = seal_generic_live_v1_order_lifecycle(
+        submission_result=result, observed_at="2026-08-19T13:35:00+00:00",
+        broker_order_evidence_hash="c" * 64, broker_fill_evidence_hashes=[],
+    )
+    assert lifecycle["status"] == "UNRESOLVED"
+
+
+def test_missing_order_during_poll_is_persisted_as_unresolved(tmp_path) -> None:
+    class MissingBroker(Broker):
+        def get_order(self, order_id):
+            return None
+
+    preflight, plan = _ready()
+    _disarm(tmp_path / "rearm.json", preflight, plan)
+    result = execute_generic_live_v1_session(
+        activation_preflight=preflight, exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        broker=MissingBroker(), wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "rearm.json",
+        result_path=tmp_path / "result.json", poll_interval_seconds=0,
+    )
+    assert result["status"] == "UNRESOLVED_ORDER_REARMED"
+    assert result["reason_codes"] == ["BROKER_ORDER_MISSING_DURING_POLL"]
+    assert result["order_status_observations"][-1]["broker_order"]["broker_status"] == "missing_after_poll"
+
+
+def test_asynchronous_cancel_never_claims_terminal_and_persists_observations(tmp_path) -> None:
+    class AsyncCancelBroker(Broker):
+        def cancel_generic_live_v4_order(self, **kwargs):
+            self.cancel_contexts.append(kwargs["mutation_context"])
+            self.by_id[kwargs["broker_order_id"]]["status"] = "pending_cancel"
+
+        def get_order(self, order_id):
+            return self.by_id.get(order_id)
+
+    preflight, plan = _ready()
+    _disarm(tmp_path / "rearm.json", preflight, plan)
+    result = execute_generic_live_v1_session(
+        activation_preflight=preflight, exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        broker=AsyncCancelBroker(), wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "rearm.json", result_path=tmp_path / "result.json",
+        poll_attempts=2, poll_interval_seconds=0,
+    )
+    assert result["status"] == "UNRESOLVED_ORDER_REARMED"
+    assert result["reason_codes"] == ["CANCEL_NOT_TERMINAL:pending_cancel"]
+    assert result["cancel_performed"] is True
+    assert result["order_status_observations"][-1]["broker_order"]["broker_status"] == "pending_cancel"
 
 
 def test_recovered_partial_order_is_canceled_without_resubmission(tmp_path) -> None:
