@@ -16,6 +16,7 @@ def main() -> int:
     parser.add_argument("--active-path", type=Path, required=True)
     parser.add_argument("--backup-path", type=Path, required=True)
     parser.add_argument("--candidate-path", type=Path)
+    parser.add_argument("--candidate-sha256")
     parser.add_argument("--allowed-root", action="append", type=Path, required=True)
     args = parser.parse_args()
     expected_active = Path("/home/brettolson/.caerus/generic_live_v1.env")
@@ -23,13 +24,14 @@ def main() -> int:
     if args.active_path != expected_active or args.backup_path != expected_backup:
         parser.error("generic Live v1 active/rollback config paths are fixed")
     if args.mode == "install":
-        if args.candidate_path is None:
-            parser.error("--candidate-path is required for install")
+        if args.candidate_path is None or args.candidate_sha256 is None:
+            parser.error("--candidate-path and --candidate-sha256 are required for install")
         result = install_config_with_backup(
             candidate_path=args.candidate_path,
             active_path=args.active_path,
             backup_path=args.backup_path,
             allowed_roots=args.allowed_root,
+            expected_candidate_sha256=args.candidate_sha256,
         )
     else:
         result = restore_config_backup(

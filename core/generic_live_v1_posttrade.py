@@ -60,7 +60,10 @@ def finalize_generic_live_v1_production_posttrade(
 ) -> dict[str, Any]:
     """Validate and durably bind reconciliation through published truth surfaces."""
 
-    def rollback_break(trigger: str) -> None:
+    rolled_back = False
+
+    def rollback_break(trigger: str) -> Mapping[str, Any]:
+        nonlocal rolled_back
         evidence = rollback_handler(trigger)
         if (
             not isinstance(evidence, Mapping)
@@ -76,12 +79,16 @@ def finalize_generic_live_v1_production_posttrade(
             raise GenericLiveV1PosttradeError(
                 f"{trigger} rollback evidence is incomplete"
             )
+        rolled_back = True
+        return evidence
 
     try:
         reconciled = validate_lane_reconciliation(reconciliation, exact_plan=exact_plan)
     except Exception:
-        rollback_break("RECONCILIATION_BREAK")
-        raise
+        try:
+            rollback_break("RECONCILIATION_BREAK")
+        finally:
+            raise
     try:
         journal = validate_accounting_journal(journal_entries)
         if not journal:
@@ -93,8 +100,10 @@ def finalize_generic_live_v1_production_posttrade(
         if {row["fill_id"] for row in session_rows} != reconciled_fill_ids:
             raise GenericLiveV1PosttradeError("journal does not exactly cover reconciled session fills")
     except Exception:
-        rollback_break("ACCOUNTING_BREAK")
-        raise
+        try:
+            rollback_break("ACCOUNTING_BREAK")
+        finally:
+            raise
     try:
         observed_journal_hash = accounting_journal_hash(journal)
         daily = validate_daily_lane_audit(daily_lane_audit)
@@ -190,16 +199,26 @@ def finalize_generic_live_v1_production_posttrade(
         ):
             raise GenericLiveV1PosttradeError("dashboard omits exact Live audit/performance lineage")
     except Exception:
-        rollback_break("REPORTING_BREAK")
+        try:
+            rollback_break("REPORTING_BREAK")
+        finally:
+            raise
+    try:
+        base = finalize_generic_live_v1_posttrade(
+            submission_result=submission_result, exact_plan=exact_plan,
+            order_lifecycle=order_lifecycle, reconciliation=reconciled,
+            journal_entries=journal, performance=perf,
+            dashboard_projection=dashboard, finalized_at=finalized_at,
+            rearm_state_path=rearm_state_path, result_path=base_result_path,
+            rollback_handler=rollback_break,
+        )
+    except Exception:
+        if not rolled_back:
+            try:
+                rollback_break("REPORTING_BREAK")
+            finally:
+                raise
         raise
-    base = finalize_generic_live_v1_posttrade(
-        submission_result=submission_result, exact_plan=exact_plan,
-        order_lifecycle=order_lifecycle, reconciliation=reconciled,
-        journal_entries=journal, performance=perf,
-        dashboard_projection=dashboard, finalized_at=finalized_at,
-        rearm_state_path=rearm_state_path, result_path=base_result_path,
-        rollback_handler=rollback_handler,
-    )
     evidence_hashes = sorted({
         base["content_hash"], reconciled["content_hash"],
         *[row["record_hash"] for row in session_rows], *valuation_hashes,
@@ -233,7 +252,11 @@ def finalize_generic_live_v1_production_posttrade(
     try:
         _write_exclusive(Path(closure_result_path), body)
     except Exception:
-        rollback_break("REPORTING_BREAK")
+        if not rolled_back:
+            try:
+                rollback_break("REPORTING_BREAK")
+            finally:
+                raise
         raise
     return body
 
@@ -378,7 +401,7 @@ def build_and_finalize_generic_live_v1_production_posttrade(
         )
         return result
     except BaseException:
-        if current_trigger not in rollback_triggers:
+        if not rollback_triggers:
             rollback_break(current_trigger)
         raise
 

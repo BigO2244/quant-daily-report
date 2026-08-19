@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import tempfile
 from pathlib import Path
@@ -36,6 +37,8 @@ GENERIC_LIVE_V1_BREAK_TRIGGERS = frozenset(
     }
 )
 CRON_TZ_LINE = "CRON_TZ=America/New_York"
+_ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_ENV_LITERAL_VALUE = re.compile(r"^[A-Za-z0-9_./:@+,-]+$")
 
 
 def reject_sensitive_payload(payload: Any) -> None:
@@ -187,6 +190,7 @@ def install_config_with_backup(
     active_path: Path | str,
     backup_path: Path | str,
     allowed_roots: Sequence[Path | str],
+    expected_candidate_sha256: str,
 ) -> dict[str, str | bool]:
     """Atomically install a protected config after making an immutable backup."""
 
@@ -195,26 +199,62 @@ def install_config_with_backup(
     backup = secure_path(backup_path, allowed_roots=allowed_roots, must_exist=False, kind="file")
     require_protected_mode(candidate, directory=False)
     body = candidate.read_bytes()
-    if not body or b"CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0" not in body:
-        raise GenericLiveV1OpsError("candidate config must be non-empty and schedule-disabled")
-    config_keys = {
-        line.split(b"=", 1)[0].strip().upper()
-        for line in body.splitlines()
-        if b"=" in line and not line.lstrip().startswith(b"#")
-    }
+    if (
+        not isinstance(expected_candidate_sha256, str)
+        or len(expected_candidate_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in expected_candidate_sha256)
+    ):
+        raise GenericLiveV1OpsError("expected candidate config hash must be a lowercase SHA-256 digest")
+    observed_candidate_sha256 = hashlib.sha256(body).hexdigest()
+    if observed_candidate_sha256 != expected_candidate_sha256:
+        raise GenericLiveV1OpsError("candidate config byte hash differs from the approved digest")
+    if not body:
+        raise GenericLiveV1OpsError("candidate config must be non-empty")
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise GenericLiveV1OpsError("candidate config must be UTF-8 text") from exc
     forbidden_config_keys = {
-        b"APCA_API_KEY_ID", b"APCA_API_SECRET_KEY", b"ALPACA_API_KEY",
-        b"ALPACA_API_SECRET", b"CAERUS_GENERIC_LIVE_ACCOUNT_ID",
+        "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "ALPACA_API_KEY",
+        "ALPACA_API_SECRET", "CAERUS_GENERIC_LIVE_ACCOUNT_ID",
     }
-    if config_keys & forbidden_config_keys:
-        raise GenericLiveV1OpsError("generic Live config cannot contain credentials or a raw account id")
+    config: dict[str, str] = {}
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if not line or line.startswith("#"):
+            continue
+        if line != line.strip() or line.count("=") != 1:
+            raise GenericLiveV1OpsError(
+                f"candidate config line {line_number} is not a canonical literal assignment"
+            )
+        key, value = line.split("=", 1)
+        if key in forbidden_config_keys:
+            raise GenericLiveV1OpsError(
+                "generic Live config cannot contain credentials or a raw account id"
+            )
+        if (
+            not _ENV_KEY.fullmatch(key)
+            or not key.startswith("CAERUS_")
+            or not value
+            or not _ENV_LITERAL_VALUE.fullmatch(value)
+        ):
+            raise GenericLiveV1OpsError(
+                f"candidate config line {line_number} is not a command-free literal assignment"
+            )
+        if key in config:
+            raise GenericLiveV1OpsError(f"candidate config contains duplicate key: {key}")
+        config[key] = value
+    if config.get("CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED") != "0":
+        raise GenericLiveV1OpsError("candidate config must be schedule-disabled")
     backed_up = False
     if active.exists():
         require_protected_mode(active, directory=False)
         atomic_write_protected(backup, active.read_bytes(), allowed_roots=allowed_roots, replace=False)
         backed_up = True
     atomic_write_protected(active, body, allowed_roots=allowed_roots, replace=True)
-    return {"active_path": str(active), "backup_path": str(backup), "backup_created": backed_up}
+    return {
+        "active_path": str(active), "backup_path": str(backup),
+        "backup_created": backed_up, "candidate_sha256": observed_candidate_sha256,
+    }
 
 
 def restore_config_backup(
