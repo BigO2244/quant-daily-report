@@ -1,0 +1,24 @@
+{
+  "schema_version": "caerus.generic_live_deployment_policy_template.v1",
+  "status": "TEMPLATE_ONLY_NOT_ACTIVE",
+  "active_registry_mutation_allowed": false,
+  "paper_cutover_status": "LEGACY_UNCHANGED_NOT_YET_CUT_OVER",
+  "live_lane": {
+    "lane_id": "REPLACE_FROM_OWNER_DECISION",
+    "lane_kind": "LIVE",
+    "enabled": false,
+    "deployment_version": "REPLACE_FROM_OWNER_DECISION",
+    "account_id_hash": "REPLACE_WITH_REDACTED_SHA256",
+    "broker_environment": "REPLACE_FROM_ENVIRONMENT_BINDING",
+    "eligible_sleeves": "REPLACE_FROM_SEPARATELY_APPROVED_POLICY_ONLY",
+    "capital_policy": "REPLACE_FROM_OWNER_DECISION",
+    "execution_policy": "REPLACE_FROM_GENERIC_V4_BINDING",
+    "reconciliation_policy": "REPLACE_FROM_GENERIC_V4_BINDING"
+  },
+  "required_candidate_schema": "caerus.lane_deployment_policy.v1",
+  "required_candidate_status": "PENDING",
+  "kill_switch_must_remain_engaged": true,
+  "legacy_live_executor_must_remain_disabled": true,
+  "execution_authority": false,
+  "activation_authority": false
+}

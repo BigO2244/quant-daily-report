@@ -1,0 +1,94 @@
+{
+  "schema_version": "caerus.vm_generic_live_preflight.v1",
+  "observed_at": "2026-08-19T00:36:53Z",
+  "access_method": "ssh caerus-vm",
+  "repository_reference": "$HOME/quant-daily-report",
+  "persistence_class": "HASH_REDACTED_READ_ONLY_EVIDENCE",
+  "advisory_status": "READY_TO_STAGE",
+  "cutover_status": "BLOCKED",
+  "owner_intent": "GENERIC_LIVE_CUTOVER_ONLY_LEGACY_REACTIVATION_FORBIDDEN",
+  "deployment": {
+    "branch": "main",
+    "head_sha": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+    "origin_main_sha": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+    "deployed_sha": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+    "deploy_state_hash": "0c600f16363c30201cca298af99d0c8a4bc6e603b4de7fd1efea16ce72098c43",
+    "dirty_entry_count": 0
+  },
+  "legacy_live_disabled_proof": {
+    "registry_live_enabled": false,
+    "strategy_registry_hash": "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd",
+    "cron_structural_disable_present": true,
+    "cron_wrapper_hash": "5dc4d92edfe4d410fb8a4734c1f2f511f33bdc9ba6ecb83570318fd0c418991f",
+    "executor_structural_disable_present": true,
+    "legacy_executor_hash": "dc414be8d6387db933d35f3f7c8a3abca041fea5cd53597d06564d27c7bd8053",
+    "legacy_guardrails_hash": "0e4982bdb955e4f2491dad55eebf5486510c9f5f7589ac9c9adf757e418ebf5b"
+  },
+  "live_environment_redacted": {
+    "reference": "$HOME/.caerus/live_pilot.env",
+    "exists": true,
+    "source_hash": "3896bec8adc485a136f1d636fad2b37e6a45c0fcbc86f8095c827ff6d62a3597",
+    "kill_switch_state": "ARMED",
+    "owner_approval_state": "UNSET",
+    "submit_approval_state": "UNSET",
+    "cron_approval_state": "UNSET",
+    "schedule_enabled_state": "UNSET",
+    "account_pin_configured": false,
+    "capital_ceiling_configured": false,
+    "max_orders_configured": false,
+    "credentials_or_account_ids_persisted": false
+  },
+  "schedule_redacted": {
+    "crontab_present": true,
+    "crontab_hash": "e053c2ea0de7738798705f11556db9c69c6beabab59b1cd3c631f53b37ce6033",
+    "active_entry_count": 15,
+    "legacy_live_entry_count": 1,
+    "generic_entry_count": 0
+  },
+  "generic_path_inventory": {
+    "core/lane_environment_adapter.py": null,
+    "core/lane_scheduler_dry_run.py": null,
+    "core/generic_live_cutover_manifests.py": null,
+    "scripts/run_generic_lane_scheduler_dry_run.py": null,
+    "config/templates/generic_live.env.example": null,
+    "config/templates/generic_live_lane_deployment_policy.template.json": null,
+    "docs/runbooks/GENERIC_LIVE_CUTOVER.md": null
+  },
+  "future_staging_roots": {
+    "config": "EXISTS_WRITABLE",
+    "core": "EXISTS_WRITABLE",
+    "scripts": "EXISTS_WRITABLE",
+    "docs/runbooks": "EXISTS_WRITABLE",
+    "outputs": "EXISTS_WRITABLE"
+  },
+  "cutover_blockers": [
+    "GENERIC_PATH_NOT_DEPLOYED",
+    "GENERIC_SCHEDULE_NOT_PRESENT",
+    "LIVE_ACCOUNT_PIN_NOT_CONFIGURED",
+    "LIVE_CAPITAL_CEILING_NOT_CONFIGURED",
+    "LIVE_MAX_ORDERS_NOT_CONFIGURED",
+    "OWNER_APPROVAL_UNSET",
+    "SUBMIT_APPROVAL_UNSET",
+    "SCHEDULE_APPROVAL_UNSET"
+  ],
+  "required_before_cutover": [
+    "DEPLOY_GENERIC_FILES_THROUGH_CANONICAL_COMMIT_PUSH_DEPLOY_FLOW",
+    "KEEP_LEGACY_EXECUTOR_DISABLED",
+    "KEEP_KILL_SWITCH_ARMED_DURING_STAGING_AND_READ_ONLY_OBSERVATION",
+    "CREATE_REDACTED_ACCOUNT_PINNED_GENERIC_ENVIRONMENT",
+    "RUN_GENERIC_PAPER_LIVE_PARITY_AND_ALL_PREFLIGHTS",
+    "COMPILE_OWNER_APPROVED_PENDING_DEPLOYMENT_POLICY",
+    "REQUIRE_SEPARATE_OWNER_ACTIVATION_AFTER_OBSERVATION"
+  ],
+  "read_only": true,
+  "secrets_redacted": true,
+  "broker_call_performed": false,
+  "broker_write_performed": false,
+  "configuration_mutated": false,
+  "schedule_mutated": false,
+  "kill_switch_mutated": false,
+  "remote_files_written": false,
+  "execution_authority": false,
+  "activation_authority": false,
+  "content_hash": "3077cc9eee50dfcdb8ff8f3571efe87b966c96248464a3d6eee731d6f55e19b2"
+}
