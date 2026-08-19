@@ -1,0 +1,27 @@
+{
+  "approved_candidate_hash": "0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e",
+  "approved_candidate_id": "adaptive-shadow-v1-conservative-2026-08-18",
+  "approved_eligible_sleeves": [
+    "caerus_lyra",
+    "caerus_polaris"
+  ],
+  "approved_scope": "ADAPTIVE_SHADOW_OBSERVATION_ONLY",
+  "authority": {
+    "activation_authority": false,
+    "approval_authority_beyond_this_shadow_observation": false,
+    "automatic_promotion_enabled": false,
+    "execution_authority": false,
+    "live_lane_eligible": false,
+    "paper_lane_eligible": false,
+    "produces_executable_target": false
+  },
+  "content_hash": "c37d401904400dc9b6a07e6a9e632ffe73433f5fa2148f83637d0f4d2e32a84c",
+  "decision_date": "2026-08-18",
+  "decision_id": "owner-decision:adaptive-shadow-v1:2026-08-18",
+  "decision_status": "APPROVED_FOR_SHADOW_OBSERVATION_ONLY",
+  "fallback_action": "HOLD_STATIC_POLARIS_SHADOW_BASELINE",
+  "owner_role": "CAERUS_CIO_AND_PRODUCT_OWNER",
+  "readiness_gates_remain_binding": true,
+  "schema_version": "caerus.adaptive_shadow_owner_decision.v1",
+  "source_record": "OWNER_EXPLICIT_DIRECTIVE_IN_ORCHESTRATED_SESSION"
+}

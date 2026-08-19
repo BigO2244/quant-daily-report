@@ -1,0 +1,94 @@
+{
+  "activation_authority": false,
+  "activation_id": "adaptive-shadow-activation:9157117cc2fff7a33a4f2e9b",
+  "adaptive_evidence_emitted": false,
+  "adaptive_evidence_hash": null,
+  "approval_authority": false,
+  "artifact_kind": "ADAPTIVE_SHADOW_OBSERVATION_READINESS",
+  "automatic_promotion_enabled": false,
+  "blockers": [
+    "MISSING_CAPACITY_LIQUIDITY_OVERLAP_CONSTRAINT_EVIDENCE",
+    "MISSING_DECISION_BATCH_V2",
+    "MISSING_LYRA_CAUSAL_SIGNAL",
+    "MISSING_POLARIS_CAUSAL_SIGNAL",
+    "MISSING_READINESS_HISTORY_60_VALID_20_GREEN",
+    "MISSING_SHADOW_DEPLOYMENT_MEMBERSHIP"
+  ],
+  "candidate_hash": "0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e",
+  "content_hash": "8a4e240dc94d09c8337834c41d52292467c6db8d06ae149005fb81691fd7c928",
+  "eligible_sleeves_if_ready": [
+    "caerus_lyra",
+    "caerus_polaris"
+  ],
+  "enable_requested": true,
+  "executable_target": false,
+  "execution_authority": false,
+  "fallback": {
+    "action": "HOLD_STATIC_POLARIS_SHADOW_BASELINE",
+    "automatic_recovery": false,
+    "modeled_sleeve_weights": {
+      "caerus_lyra": 0.0,
+      "caerus_polaris": 1.0
+    },
+    "produces_executable_target": false,
+    "status": "ACTIVE_MODELED_CONTROL"
+  },
+  "input_inventory": [
+    {
+      "content_hash": null,
+      "input_role": "SHADOW_DEPLOYMENT_MEMBERSHIP",
+      "status": "MISSING"
+    },
+    {
+      "content_hash": null,
+      "input_role": "DECISION_BATCH_V2",
+      "status": "MISSING"
+    },
+    {
+      "content_hash": null,
+      "input_role": "POLARIS_CAUSAL_SIGNAL",
+      "status": "MISSING"
+    },
+    {
+      "content_hash": null,
+      "input_role": "LYRA_CAUSAL_SIGNAL",
+      "status": "MISSING"
+    },
+    {
+      "content_hash": null,
+      "input_role": "READINESS_HISTORY_60_VALID_20_GREEN",
+      "status": "MISSING"
+    },
+    {
+      "content_hash": null,
+      "input_role": "CAPACITY_LIQUIDITY_OVERLAP_CONSTRAINT_EVIDENCE",
+      "status": "MISSING"
+    }
+  ],
+  "lane_kind": "SHADOW",
+  "live_authority_changed": false,
+  "live_lane_eligible": false,
+  "observation_scope": "ADAPTIVE_SHADOW_OBSERVATION_ONLY",
+  "observed_at": "2026-08-19T00:23:11Z",
+  "owner_decision_hash": "c37d401904400dc9b6a07e6a9e632ffe73433f5fa2148f83637d0f4d2e32a84c",
+  "paper_authority_changed": false,
+  "paper_lane_eligible": false,
+  "produces_portfolio_target": false,
+  "readiness_status": "BLOCKED_STATIC_POLARIS_FALLBACK",
+  "reason_codes": [
+    "MISSING_CAPACITY_LIQUIDITY_OVERLAP_CONSTRAINT_EVIDENCE",
+    "MISSING_DECISION_BATCH_V2",
+    "MISSING_LYRA_CAUSAL_SIGNAL",
+    "MISSING_POLARIS_CAUSAL_SIGNAL",
+    "MISSING_READINESS_HISTORY_60_VALID_20_GREEN",
+    "MISSING_SHADOW_DEPLOYMENT_MEMBERSHIP"
+  ],
+  "registry_hash": "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd",
+  "registry_revision": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+  "schema_version": "caerus.adaptive_shadow_activation_readiness.v1",
+  "source_hashes": [
+    "0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e",
+    "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd",
+    "c37d401904400dc9b6a07e6a9e632ffe73433f5fa2148f83637d0f4d2e32a84c"
+  ]
+}

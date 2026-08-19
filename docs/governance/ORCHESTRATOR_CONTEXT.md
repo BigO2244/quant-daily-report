@@ -45,6 +45,12 @@ artifacts and an explicit research-to-production promotion ladder.
   has no model fallback and writes the end-of-day portfolio audit.
 - Polaris remains the historical research baseline and daily shadow comparison control.
 - Lyra is the shadow challenger.
+- Adaptive Shadow v1 candidate hash `0ee486...` is owner-approved for
+  observation only across Polaris and Lyra. All preregistered readiness gates
+  remain binding; the first enabled readiness result fails closed to static
+  Polaris because governed decision, signal, history, membership, and
+  constraint inputs are incomplete. It grants no PAPER/Live or execution
+  authority.
 - SPY is the benchmark anchor.
 - Orion sends PAPER orders only after immutable package validation. The `$500`
   FR-104 live-pilot lane remains blocked and separately governed; no live

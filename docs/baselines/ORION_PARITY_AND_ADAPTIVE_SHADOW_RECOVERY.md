@@ -131,11 +131,12 @@ return evidence, no cutover eligibility, and no execution or activation
 authority. It cannot satisfy or replace either the factual Orion input or the
 factual generic-path comparison.
 
-The adaptive allocator also has no factual input set. Its sealed readiness
-status is `BLOCKED`, not synthetic performance evidence:
+The adaptive allocator also had no factual input set in the initial capture.
+That historical readiness remains `BLOCKED`, not synthetic performance
+evidence:
 
 - `adaptive_shadow_evidence_readiness_20260818.json`
-- no preregistered adaptive policy artifact;
+- at that capture, no owner-approved adaptive policy artifact;
 - no factual sleeve-decision v2 batch;
 - no causal, pre-as-of signal set;
 - no deployment-policy hash selected for this research observation.
@@ -164,6 +165,16 @@ but none is a sealed adaptive policy, causal signal set, sleeve-decision v2
 batch, or selected deployment-policy artifact. Those datasets cannot be
 relabeled as an adaptive Shadow evidence session, so the adaptive readiness
 artifact remains `BLOCKED` rather than emitting synthetic performance.
+
+The owner subsequently approved exact candidate hash `0ee486...` for Shadow
+observation only. The decision record is
+`docs/governance/decision_records/adaptive_shadow_v1_owner_approval_20260818.json`.
+The enabled observation readiness result is sealed separately at
+`adaptive_shadow_v1_activation_readiness_20260818.json`. It remains
+`BLOCKED_STATIC_POLARIS_FALLBACK`: Shadow deployment membership, a complete
+Polaris+Lyra decision-v2 batch, both causal signals, 60-valid/20-green history,
+and full capacity/liquidity/overlap constraint evidence are missing. No
+adaptive performance evidence was emitted.
 
 ## Exact Orion recovery inputs
 
@@ -207,17 +218,23 @@ account hash, and captured-at time. Output remains stdout-only.
 ## Off-by-default adaptive Shadow runner
 
 `scripts/run_adaptive_shadow_evidence.py` is disabled unless
-`--enable-shadow-evidence` is present. A disabled call emits `DISABLED`; an
-enabled call with missing inputs emits `BLOCKED`. It produces sleeve-weight
-research evidence only—never security targets, orders, PAPER eligibility, LIVE
-eligibility, execution authority, or activation authority.
+`--enable-shadow-observation` is present. A disabled call emits `DISABLED`; an
+enabled call with missing inputs emits `BLOCKED_STATIC_POLARIS_FALLBACK`. The
+runner emits readiness only—never security targets, orders, PAPER eligibility,
+LIVE eligibility, execution authority, or activation authority.
 
 ```text
 python scripts/run_adaptive_shadow_evidence.py \
-  --observed-at <iso-timestamp>
+  --candidate docs/governance/proposals/adaptive_shadow_v1_policy_candidate.json \
+  --owner-decision docs/governance/decision_records/adaptive_shadow_v1_owner_approval_20260818.json \
+  --registry config/research/strategy_registry.json \
+  --observed-at <iso-timestamp> \
+  --enable-shadow-observation
 ```
 
-An enabled factual run additionally requires explicit paths for the sealed
-adaptive policy, sleeve-decision v2 batch, causal signals, plus the deployment
-policy hash, as-of time, and generated-at time. The runner prints to stdout and
-does not write runtime pointers or configuration.
+Readiness additionally requires explicit paths for Shadow deployment
+membership, the decision-v2 batch, Polaris and Lyra causal signals, readiness
+history, and constraint evidence. The runner hashes those immutable inputs,
+prints to stdout, and does not write runtime pointers or configuration. Even a
+`READY_FOR_ADAPTIVE_EVIDENCE_RUN` result remains non-executable and holds the
+static Polaris control until separate adaptive evidence is sealed.

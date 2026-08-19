@@ -434,6 +434,15 @@ Their future status will be determined through:
 
 The data will determine which strategy survives.
 
+Owner amendment, 2026-08-18: Adaptive Shadow v1 candidate hash
+`0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`
+is approved for observation only across Polaris and Lyra. Its 60-valid-session,
+20-consecutive-green, causal-lineage, freshness, capacity, liquidity, overlap,
+concentration, and turnover gates remain mandatory. Missing or failed evidence
+holds the static Polaris Shadow modeled control and requires escalation; there
+is no automatic recovery. This amendment grants no Paper or Live eligibility,
+capital, promotion, executable target, execution, or activation authority.
+
 ---
 
 ## Polaris_Alpha and Orion_Alpha
