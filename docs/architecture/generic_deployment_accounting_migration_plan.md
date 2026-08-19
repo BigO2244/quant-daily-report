@@ -1385,6 +1385,21 @@ must bind that decision and fresh account state. Until those artifacts exist
 and an all-green preflight is rebuilt from them, no schedule, observation,
 kill-switch, or submission flag may be enabled.
 
+The 2026-08-19 attempt is conclusively `NO_GO` on chronology, not merely missing
+code. Lyra rebalances weekly on Monday, so its Wednesday target carries the
+2026-08-17 selection. The governed universe freeze is prospective from
+2026-08-19 and cannot certify that earlier target. Recomputing Wednesday would
+change strategy economics and violate the no-opportunistic-order term. The
+sealed chronology evidence is
+[`generic_live_v1_p0_1_chronology_no_go_2026-08-19.json`](../evidence/generic_live_v1_p0_1_chronology_no_go_2026-08-19.json),
+content hash
+`f1d8e172b5660c2d83120bb1bd30a0801e3a55e966ab214728fe0f6ef37b1ba1`.
+The first prospective eligible rebalance is Monday 2026-08-24, but the current
+approval expires on 2026-08-20. The exact same-terms proposal at
+[`generic_live_v1_owner_decision_2026-08-24.pending.json`](../governance/proposals/generic_live_v1_owner_decision_2026-08-24.pending.json)
+is deliberately `PENDING_OWNER_APPROVAL`; its content hash is
+`8a07df4852a30358761e2be62054cf202b406bb4ca096c70be55e3b1e60cd641`.
+
 The adaptive policy choice is now concrete rather than implicit. Candidate
 hash `0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`
 selects only registry/deployment-approved Shadow sleeves that pass 60-session,

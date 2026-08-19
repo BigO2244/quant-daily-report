@@ -212,6 +212,19 @@ and compile an exact Lyra-only v4 plan before any schedule, observation, kill
 switch, or submission setting may be enabled. Installed source or cron presence
 must never be read as trading authority.
 
+The 2026-08-19 session cannot satisfy that gate without changing Lyra's weekly
+economics. Lyra's Wednesday target carries its Monday 2026-08-17 selection,
+while the governed universe freeze is prospective only from 2026-08-19 and
+forbids retroactive use. The immutable chronology verdict is
+[`generic_live_v1_p0_1_chronology_no_go_2026-08-19.json`](evidence/generic_live_v1_p0_1_chronology_no_go_2026-08-19.json),
+content hash `f1d8e172b5660c2d83120bb1bd30a0801e3a55e966ab214728fe0f6ef37b1ba1`.
+The first eligible prospective rebalance is Monday 2026-08-24, after the current
+owner decision expires. A same-terms decision proposal is sealed at
+[`generic_live_v1_owner_decision_2026-08-24.pending.json`](governance/proposals/generic_live_v1_owner_decision_2026-08-24.pending.json),
+content hash `8a07df4852a30358761e2be62054cf202b406bb4ca096c70be55e3b1e60cd641`.
+It is `PENDING_OWNER_APPROVAL` and grants no approval, activation, or execution
+authority.
+
 A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),
 with its owner brief at
