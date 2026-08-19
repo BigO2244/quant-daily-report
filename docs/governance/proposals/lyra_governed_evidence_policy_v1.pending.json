@@ -1,0 +1,30 @@
+{
+  "activation_authority": false,
+  "content_hash": "c6c12f954757f5ee020ff27e5c10705462a0a24a689c018290995c83de878e0e",
+  "execution_authority": false,
+  "policy_terms": {
+    "activation_authority": false,
+    "annualization_factor": 252,
+    "calendar_policy_id": "XNYS_US_EQUITIES_HOLIDAY_RULES_V1",
+    "capacity_formula_id": "MIN_SYMBOL_PARTICIPATION_CAPACITY_DIVIDED_BY_TARGET_WEIGHT_V1",
+    "capital_reference_usd": 460.0,
+    "effective_from": "2026-08-24",
+    "execution_authority": false,
+    "formula_id": "STATIC_TARGET_WEIGHTED_20_SESSION_CLOSE_RETURN_VOLATILITY_ANNUALIZED_V1",
+    "liquidity_formula_id": "20_SESSION_MEAN_DOLLAR_VOLUME_AND_1PCT_ORDER_PARTICIPATION_V1",
+    "liquidity_lookback_sessions": 20,
+    "lookback_sessions": 20,
+    "maximum_liquidation_participation_rate": 0.05,
+    "maximum_order_participation_rate": 0.01,
+    "metric": "annualized_volatility",
+    "minimum_capacity_multiple": 20.0,
+    "minimum_mean_dollar_volume_usd": 20000000.0,
+    "minimum_price_observations": 21,
+    "sleeve_id": "caerus_lyra",
+    "turnover_formula_id": "FULL_L1_TARGET_WEIGHT_CHANGE_V1"
+  },
+  "proposal_id": "lyra-governed-evidence-policy:v1:20260824",
+  "proposed_at": "2026-08-19T06:59:28Z",
+  "proposed_by": "CAERUS_OPERATING_MODEL_MIGRATION",
+  "schema_version": "caerus.lyra_forecast_risk_policy_proposal.v1"
+}

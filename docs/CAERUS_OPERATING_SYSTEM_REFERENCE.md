@@ -231,6 +231,17 @@ content hash `c523bc96aae5e45688449750dd7fb995564958545972411f0510ed15cf434eeb`.
 It is `PENDING_OWNER_APPROVAL` and grants no approval, activation, or execution
 authority.
 
+The decision-grade evidence formulas are governed separately rather than
+silently inferred from implementation constants. The exact proposal is
+[`lyra_governed_evidence_policy_v1.pending.json`](governance/proposals/lyra_governed_evidence_policy_v1.pending.json),
+content hash `c6c12f954757f5ee020ff27e5c10705462a0a24a689c018290995c83de878e0e`.
+It binds the 20-session risk and liquidity windows, 1% order and 5%
+liquidation participation limits, $20 million minimum mean dollar volume,
+20-times-capital capacity floor, XNYS calendar policy, and canonical full-L1
+turnover. It is pending Brett's approval and cannot be used to mark a Lyra
+decision READY until a separate immutable owner decision binds this exact
+proposal.
+
 A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),
 with its owner brief at
