@@ -80,6 +80,8 @@ def _inputs(tmp_path) -> dict:
         "closure_result_path": tmp_path / "closure" / "result.json",
         "rollback_handler": lambda trigger: {
             "status": "ROLLED_BACK_ARMED", "trigger": trigger,
+            "paper_bytes_unchanged": True, "cron_exact_line_removed": True,
+            "config_action": "ALREADY_ABSENT", "rearm_hash": "d" * 64,
         },
     }
 
