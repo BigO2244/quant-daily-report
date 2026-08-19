@@ -436,4 +436,7 @@ def test_templates_remain_disabled_and_runtime_pinned() -> None:
     assert "finalize_generic_live_v1_posttrade.py" in cron_text
     assert "--collect-from-broker" in cron_text
     assert "CAERUS_GENERIC_LIVE_BOOTSTRAP_GUARD:-0" in cron_text
+    assert cron_text.index("scripts/run_generic_live_v1_session.py") < cron_text.index(
+        "scripts/finalize_generic_live_v1_posttrade.py"
+    ) < cron_text.rindex("trap - ERR INT TERM HUP")
     assert os.access(cron_wrapper, os.X_OK)

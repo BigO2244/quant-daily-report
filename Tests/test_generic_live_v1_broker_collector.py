@@ -25,45 +25,55 @@ class ReadBroker:
         self.submission = arguments["submission_result"]
         self.order = [*self.plan["sell_orders"], *self.plan["buy_orders"]][0]
 
+    @property
+    def filled_quantity(self):
+        return float(self.submission["filled_quantity"])
+
     def get_order(self, order_id):
         assert order_id == self.submission["broker_order"]["broker_order_id"]
         return {
             "id": order_id, "client_order_id": self.order["client_order_id"],
             "symbol": self.order["symbol"], "side": self.order["side"],
-            "status": "filled", "qty": str(self.order["quantity"]),
-            "filled_qty": str(self.order["quantity"]),
+            "status": self.submission["broker_order"]["broker_status"],
+            "qty": str(self.order["quantity"]),
+            "filled_qty": str(self.filled_quantity),
         }
 
     def list_generic_live_v1_fill_activities(self, date_iso):
         assert date_iso == self.plan["trade_date"]
+        if not self.filled_quantity:
+            return []
         return [{
             "id": "alpaca-fill-activity-1", "activity_type": "FILL",
             "transaction_time": "2026-08-19T13:34:30+00:00",
             "order_id": self.submission["broker_order"]["broker_order_id"],
             "symbol": self.order["symbol"], "side": self.order["side"],
-            "qty": str(self.order["quantity"]),
+            "qty": str(self.filled_quantity),
             "price": str(self.order["enforcement_price"]), "fee_amount": "0",
         }]
 
     def get_account(self):
-        gross = float(self.order["quantity"]) * float(self.order["enforcement_price"])
+        gross = self.filled_quantity * float(self.order["enforcement_price"])
         cash = float(self.plan["starting_cash"]) - gross
         return {
             "id": self.raw_account_id,
             "id_hash": self.plan["account_id_hash"], "status": "ACTIVE",
             "trading_blocked": False, "account_blocked": False,
-            "cash": str(cash), "equity": str(cash + 400.0),
+            "cash": str(cash), "equity": str(cash + self.filled_quantity * 100.0),
         }
 
     def get_positions(self):
+        if not self.filled_quantity:
+            return []
         return [{
-            "symbol": self.order["symbol"], "qty": str(self.order["quantity"]),
-            "current_price": "100", "market_value": "400",
+            "symbol": self.order["symbol"], "qty": str(self.filled_quantity),
+            "current_price": "100",
+            "market_value": str(self.filled_quantity * 100.0),
         }]
 
 
-def _collector_arguments(tmp_path):
-    raw = _session_fixture(tmp_path)
+def _collector_arguments(tmp_path, *, outcome="FILLED"):
+    raw = _session_fixture(tmp_path, outcome=outcome)
     return raw, {
         key: value for key, value in raw.items()
         if key not in {"order_lifecycle", "broker_orders", "broker_fills", "ending_state"}
@@ -88,6 +98,68 @@ def test_fresh_read_only_broker_evidence_closes_before_publishing_pointer(tmp_pa
         path.read_text() for path in (tmp_path / "broker-evidence").glob("*.json")
     )
     assert "RAW_ACCOUNT_MUST_NOT_PERSIST" not in persisted
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_reconciliation_status", "expected_session_journal_rows"),
+    [
+        ("PARTIAL_CANCELED", "PARTIAL", 1),
+        ("REJECTED", "REJECTED", 0),
+    ],
+)
+def test_terminal_order_break_collects_fresh_truth_before_suppressed_pointer(
+    tmp_path, outcome, expected_reconciliation_status,
+    expected_session_journal_rows,
+) -> None:
+    raw, arguments = _collector_arguments(tmp_path, outcome=outcome)
+    pointer = tmp_path / "published" / "posttrade.json"
+    observed = []
+    arguments["rollback_handler"] = (
+        lambda trigger: observed.append(trigger) or _rollback(trigger)
+    )
+
+    result = collect_and_finalize_generic_live_v1_posttrade(
+        broker=ReadBroker(raw), observed_at="2026-08-19T20:00:00+00:00",
+        evidence_directory=tmp_path / "broker-evidence",
+        published_pointer_path=pointer, **arguments,
+    )
+
+    artifacts = [
+        json.loads(path.read_text())
+        for path in (tmp_path / "reporting").glob("*.json")
+    ]
+    reconciliation = next(
+        row for row in artifacts
+        if row.get("schema_version") == "caerus.lane_reconciliation.v1"
+    )
+    daily = next(
+        row for row in artifacts
+        if row.get("schema_version") == "caerus.daily_lane_audit.v1"
+    )
+    dashboard = next(
+        row for row in artifacts
+        if row.get("schema_version")
+        == "caerus.dashboard_performance_surfaces.v1"
+    )
+    session_journal = [
+        row for row in artifacts
+        if row.get("schema_version") == "caerus.accounting_journal_entry.v1"
+        and row.get("source_hash") == reconciliation["content_hash"]
+    ]
+    assert result["closure"]["status"] == "ROLLBACK_REQUIRED_REARMED"
+    assert reconciliation["status"] == expected_reconciliation_status
+    assert len(session_journal) == expected_session_journal_rows
+    assert daily["status"] == "BLOCKED"
+    assert all(row["claim_status"] == "SUPPRESSED" for row in daily["return_claims"])
+    assert all(
+        row["claim_status"] == "SUPPRESSED"
+        for row in dashboard["performance_surfaces"]
+    )
+    assert observed == ["ORDER_BREAK"]
+    assert pointer.exists()
+    published = json.loads(pointer.read_text())
+    assert published["status"] == "ROLLBACK_REQUIRED_REARMED"
+    assert published["closure_hash"] == result["closure"]["content_hash"]
 
 
 def test_pointer_is_never_published_when_broker_state_cannot_reconcile(tmp_path) -> None:

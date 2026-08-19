@@ -30,8 +30,8 @@ from core.generic_live_v1_ops import (
 )
 
 
-def _requires_external_rollback(status: object) -> bool:
-    return status in {"ORDER_BREAK_REARMED", "UNRESOLVED_ORDER_REARMED"}
+def _requires_immediate_external_rollback(status: object) -> bool:
+    return status == "UNRESOLVED_ORDER_REARMED"
 
 
 def _require_exact_env(preflight: dict, *, submit: bool) -> None:
@@ -193,11 +193,11 @@ def main() -> int:
             rearm_state_path=args.session_gate_path,
             result_path=args.result_path,
         )
-        if args.submit_exact_session and _requires_external_rollback(
+        if args.submit_exact_session and _requires_immediate_external_rollback(
             result.get("status")
         ):
             raise RuntimeError(
-                "generic Live v1 order break or unresolved order requires external rollback"
+                "generic Live v1 unresolved order requires immediate external rollback"
             )
     except Exception:
         if args.submit_exact_session and safe_rearm_path is not None:

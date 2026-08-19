@@ -21,6 +21,8 @@ from authority.lane_exact_plan import canonical_json
 from scripts.manage_generic_live_v1_cron import update_crontab
 import scripts.finalize_generic_live_v1_posttrade as posttrade_cli
 import scripts.run_generic_live_v1_session as runner
+from Tests.test_generic_live_v1_broker_collector import ReadBroker
+from Tests.test_generic_live_v1_posttrade_orchestrator import _session_fixture
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -222,6 +224,7 @@ def test_external_guard_fully_rolls_back_bootstrap_and_terminal_order_failures(
     assert len(evidence) == 1
     assert "paper_bytes_unchanged=true" in evidence[0].read_text()
     assert "SENTINEL_SECRET" not in evidence[0].read_text()
+    assert not (state / "posttrade-published-2026-08-19.json").exists()
 
 
 def test_runner_masks_forced_secret_from_stdout_and_stderr(
@@ -237,14 +240,14 @@ def test_runner_masks_forced_secret_from_stdout_and_stderr(
     assert "failed closed" in captured.err
 
 
-@pytest.mark.parametrize(
-    "status", ["ORDER_BREAK_REARMED", "UNRESOLVED_ORDER_REARMED"],
-)
-def test_order_break_and_unresolved_results_both_require_outer_rollback(
-    status: str,
-) -> None:
-    assert runner._requires_external_rollback(status) is True
-    assert runner._requires_external_rollback("FILLED_REARMED") is False
+def test_only_unresolved_result_requires_immediate_outer_rollback() -> None:
+    assert runner._requires_immediate_external_rollback(
+        "UNRESOLVED_ORDER_REARMED"
+    ) is True
+    assert runner._requires_immediate_external_rollback(
+        "ORDER_BREAK_REARMED"
+    ) is False
+    assert runner._requires_immediate_external_rollback("FILLED_REARMED") is False
 
 
 def test_posttrade_cli_missing_link_performs_full_rollback(
@@ -448,3 +451,157 @@ def test_posttrade_cli_connected_mode_collects_broker_truth_then_calls_raw_build
     assert captured["submission_result"] == payloads["submission.json"]
     assert captured["exact_plan"] == payloads["plan.json"]
     assert captured["published_pointer_path"] == state / "published.json"
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_reconciliation", "expected_session_journal_rows"),
+    [
+        ("PARTIAL_CANCELED", "PARTIAL", 1),
+        ("REJECTED", "REJECTED", 0),
+    ],
+)
+def test_connected_terminal_break_closes_suppressed_truth_then_exactly_rolls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str,
+    expected_reconciliation: str, expected_session_journal_rows: int,
+) -> None:
+    fixture_root = tmp_path / "fixture"
+    fixture_root.mkdir(mode=0o700)
+    raw = _session_fixture(fixture_root, outcome=outcome)
+    inputs = tmp_path / "inputs"
+    state = tmp_path / "state"
+    paper = tmp_path / "paper"
+    ops = tmp_path / "ops"
+    rollback = state / "rollback"
+    for directory in (inputs, state, paper, ops, rollback):
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
+
+    payloads = {
+        "submission.json": raw["submission_result"],
+        "plan.json": raw["exact_plan"],
+        "journal.json": {"journal_entries": raw["existing_journal_entries"]},
+        "valuations.json": {"valuations": raw["prior_valuations"]},
+        "policy.json": raw["deployment_policy"],
+        "sleeves.json": {"known_sleeve_ids": raw["known_sleeve_ids"]},
+        "deployment.json": raw["deployment_state"],
+        "capital.json": raw["capital"],
+        "other.json": {"lane_audits": raw["other_lane_audits"]},
+    }
+    for name, payload in payloads.items():
+        _write(inputs / name, json.dumps(payload))
+    gate = state / "gate.json"
+    _write(gate, Path(raw["rearm_state_path"]).read_text())
+
+    active = ops / "generic_live_v1.env"
+    backup = ops / "generic_live_v1.env.rollback"
+    _write(active, "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=1\nNEW=1\n")
+    _write(backup, "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\nPRIOR=1\n")
+    paper_paths = [paper / "cron_precompute.sh", paper / "cron_execute.sh", paper / "crontab.txt"]
+    for index, path in enumerate(paper_paths):
+        _write(path, f"paper-{index}\n", 0o700 if path.suffix == ".sh" else 0o600)
+    paper_before = {
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paper_paths
+    }
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(mode=0o700)
+    cron_store = tmp_path / "crontab.txt"
+    exact = (
+        "36 9 19 8 * /fixed/guard --effective-session 2026-08-19 "
+        "# CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-19"
+    )
+    cron_store.write_text(f"PAPER_LINE\n{exact}\n", encoding="utf-8")
+    _write(
+        fake_bin / "crontab",
+        "#!/usr/bin/env bash\n"
+        "if [[ \"${1:-}\" == '-l' ]]; then cat \"${FAKE_CRONTAB_STORE}\"; exit 0; fi\n"
+        "if [[ \"${1:-}\" == '-' ]]; then cat >\"${FAKE_CRONTAB_STORE}\"; exit 0; fi\n"
+        "exit 2\n",
+        0o700,
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_CRONTAB_STORE", str(cron_store))
+    monkeypatch.setattr(posttrade_cli, "CANONICAL_OPS_ROOT", ops)
+    monkeypatch.setattr(posttrade_cli, "CANONICAL_ACTIVE_CONFIG", active)
+    monkeypatch.setattr(posttrade_cli, "CANONICAL_BACKUP_CONFIG", backup)
+    monkeypatch.setattr(
+        posttrade_cli.AlpacaBroker, "from_env", lambda: ReadBroker(raw),
+    )
+
+    pointer = state / "published.json"
+    argv = [
+        "--input-root", str(inputs), "--state-root", str(state),
+        "--submission-result", str(inputs / "submission.json"),
+        "--exact-plan", str(inputs / "plan.json"), "--collect-from-broker",
+        "--broker-evidence-directory", str(state / "broker-evidence"),
+        "--published-pointer-path", str(pointer),
+        "--existing-journal", str(inputs / "journal.json"),
+        "--prior-valuations", str(inputs / "valuations.json"),
+        "--deployment-policy", str(inputs / "policy.json"),
+        "--known-sleeve-ids", str(inputs / "sleeves.json"),
+        "--deployment-state", str(inputs / "deployment.json"),
+        "--capital", str(inputs / "capital.json"),
+        "--other-lane-audits", str(inputs / "other.json"),
+        "--session-gate-path", str(gate),
+        "--base-result-path", str(state / "base.json"),
+        "--closure-result-path", str(state / "closure.json"),
+        "--reporting-artifact-directory", str(state / "reporting"),
+        "--exact-cron-line", exact, "--active-config-path", str(active),
+        "--backup-config-path", str(backup), "--paper-root", str(paper),
+        "--rollback-evidence-directory", str(rollback),
+        "--reconciled-at", "2026-08-19T20:01:00+00:00",
+        "--valuation-date", "2026-08-19",
+        "--finalized-at", "2026-08-19T20:02:00+00:00",
+    ]
+    for path in paper_paths:
+        argv.extend(["--paper-path", str(path)])
+
+    assert posttrade_cli.main(argv) == 0
+
+    artifacts = [
+        json.loads(path.read_text()) for path in (state / "reporting").glob("*.json")
+    ]
+    reconciliation = next(
+        row for row in artifacts
+        if row.get("schema_version") == "caerus.lane_reconciliation.v1"
+    )
+    daily = next(
+        row for row in artifacts
+        if row.get("schema_version") == "caerus.daily_lane_audit.v1"
+    )
+    dashboard = next(
+        row for row in artifacts
+        if row.get("schema_version")
+        == "caerus.dashboard_performance_surfaces.v1"
+    )
+    session_journal = [
+        row for row in artifacts
+        if row.get("schema_version") == "caerus.accounting_journal_entry.v1"
+        and row.get("source_hash") == reconciliation["content_hash"]
+    ]
+    closure = json.loads((state / "closure.json").read_text())
+    published = json.loads(pointer.read_text())
+    assert reconciliation["status"] == expected_reconciliation
+    assert len(session_journal) == expected_session_journal_rows
+    assert daily["status"] == "BLOCKED"
+    assert all(row["claim_status"] == "SUPPRESSED" for row in daily["return_claims"])
+    assert all(
+        row["claim_status"] == "SUPPRESSED"
+        for row in dashboard["performance_surfaces"]
+    )
+    assert closure["status"] == "ROLLBACK_REQUIRED_REARMED"
+    assert published["closure_hash"] == closure["content_hash"]
+    assert published["status"] == "ROLLBACK_REQUIRED_REARMED"
+    assert list((state / "broker-evidence").glob("*.json"))
+    assert json.loads(gate.read_text())["status"] == "ARMED"
+    assert exact not in cron_store.read_text()
+    assert "PAPER_LINE" in cron_store.read_text()
+    assert active.read_bytes() == backup.read_bytes()
+    assert paper_before == {
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paper_paths
+    }
+    evidence = json.loads((rollback / "order_break.json").read_text())
+    assert evidence["status"] == "ROLLED_BACK_ARMED"
+    assert evidence["cron_exact_line_removed"] is True
+    assert evidence["config_action"] == "RESTORED_BACKUP"
+    assert evidence["paper_bytes_unchanged"] is True
