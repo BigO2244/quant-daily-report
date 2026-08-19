@@ -1,0 +1,57 @@
+{
+  "activation_authority": false,
+  "broker_call_performed": false,
+  "broker_write_performed": false,
+  "captured_at": "2026-08-19T05:25:00Z",
+  "content_hash": "f1d8e172b5660c2d83120bb1bd30a0801e3a55e966ab214728fe0f6ef37b1ba1",
+  "current_owner_decision": {
+    "content_hash": "ef5d9ae5ab9833208c0c3979a4ce743fbd0c36fa5676c3910af799444bc94ba7",
+    "effective_session": "2026-08-19",
+    "expires_at": "2026-08-20T20:00:00+00:00",
+    "file_sha256": "bd79cc1a06c4bdee99979ab3a31be67a66eac3607908fc24ec305f304448bd68"
+  },
+  "decision": "NO_GO",
+  "execution_authority": false,
+  "first_eligible_rebalance_session": "2026-08-24",
+  "governed_universe_freeze": {
+    "content_hash": "850e8104e0b5d913e96b6627d0b47219967802328a280e07a7c8f94e6835e434",
+    "effective_from": "2026-08-19T00:00:00-04:00",
+    "file_sha256": "97865b009e5d943b664c3b049767730e7bba6201cc65f94ee5724d54a81c2643",
+    "no_retroactive_use_before": "2026-08-19",
+    "source_sha256": "b9b21f2311ef249facf4f7f699fe916b06f4c778262772a3ac2f63e1bfb8cc21"
+  },
+  "inert_runtime": {
+    "generic_gate_armed": true,
+    "generic_submission_enabled": false,
+    "legacy_kill_switch_armed": true,
+    "paper_cutover_enabled": false,
+    "posttrade_observation_enabled": false,
+    "schedule_enabled": false
+  },
+  "lyra_chronology": {
+    "august_19_is_rebalance_day": false,
+    "carried_target_origin": "2026-08-17",
+    "carried_target_origin_weekday": "MONDAY",
+    "rebalance_mode": "weekly",
+    "rebalance_weekday": "MONDAY",
+    "source_variant": "h1_weekly_h6_top5"
+  },
+  "new_owner_decision_required": true,
+  "order_submitted": false,
+  "p0_1_status": "OPEN",
+  "reason_codes": [
+    "AUGUST_19_IS_NOT_LYRA_REBALANCE_DAY",
+    "AUGUST_19_TARGET_CARRIES_AUGUST_17_SELECTION",
+    "GOVERNED_UNIVERSE_FREEZE_POSTDATES_SIGNAL_ORIGIN",
+    "NO_GOVERNED_AUGUST_17_UNIVERSE_SESSION_TARGET_CHAIN",
+    "CURRENT_OWNER_DECISION_EXPIRES_BEFORE_NEXT_ELIGIBLE_REBALANCE",
+    "FACTUAL_RISK_CAPACITY_LIQUIDITY_EVIDENCE_NOT_YET_AVAILABLE"
+  ],
+  "required_next_step": "OWNER_APPROVAL_FOR_2026_08_24_THEN_PROSPECTIVE_FACTUAL_CAPTURE",
+  "schema_version": "caerus.generic_live_v1_p0_1_chronology.v1",
+  "source_files": {
+    "alpha_lab_engine_sha256": "693b22166d3b039889e68c9b32e8c3d09196dd31f486bd5c72ee23b4fa581f1e",
+    "shadow_strategy_definition_sha256": "89088e54c625bd2662ccf2e92e02115cdd9784dec66d0c072abc4c32e98adedd",
+    "strategy_registry_sha256": "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd"
+  }
+}
