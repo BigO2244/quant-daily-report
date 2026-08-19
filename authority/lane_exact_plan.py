@@ -24,6 +24,11 @@ from core.lane_risk_authority import (
     LANE_RISK_PACKAGE_SCHEMA,
     validate_lane_risk_package,
 )
+from core.lane_whole_share_optimizer import (
+    LaneWholeShareOptimizerError,
+    optimize_cash_aware_quantities,
+    validate_cash_aware_realization,
+)
 
 
 LANE_EXACT_PLAN_SCHEMA = "caerus.execution_plan.v4"
@@ -102,6 +107,7 @@ _PLAN_FIELDS = frozenset(
         "content_hash",
     }
 )
+_REALIZATION_PLAN_FIELD = "whole_share_realization"
 
 
 class LaneExactPlanError(ValueError):
@@ -342,6 +348,36 @@ def _normalize_policy(
             label="execution_policy.snapshot_reconciliation_tolerance_usd",
         ),
     }
+    realization_method = execution.get("realization_method")
+    if realization_method is not None:
+        if realization_method != "cash_aware_nearest_feasible_v1":
+            raise LaneExactPlanError("execution realization_method is unsupported")
+        execution_values.update(
+            {
+                "realization_method": realization_method,
+                "minimum_cash_weight": _finite(
+                    execution.get("minimum_cash_weight"),
+                    label="execution_policy.minimum_cash_weight",
+                ),
+                "cash_target_tolerance_usd": _finite(
+                    execution.get("cash_target_tolerance_usd"),
+                    label="execution_policy.cash_target_tolerance_usd",
+                ),
+                "fee_per_order_usd": _finite(
+                    execution.get("fee_per_order_usd"),
+                    label="execution_policy.fee_per_order_usd",
+                ),
+                "maximum_optimizer_candidates": _integer(
+                    execution.get("maximum_optimizer_candidates"),
+                    label="execution_policy.maximum_optimizer_candidates",
+                    minimum=1,
+                ),
+            }
+        )
+        if execution_values["minimum_cash_weight"] > float(
+            allocator.get("target_cash_weight")
+        ):
+            raise LaneExactPlanError("minimum cash weight exceeds target cash weight")
     if execution_values["maximum_order_notional_usd"] <= 0.0:
         raise LaneExactPlanError("maximum_order_notional_usd must be positive")
     if execution_values["maximum_total_buy_notional_usd"] <= 0.0:
@@ -578,7 +614,10 @@ def _enforcement_price(
         return reference_price
     collar = execution["max_adverse_slippage_bps"] / 10000.0
     raw = reference_price * (1.0 + collar if side == "BUY" else 1.0 - collar)
-    return round(raw, execution["price_precision"])
+    scale = 10 ** execution["price_precision"]
+    if side == "BUY":
+        return math.floor((raw + 1e-12) * scale) / scale
+    return math.ceil((raw - 1e-12) * scale) / scale
 
 
 def _order_seed(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -620,10 +659,165 @@ def _approved_target_hash(payload: Mapping[str, Any]) -> str:
     )
 
 
+def _assign_order_ids(
+    *,
+    sells: list[dict[str, Any]],
+    buys: list[dict[str, Any]],
+    risk: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    policy: Mapping[str, Any],
+) -> None:
+    for row in [*sells, *buys]:
+        row.pop("order_id", None)
+        row.pop("client_order_id", None)
+    plan_seed = _order_plan_seed(
+        {
+            "risk_package_hash": risk["content_hash"],
+            "broker_snapshot_hash": snapshot["content_hash"],
+            "lane_policy_hash": policy["lane_policy_hash"],
+            "approved_target_hash": risk["approved_target_hash"],
+            "sell_orders": sells,
+            "buy_orders": buys,
+        }
+    )
+    for side_rows, side in ((sells, "sell"), (buys, "buy")):
+        for index, order in enumerate(side_rows, start=1):
+            identity = _json_hash(
+                {
+                    "plan_seed": plan_seed,
+                    "side": side.upper(),
+                    "index": index,
+                    "order": _order_seed(order),
+                }
+            )
+            order["order_id"] = f"order:{side}:{index}:{identity[:16]}"
+            order["client_order_id"] = f"cx4-{identity[:39]}"
+
+
+def _build_cash_aware_orders(
+    *,
+    risk: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    policy: Mapping[str, Any],
+    deployable: float,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], float, dict[str, Any]]:
+    execution = policy["execution"]
+    marks = snapshot["marks"]
+    symbols = sorted(
+        {row["symbol"] for row in risk["approved_target_rows"]}
+        | {row["symbol"] for row in snapshot["positions"]}
+    )
+    buy_prices = {
+        symbol: _enforcement_price(
+            reference_price=float(marks[symbol]["price"]),
+            side="BUY",
+            execution=execution,
+        )
+        for symbol in symbols
+    }
+    sell_prices = {
+        symbol: _enforcement_price(
+            reference_price=float(marks[symbol]["price"]),
+            side="SELL",
+            execution=execution,
+        )
+        for symbol in symbols
+    }
+    try:
+        proof = optimize_cash_aware_quantities(
+            target_rows=risk["approved_target_rows"],
+            starting_positions=snapshot["positions"],
+            marks={symbol: float(marks[symbol]["price"]) for symbol in symbols},
+            buy_prices=buy_prices,
+            sell_prices=sell_prices,
+            equity=deployable,
+            starting_cash=float(snapshot["cash"]),
+            target_cash_weight=float(risk["approved_cash_weight"]),
+            minimum_cash_weight=float(execution["minimum_cash_weight"]),
+            cash_target_tolerance_usd=float(execution["cash_target_tolerance_usd"]),
+            quantity_precision=int(execution["quantity_precision"]),
+            fee_per_order_usd=float(execution["fee_per_order_usd"]),
+            minimum_order_notional_usd=float(execution["minimum_order_notional_usd"]),
+            maximum_order_notional_usd=float(execution["maximum_order_notional_usd"]),
+            maximum_total_buy_notional_usd=float(
+                execution["maximum_total_buy_notional_usd"]
+            ),
+            maximum_orders=int(execution["maximum_orders"]),
+            max_candidates=int(execution["maximum_optimizer_candidates"]),
+        )
+    except LaneWholeShareOptimizerError as exc:
+        raise LaneExactPlanError(str(exc)) from exc
+
+    target_by_symbol = {row["symbol"]: row for row in risk["approved_target_rows"]}
+    current_by_symbol = {row["symbol"]: row for row in snapshot["positions"]}
+    sells: list[dict[str, Any]] = []
+    buys: list[dict[str, Any]] = []
+    for transition in proof["transitions"]:
+        symbol = transition["symbol"]
+        side = transition["side"]
+        if side == "BUY":
+            contribution_source = target_by_symbol[symbol]["sleeve_contributions"]
+            basis = "target_weight"
+        else:
+            contribution_source = current_by_symbol[symbol]["sleeve_contributions"]
+            basis = "quantity"
+        order = {
+            "symbol": symbol,
+            "side": side,
+            "quantity": transition["quantity"],
+            "order_type": execution["order_type"],
+            "time_in_force": execution["time_in_force"],
+            "extended_hours": execution["allow_extended_hours"],
+            "reference_price": transition["reference_price"],
+            "enforcement_price": transition["enforcement_price"],
+            "estimated_fee": transition["estimated_fee"],
+            "notional": transition["notional"],
+            "sleeve_contributions": _scaled_contributions(
+                contribution_source,
+                quantity=float(transition["quantity"]),
+                basis_field=basis,
+            ),
+        }
+        (buys if side == "BUY" else sells).append(order)
+    sells.sort(key=lambda row: row["symbol"])
+    buys.sort(key=lambda row: row["symbol"])
+
+    expected_positions: list[dict[str, Any]] = []
+    for allocation in proof["allocations"]:
+        quantity = float(allocation["target_quantity"])
+        if quantity <= _TOLERANCE:
+            continue
+        symbol = allocation["symbol"]
+        target = target_by_symbol.get(symbol)
+        if target is None:
+            raise LaneExactPlanError(
+                "whole-share realization leaves a non-target residual position"
+            )
+        expected_positions.append(
+            {
+                "symbol": symbol,
+                "quantity": quantity,
+                "sleeve_contributions": _scaled_contributions(
+                    target["sleeve_contributions"],
+                    quantity=quantity,
+                    basis_field="target_weight",
+                ),
+            }
+        )
+    return sells, buys, expected_positions, float(proof["projected_cash"]), proof
+
+
 def _build_orders(
     *, risk: Mapping[str, Any], snapshot: Mapping[str, Any], policy: Mapping[str, Any], deployable: float
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], float]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], float, dict[str, Any] | None]:
     execution = policy["execution"]
+    if execution.get("realization_method") == "cash_aware_nearest_feasible_v1":
+        return _build_cash_aware_orders(
+            risk=risk,
+            snapshot=snapshot,
+            policy=policy,
+            deployable=deployable,
+        )
     precision = execution["quantity_precision"]
     marks = snapshot["marks"]
     current = {row["symbol"]: row for row in snapshot["positions"]}
@@ -733,7 +927,7 @@ def _build_orders(
         raise LaneExactPlanError("exact plan violates Risk-approved cash requirement")
     if expected_cash < -_TOLERANCE:
         raise LaneExactPlanError("exact plan would create negative cash")
-    return sells, buys, expected_positions, expected_cash
+    return sells, buys, expected_positions, expected_cash, None
 
 
 def _starting_state_hash(positions: Sequence[Mapping[str, Any]], cash: float) -> str:
@@ -800,8 +994,15 @@ def build_lane_exact_execution_plan(
     if abs(marked_equity - float(snapshot["equity"])) > tolerance:
         raise LaneExactPlanError("broker snapshot positions, cash, and equity do not reconcile")
     deployable = _deployable_capital(risk=risk, snapshot=snapshot, policy=policy)
-    sells, buys, expected_positions, expected_cash = _build_orders(
+    sells, buys, expected_positions, expected_cash, realization = _build_orders(
         risk=risk, snapshot=snapshot, policy=policy, deployable=deployable
+    )
+    _assign_order_ids(
+        sells=sells,
+        buys=buys,
+        risk=risk,
+        snapshot=snapshot,
+        policy=policy,
     )
     expires_at = (
         planned + dt.timedelta(seconds=policy["execution"]["plan_ttl_seconds"])
@@ -871,6 +1072,8 @@ def build_lane_exact_execution_plan(
             "reconciliation_policy": risk["reconciliation_policy_hash"],
         },
     }
+    if realization is not None:
+        body[_REALIZATION_PLAN_FIELD] = realization
     seed = _plan_identity_seed(body)
     body["plan_id"] = f"lane-plan:{body['lane_id']}:{trade_date}:{seed[:24]}"
     body["content_hash"] = lane_exact_plan_content_hash(body)
@@ -906,6 +1109,27 @@ def _validate_orders(payload: Mapping[str, Any]) -> None:
             )
             if quantity <= 0.0 or price <= 0.0:
                 raise LaneExactPlanError("exact order quantity and price must be positive")
+            precision = int(payload["constraints"]["quantity_precision"])
+            quantity_step = 10.0 ** (-precision)
+            if abs(quantity / quantity_step - round(quantity / quantity_step)) > 1e-7:
+                raise LaneExactPlanError("exact order quantity violates quantity precision")
+            reference = _finite(
+                row.get("reference_price"),
+                label=f"{field}.{symbol}.reference_price",
+            )
+            collar = (
+                float(payload["constraints"]["max_adverse_slippage_bps"])
+                / 10000.0
+            )
+            if payload["constraints"].get("realization_method") == "cash_aware_nearest_feasible_v1":
+                if required_side == "BUY" and price > reference * (1.0 + collar) + 1e-9:
+                    raise LaneExactPlanError("buy enforcement price exceeds adverse collar")
+                if required_side == "SELL" and price + 1e-9 < reference * (1.0 - collar):
+                    raise LaneExactPlanError("sell enforcement price exceeds adverse collar")
+            price_scale = 10 ** int(payload["constraints"]["price_precision"])
+            if abs(price * price_scale - round(price * price_scale)) > 1e-7:
+                raise LaneExactPlanError("enforcement price violates price precision")
+            _finite(row.get("estimated_fee", 0.0), label="estimated_fee")
             if abs(float(row.get("notional", -1.0)) - quantity * price) > 0.01:
                 raise LaneExactPlanError("exact order notional is not quantity times price")
             order_id = _required_string(row.get("order_id"), label="order_id", safe_id=True)
@@ -965,9 +1189,10 @@ def _validate_or_raise(
 ) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise LaneExactPlanError("lane exact plan must be an object")
-    if set(payload) != _PLAN_FIELDS:
+    allowed_fields = (_PLAN_FIELDS, _PLAN_FIELDS | {_REALIZATION_PLAN_FIELD})
+    if set(payload) not in allowed_fields:
         missing = sorted(_PLAN_FIELDS - set(payload))
-        unknown = sorted(set(payload) - _PLAN_FIELDS)
+        unknown = sorted(set(payload) - (_PLAN_FIELDS | {_REALIZATION_PLAN_FIELD}))
         raise LaneExactPlanError(
             "lane exact plan fields differ; missing="
             + ",".join(missing)
@@ -1130,11 +1355,11 @@ def _validate_or_raise(
         if positions.get(symbol, 0.0) + _TOLERANCE < float(order["quantity"]):
             raise LaneExactPlanError("exact sell exceeds starting position")
         positions[symbol] = positions.get(symbol, 0.0) - float(order["quantity"])
-        cash += float(order["notional"])
+        cash += float(order["notional"]) - float(order.get("estimated_fee", 0.0))
     for order in payload["buy_orders"]:
         symbol = order["symbol"]
         positions[symbol] = positions.get(symbol, 0.0) + float(order["quantity"])
-        cash -= float(order["notional"])
+        cash -= float(order["notional"]) + float(order.get("estimated_fee", 0.0))
     expected = {
         symbol: quantity for symbol, quantity in positions.items() if quantity > _TOLERANCE
     }
@@ -1144,6 +1369,57 @@ def _validate_or_raise(
     }
     if expected != supplied or abs(cash - float(payload["expected_posttrade_cash"])) > 1e-6:
         raise LaneExactPlanError("expected post-trade state is not derived from exact orders")
+
+    realization = payload.get(_REALIZATION_PLAN_FIELD)
+    realization_method = payload["constraints"].get("realization_method")
+    if realization_method == "cash_aware_nearest_feasible_v1":
+        if not isinstance(realization, Mapping):
+            raise LaneExactPlanError("cash-aware plan lacks whole-share realization proof")
+        proof_failures = validate_cash_aware_realization(realization)
+        if proof_failures:
+            raise LaneExactPlanError(
+                "whole-share realization proof is invalid: " + ",".join(proof_failures)
+            )
+        if realization.get("target_rows_hash") != _json_hash(
+            payload["approved_target_rows"]
+        ) or realization.get("starting_positions_hash") != _json_hash(
+            payload["starting_positions"]
+        ):
+            raise LaneExactPlanError("whole-share proof source lineage mismatch")
+        if abs(float(realization["projected_cash"]) - cash) > 1e-6:
+            raise LaneExactPlanError("whole-share proof cash differs from exact orders")
+        if realization.get("cash_target_within_tolerance") is not True:
+            raise LaneExactPlanError("whole-share realization misses governed cash tolerance")
+        proof_transitions = [
+            {
+                "symbol": row["symbol"],
+                "side": row["side"],
+                "quantity": row["quantity"],
+                "reference_price": row["reference_price"],
+                "enforcement_price": row["enforcement_price"],
+                "estimated_fee": row["estimated_fee"],
+                "notional": row["notional"],
+            }
+            for row in realization["transitions"]
+        ]
+        planned_transitions = [
+            {
+                "symbol": row["symbol"],
+                "side": row["side"],
+                "quantity": row["quantity"],
+                "reference_price": row["reference_price"],
+                "enforcement_price": row["enforcement_price"],
+                "estimated_fee": row.get("estimated_fee", 0.0),
+                "notional": row["notional"],
+            }
+            for row in [*payload["sell_orders"], *payload["buy_orders"]]
+        ]
+        if sorted(proof_transitions, key=canonical_json) != sorted(
+            planned_transitions, key=canonical_json
+        ):
+            raise LaneExactPlanError("whole-share proof transitions differ from exact orders")
+    elif realization is not None:
+        raise LaneExactPlanError("whole-share proof exists without governed realization method")
     for row in payload["expected_posttrade_positions"]:
         symbol = row["symbol"]
         target = approved_by_symbol.get(symbol)

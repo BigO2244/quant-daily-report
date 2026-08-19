@@ -1,0 +1,41 @@
+{
+  "activation_authority": false,
+  "approval_authority": false,
+  "broker_call_performed": false,
+  "broker_factual": false,
+  "broker_write_performed": false,
+  "classification": "STRUCTURAL_REHEARSAL_NOT_BROKER_FACTUAL",
+  "configuration_mutated": false,
+  "content_hash": "d4fb653c5d7d8e8fcd39a9373bcbb12518da45426f93bb47e8a7223f73f84381",
+  "created_at": "2026-08-19T02:15:00+00:00",
+  "deployment_version": "deployment:2026-08-18:generic-fixture",
+  "execution_authority": false,
+  "kill_switch_mutated": false,
+  "operational_receipt_hash": "98e5e10a4addc42b733ed6813d5bca713234af81fd09fe1aab279355cca38e3f",
+  "parity_status": "PASS",
+  "rehearsals": [
+    {
+      "broker_submission_allowed": false,
+      "deployment_version": "deployment:2026-08-18:generic-fixture",
+      "execution_dry_run_hash": "56e554276b63a01d5e13d3de6610f20fb77f463456886c23a51159cd9789ec40",
+      "lane_id": "live-small",
+      "lane_kind": "LIVE",
+      "status": "VALIDATED_NO_WRITE",
+      "write_enabled": false
+    },
+    {
+      "broker_submission_allowed": false,
+      "deployment_version": "deployment:2026-08-18:generic-fixture",
+      "execution_dry_run_hash": "d117672151b2861aff6e295ea5178b8a5c66596d3ece25f38f37aafaca2d6284",
+      "lane_id": "paper",
+      "lane_kind": "PAPER",
+      "status": "VALIDATED_NO_WRITE",
+      "write_enabled": false
+    }
+  ],
+  "schedule_mutated": false,
+  "schema_version": "caerus.generic_paper_live_no_write_rehearsal.v1",
+  "shared_adapter_id": "core.lane_execution_dry_run:caerus.lane_execution_dry_run.v1",
+  "source_artifact_hash": "c7686e4f2b8f8d4a615b2a30b726334a977040e9d7be3478f17d1a0bc6410fe0",
+  "source_artifact_schema": "caerus.scheduled_v2_factual_pipeline_result.v1"
+}

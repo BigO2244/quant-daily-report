@@ -1,0 +1,18 @@
+{
+  "account_blocked": false,
+  "account_id_hash": "cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85",
+  "cash": "460.90",
+  "content_hash": "e5eb0400a8f9937fb3505983d867fd04e859c6a818e76695b7a62a3602bf58d8",
+  "credentials_printed": false,
+  "endpoint": "GET /v2/account",
+  "environment": "LIVE",
+  "equity": "460.90",
+  "observed_at": "2026-08-19T01:40:49.959220+00:00",
+  "raw_account_id_printed": false,
+  "request_method": "GET",
+  "schema_version": "caerus.redacted_live_account_observation.v1",
+  "source_response_hash": "342a5bf26389da8b852400fa567a00fef0b3e1f624e89fda9c5137aa43f11916",
+  "status": "ACTIVE",
+  "trading_blocked": false,
+  "write_performed": false
+}
