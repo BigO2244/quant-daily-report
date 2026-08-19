@@ -40,6 +40,10 @@ fi
 [[ "${CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED:-0}" == "0" ]] || exit 78
 
 readonly PREFLIGHT_PATH="${CAERUS_GENERIC_LIVE_PREFLIGHT_PATH:?missing preflight path}"
+readonly OWNER_DECISION_PATH="${CAERUS_GENERIC_LIVE_OWNER_DECISION_PATH:?missing owner decision path}"
+readonly ACCOUNT_OBSERVATION_PATH="${CAERUS_GENERIC_LIVE_ACCOUNT_OBSERVATION_PATH:?missing account observation path}"
+readonly LYRA_DECISION_PATH="${CAERUS_GENERIC_LIVE_LYRA_DECISION_PATH:?missing Lyra decision path}"
+readonly OPERATIONAL_PROOFS_PATH="${CAERUS_GENERIC_LIVE_OPERATIONAL_PROOFS_PATH:?missing operational proofs path}"
 readonly PLAN_PATH="${CAERUS_GENERIC_LIVE_PLAN_PATH:?missing exact plan path}"
 readonly SESSION_GATE_PATH="${CAERUS_GENERIC_LIVE_SESSION_GATE_PATH:?missing session gate path}"
 readonly WAL_DIRECTORY="${CAERUS_GENERIC_LIVE_WAL_DIRECTORY:?missing WAL directory}"
@@ -62,6 +66,10 @@ trap rearm_on_wrapper_failure ERR INT TERM HUP
 cd "${REPO_ROOT}"
 "${PYTHON_BIN}" scripts/run_generic_live_v1_session.py \
     --preflight "${PREFLIGHT_PATH}" \
+    --owner-decision "${OWNER_DECISION_PATH}" \
+    --account-observation "${ACCOUNT_OBSERVATION_PATH}" \
+    --lyra-decision "${LYRA_DECISION_PATH}" \
+    --operational-proofs "${OPERATIONAL_PROOFS_PATH}" \
     --exact-plan "${PLAN_PATH}" \
     --executed-at "${EXECUTED_AT}" \
     --wal-directory "${WAL_DIRECTORY}" \

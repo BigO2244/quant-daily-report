@@ -1015,6 +1015,13 @@ class AlpacaBroker:
             "symbol", "side", "quantity", "order_type", "time_in_force",
             "extended_hours", "allow_fractional_shares", "quantity_precision",
             "limit_price", "max_fee_usd", "maximum_gross_usd",
+            "capital_proof_hash", "fresh_equity_usd", "fresh_cash_usd",
+            "effective_capital_usd", "dynamic_gross_cap_usd",
+            "required_cash_reserve_usd", "worst_case_posttrade_gross_usd",
+            "worst_case_posttrade_cash_usd", "capital_gross_limit_pass",
+            "capital_cash_reserve_pass", "starting_symbol_quantity",
+            "starting_other_gross_usd", "gross_valuation_price",
+            "expected_posttrade_symbol_quantity",
             "content_hash", "capability_signature",
         }
         if not isinstance(mutation_context, Mapping) or set(mutation_context) != context_fields:
@@ -1035,7 +1042,7 @@ class AlpacaBroker:
             raise RuntimeError("generic Live v4 mutation context schema differs")
         if mutation_context.get("action") != "SUBMIT":
             raise RuntimeError("generic Live v4 mutation context action differs")
-        for field in ("owner_decision_hash", "preflight_hash", "plan_hash", "execution_policy_hash", "account_id_hash"):
+        for field in ("owner_decision_hash", "preflight_hash", "plan_hash", "execution_policy_hash", "account_id_hash", "capital_proof_hash"):
             value = mutation_context.get(field)
             if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
                 raise RuntimeError(f"generic Live v4 mutation context {field} is invalid")
@@ -1051,12 +1058,61 @@ class AlpacaBroker:
             "quantity_precision": 0,
             "limit_price": limit_price_float,
             "max_fee_usd": fee,
-            "maximum_gross_usd": 437.0,
         }
         if any(mutation_context.get(field) != value for field, value in expected_order_context.items()):
             raise RuntimeError("generic Live v4 mutation context does not match order boundary")
         if not re.fullmatch(r"[0-9a-f]{40}", str(mutation_context.get("deployed_sha") or "")):
             raise RuntimeError("generic Live v4 mutation context deployed_sha is invalid")
+        capital_fields = (
+            "fresh_equity_usd", "fresh_cash_usd", "effective_capital_usd",
+            "dynamic_gross_cap_usd", "required_cash_reserve_usd",
+            "worst_case_posttrade_gross_usd", "worst_case_posttrade_cash_usd",
+            "starting_symbol_quantity", "starting_other_gross_usd",
+            "gross_valuation_price", "expected_posttrade_symbol_quantity",
+            "maximum_gross_usd",
+        )
+        try:
+            capital = {field: float(mutation_context[field]) for field in capital_fields}
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("generic Live v4 capital context is invalid") from exc
+        if not all(math.isfinite(value) for value in capital.values()):
+            raise RuntimeError("generic Live v4 capital context is non-finite")
+        effective = min(460.0, capital["fresh_equity_usd"])
+        dynamic_cap = effective * 0.95
+        reserve = effective * 0.05
+        expected_quantity = capital["starting_symbol_quantity"] + (
+            qty_float if side_norm == "BUY" else -qty_float
+        )
+        expected_gross = (
+            capital["starting_other_gross_usd"]
+            + expected_quantity * capital["gross_valuation_price"]
+        )
+        expected_cash = capital["fresh_cash_usd"] + (
+            -qty_float * limit_price_float - fee
+            if side_norm == "BUY"
+            else qty_float * limit_price_float - fee
+        )
+        if any(
+            abs(observed - expected) > 1e-8
+            for observed, expected in (
+                (capital["effective_capital_usd"], effective),
+                (capital["dynamic_gross_cap_usd"], dynamic_cap),
+                (capital["maximum_gross_usd"], dynamic_cap),
+                (capital["required_cash_reserve_usd"], reserve),
+                (capital["expected_posttrade_symbol_quantity"], expected_quantity),
+                (capital["worst_case_posttrade_gross_usd"], expected_gross),
+                (capital["worst_case_posttrade_cash_usd"], expected_cash),
+            )
+        ):
+            raise RuntimeError("generic Live v4 capital context arithmetic differs")
+        if (
+            mutation_context.get("capital_gross_limit_pass") is not True
+            or mutation_context.get("capital_cash_reserve_pass") is not True
+            or expected_quantity < -1e-9
+            or expected_gross > dynamic_cap + 1e-9
+            or expected_cash + 1e-9 < reserve
+        ):
+            raise RuntimeError("generic Live v4 dynamic gross/cash boundary is not green")
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest
 
@@ -1085,6 +1141,13 @@ class AlpacaBroker:
             "symbol", "side", "quantity", "order_type", "time_in_force",
             "extended_hours", "allow_fractional_shares", "quantity_precision",
             "limit_price", "max_fee_usd", "maximum_gross_usd",
+            "capital_proof_hash", "fresh_equity_usd", "fresh_cash_usd",
+            "effective_capital_usd", "dynamic_gross_cap_usd",
+            "required_cash_reserve_usd", "worst_case_posttrade_gross_usd",
+            "worst_case_posttrade_cash_usd", "capital_gross_limit_pass",
+            "capital_cash_reserve_pass", "starting_symbol_quantity",
+            "starting_other_gross_usd", "gross_valuation_price",
+            "expected_posttrade_symbol_quantity",
             "content_hash", "capability_signature", "broker_order_id",
         }
         if (

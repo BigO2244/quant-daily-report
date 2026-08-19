@@ -15,6 +15,7 @@ from authority.lane_exact_plan import (
 from core.generic_live_v1_activation import (
     GenericLiveV1ActivationError,
     build_generic_live_v1_activation_preflight,
+    recompute_generic_live_v1_activation_preflight,
     validate_generic_live_v1_activation_preflight,
 )
 from core.lane_allocator import allocate_lane
@@ -135,7 +136,7 @@ def _plan(decision: dict) -> dict:
         "trade_date": "2026-08-19", "captured_at": "2026-08-19T13:29:30+00:00",
         "account_id_hash": OBSERVATION["account_id_hash"],
         "broker_environment": "alpaca_live", "currency": "USD",
-        "equity": 460.0, "cash": 460.0, "positions": [],
+        "equity": 460.9, "cash": 460.9, "positions": [],
         "price_marks": [{"symbol": "AAPL", "price": 100.0, "as_of": "2026-08-19T13:29:30+00:00"}],
     }
     snapshot["content_hash"] = artifact_content_hash(snapshot)
@@ -202,6 +203,36 @@ def test_every_green_gate_binds_exact_lyra_decision_and_v4_plan() -> None:
     assert result["lyra_decision_hash"] == decision["content_hash"]
     assert result["exact_plan_hash"] == plan["content_hash"]
     assert result["execution_authority"] is False
+
+
+def test_ready_preflight_recomputes_exactly_from_all_protected_sources() -> None:
+    decision = _decision()
+    plan = _plan(decision)
+    proofs = _proofs(
+        deployed_sha=EXPECTED, generic_schedule_installed=True,
+        generic_submission_adapter_deployed=True, rollback_rearm_proven=True,
+        order_lifecycle_pipeline_green=True, reconciliation_pipeline_green=True,
+        accounting_pipeline_green=True, reporting_pipeline_green=True,
+    )
+    preflight = build_generic_live_v1_activation_preflight(
+        owner_decision=OWNER, live_account_observation=OBSERVATION,
+        operational_proofs=proofs, evaluated_at="2026-08-19T13:30:00+00:00",
+        lyra_decision=decision, exact_plan=plan,
+    )
+    assert recompute_generic_live_v1_activation_preflight(
+        expected_preflight=preflight, owner_decision=OWNER,
+        live_account_observation=OBSERVATION, operational_proofs=proofs,
+        lyra_decision=decision, exact_plan=plan,
+    ) == preflight
+    forged_sources = copy.deepcopy(proofs)
+    forged_sources["reporting_pipeline_green"] = False
+    with pytest.raises(GenericLiveV1ActivationError, match="does not exactly recompute"):
+        recompute_generic_live_v1_activation_preflight(
+            expected_preflight=preflight, owner_decision=OWNER,
+            live_account_observation=OBSERVATION,
+            operational_proofs=forged_sources,
+            lyra_decision=decision, exact_plan=plan,
+        )
 
 
 def test_non_lyra_or_tampered_owner_scope_fails_closed() -> None:

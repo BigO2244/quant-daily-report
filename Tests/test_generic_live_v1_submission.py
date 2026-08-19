@@ -8,7 +8,7 @@ import pytest
 from core.generic_live_v1_activation import build_generic_live_v1_activation_preflight
 from core.generic_live_v1_submission import (
     GenericLiveV1SubmissionError,
-    execute_generic_live_v1_session,
+    execute_generic_live_v1_session as _execute_generic_live_v1_session,
     finalize_generic_live_v1_posttrade,
     seal_generic_live_v1_order_lifecycle,
 )
@@ -24,8 +24,18 @@ from Tests.test_generic_live_v1_activation import (
 )
 
 
+def execute_generic_live_v1_session(**kwargs):
+    if kwargs.get("submit_enabled") is True:
+        kwargs.setdefault("lyra_decision", _decision())
+    return _execute_generic_live_v1_session(**kwargs)
+
+
 class Broker:
-    def __init__(self, *, fail: bool = False, status: str = "accepted", terminal_status: str = "filled"):
+    def __init__(
+        self, *, fail: bool = False, status: str = "accepted",
+        terminal_status: str = "filled", equity: str = "460.9",
+        cash: str = "460.9", buying_power: str = "460.9",
+    ):
         self.orders = {}
         self.submit_calls = 0
         self.fail = fail
@@ -33,12 +43,16 @@ class Broker:
         self.terminal_status = terminal_status
         self.by_id = {}
         self.cancel_contexts = []
+        self.equity = equity
+        self.cash = cash
+        self.buying_power = buying_power
 
     def get_account(self):
         return {
             "id_hash": OBSERVATION["account_id_hash"], "status": "ACTIVE",
             "trading_blocked": False, "account_blocked": False,
-            "equity": "460", "cash": "460", "buying_power": "460",
+            "equity": self.equity, "cash": self.cash,
+            "buying_power": self.buying_power,
         }
 
     def get_positions(self):
@@ -458,6 +472,18 @@ def test_blocked_preflight_cannot_submit(tmp_path) -> None:
     with pytest.raises(Exception):
         execute_generic_live_v1_session(
             activation_preflight=blocked, exact_plan=plan,
+            executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+            broker=Broker(), wal_directory=tmp_path / "wal",
+            rearm_state_path=tmp_path / "rearm.json",
+            result_path=tmp_path / "result.json",
+        )
+
+
+def test_submission_requires_exact_protected_lyra_decision(tmp_path) -> None:
+    preflight, plan = _ready()
+    with pytest.raises(GenericLiveV1SubmissionError, match="exact protected Lyra"):
+        _execute_generic_live_v1_session(
+            activation_preflight=preflight, exact_plan=plan,
             executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
             broker=Broker(), wal_directory=tmp_path / "wal",
             rearm_state_path=tmp_path / "rearm.json",

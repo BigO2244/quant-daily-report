@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import subprocess
@@ -12,6 +13,8 @@ import sys
 from pathlib import Path
 
 from brokers.alpaca_broker import AlpacaBroker
+from authority.lane_exact_plan import canonical_json
+from core.generic_live_v1_activation import recompute_generic_live_v1_activation_preflight
 from core.generic_live_v1_submission import (
     ensure_generic_live_v1_rearmed_after_failure,
     execute_generic_live_v1_session,
@@ -68,9 +71,35 @@ def _require_exact_env(preflight: dict, *, submit: bool) -> None:
             raise RuntimeError("generic Live deployed SHA pin mismatch")
 
 
+def _require_source_pins(
+    *, owner_decision: dict, account_observation: dict,
+    lyra_decision: dict, operational_proofs: dict, plan: dict,
+) -> None:
+    operational_hash = hashlib.sha256(
+        canonical_json(operational_proofs).encode("utf-8")
+    ).hexdigest()
+    expected = {
+        "CAERUS_GENERIC_LIVE_OWNER_DECISION_HASH": owner_decision.get("content_hash"),
+        "CAERUS_GENERIC_LIVE_ACCOUNT_OBSERVATION_HASH": account_observation.get("content_hash"),
+        "CAERUS_GENERIC_LIVE_LYRA_DECISION_HASH": lyra_decision.get("content_hash"),
+        "CAERUS_GENERIC_LIVE_OPERATIONAL_PROOFS_HASH": operational_hash,
+        "CAERUS_GENERIC_LIVE_PLAN_HASH": plan.get("content_hash"),
+    }
+    mismatches = [key for key, value in expected.items() if os.environ.get(key) != value]
+    if mismatches:
+        raise RuntimeError(
+            "generic Live exact protected source pins mismatch: "
+            + ",".join(sorted(mismatches))
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--preflight", type=Path, required=True)
+    parser.add_argument("--owner-decision", type=Path)
+    parser.add_argument("--account-observation", type=Path)
+    parser.add_argument("--lyra-decision", type=Path)
+    parser.add_argument("--operational-proofs", type=Path)
     parser.add_argument("--exact-plan", type=Path, required=True)
     parser.add_argument("--executed-at", required=True)
     parser.add_argument("--wal-directory", type=Path)
@@ -80,6 +109,10 @@ def main() -> int:
     args = parser.parse_args()
     preflight: dict = {}
     plan: dict = {}
+    owner_decision: dict = {}
+    account_observation: dict = {}
+    lyra_decision: dict = {}
+    operational_proofs: dict = {}
     safe_rearm_path: Path | None = None
     try:
         input_root = Path(os.environ.get("CAERUS_GENERIC_LIVE_INPUT_ROOT", ""))
@@ -99,14 +132,44 @@ def main() -> int:
             )
             secure_path(args.result_path, allowed_roots=[state_root], must_exist=False, kind="file")
         read_roots = [input_root] if args.submit_exact_session else [args.preflight.parent, args.exact_plan.parent]
+        source_paths = {
+            "owner decision": args.owner_decision,
+            "account observation": args.account_observation,
+            "Lyra decision": args.lyra_decision,
+            "operational proofs": args.operational_proofs,
+        }
+        missing_sources = sorted(label for label, path in source_paths.items() if path is None)
+        if missing_sources:
+            raise RuntimeError(
+                "generic Live exact protected source paths are required: "
+                + ",".join(missing_sources)
+            )
         preflight = secure_read_json(args.preflight, allowed_roots=read_roots)
         plan = secure_read_json(args.exact_plan, allowed_roots=read_roots)
-        if os.environ.get("CAERUS_GENERIC_LIVE_PLAN_HASH") != plan.get("content_hash"):
-            raise RuntimeError("generic Live exact plan environment pin mismatch")
+        owner_decision = secure_read_json(args.owner_decision, allowed_roots=read_roots)
+        account_observation = secure_read_json(args.account_observation, allowed_roots=read_roots)
+        lyra_decision = secure_read_json(args.lyra_decision, allowed_roots=read_roots)
+        operational_proofs = secure_read_json(args.operational_proofs, allowed_roots=read_roots)
+        _require_source_pins(
+            owner_decision=owner_decision,
+            account_observation=account_observation,
+            lyra_decision=lyra_decision,
+            operational_proofs=operational_proofs,
+            plan=plan,
+        )
+        preflight = recompute_generic_live_v1_activation_preflight(
+            expected_preflight=preflight,
+            owner_decision=owner_decision,
+            live_account_observation=account_observation,
+            operational_proofs=operational_proofs,
+            lyra_decision=lyra_decision,
+            exact_plan=plan,
+        )
         _require_exact_env(preflight, submit=args.submit_exact_session)
         broker = AlpacaBroker.from_env() if args.submit_exact_session else None
         result = execute_generic_live_v1_session(
             activation_preflight=preflight, exact_plan=plan,
+            lyra_decision=lyra_decision,
             executed_at=args.executed_at, submit_enabled=args.submit_exact_session,
             broker=broker, wal_directory=args.wal_directory,
             rearm_state_path=args.session_gate_path,

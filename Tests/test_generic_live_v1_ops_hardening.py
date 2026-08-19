@@ -30,6 +30,7 @@ from core.generic_live_v1_submission import (
 )
 from scripts.manage_generic_live_v1_cron import render_cron_line, update_crontab
 from scripts.run_generic_live_v1_session import _require_exact_env
+from Tests.test_generic_live_v1_activation import _decision
 from Tests.test_generic_live_v1_submission import Broker, _disarm, _ready
 
 
@@ -142,6 +143,7 @@ def test_result_persistence_failure_leaves_gate_armed(tmp_path: Path, monkeypatc
         execute_generic_live_v1_session(
             activation_preflight=preflight,
             exact_plan=plan,
+            lyra_decision=_decision(),
             executed_at="2026-08-19T13:31:00+00:00",
             submit_enabled=True,
             broker=Broker(),
@@ -176,6 +178,7 @@ def test_transient_rearm_persistence_failure_is_retried_before_raise(
         execute_generic_live_v1_session(
             activation_preflight=preflight,
             exact_plan=plan,
+            lyra_decision=_decision(),
             executed_at="2026-08-19T13:31:00+00:00",
             submit_enabled=True,
             broker=Broker(),

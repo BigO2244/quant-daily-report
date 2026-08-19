@@ -18,6 +18,10 @@ from typing import Any, Mapping
 
 from authority.lane_exact_plan import canonical_json, validate_lane_exact_execution_plan
 from core.generic_live_candidate_config import validate_redacted_live_account_observation
+from core.generic_live_v1_capital import (
+    GenericLiveV1CapitalError,
+    build_generic_live_v1_capital_proof,
+)
 from core.owner_decision import OwnerDecision, parse_owner_decision
 from core.sleeve_decision import validate_sleeve_decision
 
@@ -117,6 +121,8 @@ _PLAN_BLOCKERS = frozenset(
         "EXACT_V4_PLAN_SHORT_POSITION",
         "EXACT_V4_PLAN_GROSS_MARK_MISSING",
         "EXACT_V4_PLAN_GROSS_LIMIT_EXCEEDED",
+        "EXACT_V4_PLAN_WORST_CASE_CAPITAL_PROOF_INVALID",
+        "EXACT_V4_PLAN_WORST_CASE_CASH_RESERVE_BREACHED",
     }
 )
 
@@ -224,7 +230,8 @@ def _valid_plan(
     *, decision: Mapping[str, Any] | None,
     session: str,
     account_id_hash: str,
-    effective_capital: float,
+    fresh_equity: float,
+    fresh_cash: float,
 ) -> tuple[bool, list[str]]:
     if plan is None:
         return False, ["EXACT_V4_PLAN_MISSING"]
@@ -240,6 +247,7 @@ def _valid_plan(
         blockers.append("EXACT_V4_PLAN_ACCOUNT_PIN_MISMATCH")
     if plan.get("broker_environment") != "alpaca_live":
         blockers.append("EXACT_V4_PLAN_BROKER_ENVIRONMENT_DIFFERS")
+    effective_capital = min(460.0, fresh_equity)
     deployable = float(plan.get("deployable_capital", math.inf))
     if not math.isfinite(deployable) or deployable > effective_capital + 0.01:
         blockers.append("EXACT_V4_PLAN_CAPITAL_CEILING_EXCEEDED")
@@ -298,23 +306,19 @@ def _valid_plan(
             blockers.append("EXACT_V4_PLAN_LYRA_TARGET_LINEAGE_MISMATCH")
     if float(plan.get("expected_posttrade_cash", -1.0)) < -0.01:
         blockers.append("EXACT_V4_PLAN_NEGATIVE_CASH")
-    marks = {
-        str(row.get("symbol")): float(row.get("price", math.nan))
-        for row in plan.get("price_marks", [])
-        if isinstance(row, Mapping)
-    }
-    expected_gross = 0.0
-    for position in plan.get("expected_posttrade_positions", []):
-        quantity = float(position.get("quantity", -1.0))
-        if quantity < 0.0:
+    try:
+        capital = build_generic_live_v1_capital_proof(
+            exact_plan=plan, fresh_equity_usd=fresh_equity,
+            fresh_cash_usd=fresh_cash,
+        )
+        if capital["long_only_pass"] is not True:
             blockers.append("EXACT_V4_PLAN_SHORT_POSITION")
-        price = marks.get(str(position.get("symbol")), math.nan)
-        if not math.isfinite(price) or price <= 0.0:
-            blockers.append("EXACT_V4_PLAN_GROSS_MARK_MISSING")
-        else:
-            expected_gross += max(quantity, 0.0) * price
-    if expected_gross > effective_capital * 0.95 + 0.01:
-        blockers.append("EXACT_V4_PLAN_GROSS_LIMIT_EXCEEDED")
+        if capital["gross_limit_pass"] is not True:
+            blockers.append("EXACT_V4_PLAN_GROSS_LIMIT_EXCEEDED")
+        if capital["cash_reserve_pass"] is not True:
+            blockers.append("EXACT_V4_PLAN_WORST_CASE_CASH_RESERVE_BREACHED")
+    except GenericLiveV1CapitalError:
+        blockers.append("EXACT_V4_PLAN_WORST_CASE_CAPITAL_PROOF_INVALID")
     return not blockers, sorted(set(blockers))
 
 
@@ -356,7 +360,8 @@ def build_generic_live_v1_activation_preflight(
         decision=lyra_decision if decision_green else None,
         session=str(owner.effective_session),
         account_id_hash=observation["account_id_hash"],
-        effective_capital=effective_capital,
+        fresh_equity=float(observation["equity"]),
+        fresh_cash=float(observation["cash"]),
     )
     gate_results = {
         "owner_decision_current": evaluated <= expires,
@@ -509,7 +514,59 @@ def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) ->
     return copy.deepcopy(dict(payload))
 
 
+def recompute_generic_live_v1_activation_preflight(
+    *, expected_preflight: Mapping[str, Any], owner_decision: Mapping[str, Any],
+    live_account_observation: Mapping[str, Any], operational_proofs: Mapping[str, Any],
+    lyra_decision: Mapping[str, Any], exact_plan: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Rebuild a preflight from exact protected sources and require byte equality."""
+
+    expected = validate_generic_live_v1_activation_preflight(expected_preflight)
+    rebuilt = build_generic_live_v1_activation_preflight(
+        owner_decision=owner_decision,
+        live_account_observation=live_account_observation,
+        operational_proofs=operational_proofs,
+        evaluated_at=expected["evaluated_at"],
+        lyra_decision=lyra_decision,
+        exact_plan=exact_plan,
+    )
+    if rebuilt != expected or canonical_json(rebuilt) != canonical_json(expected):
+        raise GenericLiveV1ActivationError(
+            "activation preflight does not exactly recompute from protected source artifacts"
+        )
+    return rebuilt
+
+
+def validate_generic_live_v1_lyra_plan_chain(
+    *, lyra_decision: Mapping[str, Any], exact_plan: Mapping[str, Any],
+    effective_session: str, account_id_hash: str,
+    fresh_equity_usd: float, fresh_cash_usd: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Re-prove the full Lyra decision, target, contribution, and plan chain."""
+
+    decision_green, decision_blockers = _valid_lyra_decision(
+        lyra_decision, session=effective_session
+    )
+    plan_green, plan_blockers = _valid_plan(
+        exact_plan,
+        decision=lyra_decision if decision_green else None,
+        session=effective_session,
+        account_id_hash=account_id_hash,
+        fresh_equity=float(fresh_equity_usd),
+        fresh_cash=float(fresh_cash_usd),
+    )
+    blockers = sorted(set([*decision_blockers, *plan_blockers]))
+    if not decision_green or not plan_green:
+        raise GenericLiveV1ActivationError(
+            "generic Live v1 Lyra-to-plan chain is invalid: " + ",".join(blockers)
+        )
+    return copy.deepcopy(dict(lyra_decision)), copy.deepcopy(dict(exact_plan))
+
+
 __all__ = [
     "GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA", "GenericLiveV1ActivationError",
-    "build_generic_live_v1_activation_preflight", "validate_generic_live_v1_activation_preflight",
+    "build_generic_live_v1_activation_preflight",
+    "recompute_generic_live_v1_activation_preflight",
+    "validate_generic_live_v1_lyra_plan_chain",
+    "validate_generic_live_v1_activation_preflight",
 ]

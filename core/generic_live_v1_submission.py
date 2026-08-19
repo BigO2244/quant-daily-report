@@ -23,7 +23,11 @@ from typing import Any, Mapping, Protocol
 
 from authority.lane_exact_plan import canonical_json, validate_lane_exact_execution_plan
 from brokers.alpaca_broker import _GENERIC_LIVE_V4_CAPABILITY
-from core.generic_live_v1_activation import validate_generic_live_v1_activation_preflight
+from core.generic_live_v1_activation import (
+    validate_generic_live_v1_activation_preflight,
+    validate_generic_live_v1_lyra_plan_chain,
+)
+from core.generic_live_v1_capital import build_generic_live_v1_capital_proof
 from core.accounting_journal import validate_accounting_journal
 from core.lane_performance import validate_lane_performance
 from core.lane_reconciliation import validate_lane_reconciliation
@@ -91,7 +95,8 @@ def _timestamp(value: str) -> tuple[str, dt.datetime]:
 
 
 def _mutation_context(
-    *, preflight: Mapping[str, Any], plan: Mapping[str, Any], order: Mapping[str, Any]
+    *, preflight: Mapping[str, Any], plan: Mapping[str, Any], order: Mapping[str, Any],
+    capital_proof: Mapping[str, Any],
 ) -> dict[str, Any]:
     body = {
         "schema_version": "caerus.generic_live_v1_mutation_context.v1",
@@ -115,7 +120,21 @@ def _mutation_context(
         "quantity_precision": 0,
         "limit_price": float(order["enforcement_price"]),
         "max_fee_usd": 0.01,
-        "maximum_gross_usd": 437.0,
+        "maximum_gross_usd": capital_proof["dynamic_gross_cap_usd"],
+        "capital_proof_hash": capital_proof["content_hash"],
+        "fresh_equity_usd": capital_proof["fresh_equity_usd"],
+        "fresh_cash_usd": capital_proof["fresh_cash_usd"],
+        "effective_capital_usd": capital_proof["effective_capital_usd"],
+        "dynamic_gross_cap_usd": capital_proof["dynamic_gross_cap_usd"],
+        "required_cash_reserve_usd": capital_proof["required_cash_reserve_usd"],
+        "worst_case_posttrade_gross_usd": capital_proof["worst_case_posttrade_gross_usd"],
+        "worst_case_posttrade_cash_usd": capital_proof["worst_case_posttrade_cash_usd"],
+        "capital_gross_limit_pass": capital_proof["gross_limit_pass"],
+        "capital_cash_reserve_pass": capital_proof["cash_reserve_pass"],
+        "starting_symbol_quantity": capital_proof["starting_symbol_quantity"],
+        "starting_other_gross_usd": capital_proof["starting_other_gross_usd"],
+        "gross_valuation_price": capital_proof["gross_valuation_price"],
+        "expected_posttrade_symbol_quantity": capital_proof["expected_posttrade_symbol_quantity"],
     }
     body["content_hash"] = _hash(body)
     body["capability_signature"] = _GENERIC_LIVE_V4_CAPABILITY.sign(body["content_hash"])
@@ -383,7 +402,7 @@ def _acquire_session_lock(path: Path) -> int:
 def _fresh_broker_preflight(
     *, broker: GenericLiveV1Broker, plan: Mapping[str, Any], preflight: Mapping[str, Any],
     executed: dt.datetime,
-) -> None:
+) -> dict[str, Any]:
     account = broker.get_account()
     if account.get("id_hash") != preflight["account_id_hash"]:
         raise GenericLiveV1SubmissionError("fresh broker account pin mismatch")
@@ -429,6 +448,12 @@ def _fresh_broker_preflight(
         raise GenericLiveV1SubmissionError("fresh broker market calendar is invalid") from exc
     if not (opened <= executed.astimezone(opened.tzinfo) < closed):
         raise GenericLiveV1SubmissionError("generic Live v1 submission is outside market session")
+    proof = build_generic_live_v1_capital_proof(
+        exact_plan=plan, fresh_equity_usd=equity, fresh_cash_usd=cash,
+    )
+    if proof["gross_limit_pass"] is not True or proof["cash_reserve_pass"] is not True or proof["long_only_pass"] is not True:
+        raise GenericLiveV1SubmissionError("fresh worst-case capital proof is not green")
+    return proof
 
 
 def _validate_recovered_order(
@@ -486,6 +511,7 @@ def _execute_generic_live_v1_session(
     *,
     activation_preflight: Mapping[str, Any],
     exact_plan: Mapping[str, Any],
+    lyra_decision: Mapping[str, Any] | None = None,
     executed_at: str,
     submit_enabled: bool = False,
     broker: GenericLiveV1Broker | None = None,
@@ -514,6 +540,20 @@ def _execute_generic_live_v1_session(
     if len(orders) > 1:
         raise GenericLiveV1SubmissionError("owner-approved Live v1 permits at most one order")
     _validate_owner_execution_policy(exact_plan)
+    if submit_enabled:
+        if not isinstance(lyra_decision, Mapping):
+            raise GenericLiveV1SubmissionError(
+                "submission requires the exact protected Lyra v2 decision"
+            )
+        if lyra_decision.get("content_hash") != preflight.get("lyra_decision_hash"):
+            raise GenericLiveV1SubmissionError("submission Lyra decision pin differs")
+        validate_generic_live_v1_lyra_plan_chain(
+            lyra_decision=lyra_decision, exact_plan=exact_plan,
+            effective_session=preflight["effective_session"],
+            account_id_hash=preflight["account_id_hash"],
+            fresh_equity_usd=float(preflight["observed_equity_usd"]),
+            fresh_cash_usd=float(exact_plan["starting_cash"]),
+        )
     if type(poll_attempts) is not int or poll_attempts < 1 or poll_attempts > 10:
         raise GenericLiveV1SubmissionError("poll_attempts must be in [1, 10]")
     if not math.isfinite(float(poll_interval_seconds)) or not 0.0 <= float(poll_interval_seconds) <= 5.0:
@@ -521,15 +561,14 @@ def _execute_generic_live_v1_session(
     effective_capital = min(460.0, float(preflight["observed_equity_usd"]))
     if float(exact_plan["deployable_capital"]) > effective_capital + 0.01:
         raise GenericLiveV1SubmissionError("exact plan exceeds effective account capital ceiling")
-    marks = {str(row["symbol"]): float(row["price"]) for row in exact_plan["price_marks"]}
-    gross = sum(
-        max(float(row["quantity"]), 0.0) * marks.get(str(row["symbol"]), math.inf)
-        for row in exact_plan["expected_posttrade_positions"]
+    validation_capital = build_generic_live_v1_capital_proof(
+        exact_plan=exact_plan, fresh_equity_usd=float(preflight["observed_equity_usd"]),
+        fresh_cash_usd=float(exact_plan["starting_cash"]),
     )
-    if not math.isfinite(gross) or gross > effective_capital * 0.95 + 0.01:
-        raise GenericLiveV1SubmissionError("exact plan exceeds owner-approved 95% gross ceiling")
-    if float(exact_plan["expected_posttrade_cash"]) + 0.01 < effective_capital * 0.05:
-        raise GenericLiveV1SubmissionError("exact plan does not preserve owner-approved 5% cash")
+    if validation_capital["gross_limit_pass"] is not True:
+        raise GenericLiveV1SubmissionError("exact plan exceeds owner-approved dynamic 95% gross ceiling")
+    if validation_capital["cash_reserve_pass"] is not True:
+        raise GenericLiveV1SubmissionError("exact plan does not preserve dynamic owner-approved 5% cash")
 
     base = {
         "schema_version": GENERIC_LIVE_V1_SUBMISSION_RESULT_SCHEMA,
@@ -592,7 +631,7 @@ def _execute_generic_live_v1_session(
             rearm_path, preflight_hash=preflight["content_hash"],
             plan_hash=exact_plan["content_hash"], effective_session=preflight["effective_session"],
         )
-        _fresh_broker_preflight(
+        capital_proof = _fresh_broker_preflight(
             broker=broker, plan=exact_plan, preflight=preflight, executed=executed
         )
         if not orders:
@@ -627,7 +666,10 @@ def _execute_generic_live_v1_session(
             existing = broker.find_order_by_client_id(client_id)
             lookup = True
             if existing is None:
-                context = _mutation_context(preflight=preflight, plan=exact_plan, order=order)
+                context = _mutation_context(
+                    preflight=preflight, plan=exact_plan, order=order,
+                    capital_proof=capital_proof,
+                )
                 existing = broker.submit_generic_live_v4_limit_order(
                     symbol=order["symbol"], qty=quantity, side=order["side"],
                     client_order_id=client_id, limit_price=float(order["enforcement_price"]),
@@ -637,7 +679,10 @@ def _execute_generic_live_v1_session(
                 submitted = True
             else:
                 submitted = False
-                context = _mutation_context(preflight=preflight, plan=exact_plan, order=order)
+                context = _mutation_context(
+                    preflight=preflight, plan=exact_plan, order=order,
+                    capital_proof=capital_proof,
+                )
             mutation_context_hash = context["content_hash"]
             broker_status = _validate_recovered_order(
                 existing, client_id=client_id, symbol=order["symbol"],
@@ -854,6 +899,7 @@ def execute_generic_live_v1_session(
     *,
     activation_preflight: Mapping[str, Any],
     exact_plan: Mapping[str, Any],
+    lyra_decision: Mapping[str, Any] | None = None,
     executed_at: str,
     submit_enabled: bool = False,
     broker: GenericLiveV1Broker | None = None,
@@ -869,6 +915,7 @@ def execute_generic_live_v1_session(
         return _execute_generic_live_v1_session(
             activation_preflight=activation_preflight,
             exact_plan=exact_plan,
+            lyra_decision=lyra_decision,
             executed_at=executed_at,
             submit_enabled=submit_enabled,
             broker=broker,
