@@ -218,10 +218,16 @@ while the governed universe freeze is prospective only from 2026-08-19 and
 forbids retroactive use. The immutable chronology verdict is
 [`generic_live_v1_p0_1_chronology_no_go_2026-08-19.json`](evidence/generic_live_v1_p0_1_chronology_no_go_2026-08-19.json),
 content hash `f1d8e172b5660c2d83120bb1bd30a0801e3a55e966ab214728fe0f6ef37b1ba1`.
-The first eligible prospective rebalance is Monday 2026-08-24, after the current
-owner decision expires. A same-terms decision proposal is sealed at
-[`generic_live_v1_owner_decision_2026-08-24.pending.json`](governance/proposals/generic_live_v1_owner_decision_2026-08-24.pending.json),
-content hash `8a07df4852a30358761e2be62054cf202b406bb4ca096c70be55e3b1e60cd641`.
+The first eligible prospective signal/rebalance date is Monday 2026-08-24,
+after its completed close. The first executable session is therefore Tuesday
+2026-08-25, because Monday's 07:00 precompute still carries Friday data and the
+inadmissible 2026-08-17 weekly target. The initial 2026-08-24 pending proposal
+is preserved but superseded before owner action by
+[`generic_live_v1_owner_decision_2026-08-24.supersession.json`](governance/proposals/generic_live_v1_owner_decision_2026-08-24.supersession.json),
+content hash `2365872d053941a3f6565ced52c10505a787a8930df0d9aa82f21f1e6b25f3d2`.
+The corrected same-terms owner proposal is
+[`generic_live_v1_owner_decision_2026-08-25.pending.json`](governance/proposals/generic_live_v1_owner_decision_2026-08-25.pending.json),
+content hash `c523bc96aae5e45688449750dd7fb995564958545972411f0510ed15cf434eeb`.
 It is `PENDING_OWNER_APPROVAL` and grants no approval, activation, or execution
 authority.
 
