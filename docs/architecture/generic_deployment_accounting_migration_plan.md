@@ -1406,6 +1406,13 @@ The corrected same-terms proposal at
 [`generic_live_v1_owner_decision_2026-08-25.pending.json`](../governance/proposals/generic_live_v1_owner_decision_2026-08-25.pending.json)
 is deliberately `PENDING_OWNER_APPROVAL`; its content hash is
 `c523bc96aae5e45688449750dd7fb995564958545972411f0510ed15cf434eeb`.
+The exact decision-grade evidence policy is also deliberately pending at
+[`lyra_governed_evidence_policy_v1.pending.json`](../governance/proposals/lyra_governed_evidence_policy_v1.pending.json),
+content hash
+`c6c12f954757f5ee020ff27e5c10705462a0a24a689c018290995c83de878e0e`.
+Its risk, liquidity, capacity, XNYS-calendar, and canonical full-L1 turnover
+terms cannot enter a READY capture until Brett approves this exact proposal in
+a separate immutable owner-decision artifact.
 
 The adaptive policy choice is now concrete rather than implicit. Candidate
 hash `0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`
