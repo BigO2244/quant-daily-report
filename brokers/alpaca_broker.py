@@ -1343,3 +1343,47 @@ class AlpacaBroker:
                 }
             )
         return out
+
+    def list_generic_live_v1_fill_activities(
+        self, date_iso: str,
+    ) -> List[Dict[str, Any]]:
+        """Read exact Alpaca FILL activities with order and fee lineage."""
+
+        payload = self.trading_client.get(
+            "/account/activities/FILL",
+            data={
+                "date": str(date_iso), "direction": "asc", "page_size": 100,
+            },
+        )
+        if not isinstance(payload, list):
+            raise RuntimeError("Alpaca FILL activities response is not an array")
+        rows: List[Dict[str, Any]] = []
+        for activity in payload:
+            raw = _as_dict(activity)
+            if not raw:
+                raise RuntimeError("Alpaca FILL activity is not an object")
+            fee = raw.get("fee_amount")
+            if fee is None:
+                fee = raw.get("fee")
+            side = _safe_str(raw.get("side"))
+            if fee is None and side.strip().lower().split(".")[-1] == "sell":
+                raise RuntimeError(
+                    "Alpaca SELL fill lacks explicit fee evidence"
+                )
+            rows.append(
+                {
+                    "id": _safe_str(raw.get("id")),
+                    "activity_type": _safe_str(raw.get("activity_type")),
+                    "transaction_time": _safe_str(raw.get("transaction_time")),
+                    "order_id": _safe_str(raw.get("order_id")),
+                    "symbol": _safe_str(raw.get("symbol")).upper(),
+                    "side": side,
+                    "qty": _safe_str(raw.get("qty")),
+                    "price": _safe_str(raw.get("price")),
+                    # A missing BUY commission is normalized to zero. SELL
+                    # activities fail closed above because regulatory fees can
+                    # exist and must be explicit for factual accounting.
+                    "fee_amount": _safe_str("0" if fee is None else fee),
+                }
+            )
+        return rows

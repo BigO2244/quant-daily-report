@@ -13,6 +13,7 @@ from core.generic_live_v1_submission import (
     _write_exclusive,
     finalize_generic_live_v1_posttrade,
     validate_generic_live_v1_order_lifecycle,
+    validate_generic_live_v1_order_reconciliation_causality,
     validate_generic_live_v1_submission_result,
 )
 from core.lane_factual_reporting_inputs import build_lane_factual_reporting_inputs
@@ -311,6 +312,10 @@ def build_and_finalize_generic_live_v1_production_posttrade(
             exact_plan=exact_plan, wal_intents=build_lane_oms_intents(exact_plan),
             broker_orders=broker_orders, broker_fills=broker_fills,
             ending_state=ending_state, reconciled_at=reconciled_at,
+        )
+        reconciliation = validate_generic_live_v1_order_reconciliation_causality(
+            submission_result=checked_submission, exact_plan=exact_plan,
+            order_lifecycle=checked_lifecycle, reconciliation=reconciliation,
         )
         current_trigger = "ACCOUNTING_BREAK"
         additions = (

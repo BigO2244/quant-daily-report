@@ -368,7 +368,7 @@ def test_runtime_pin_mismatch_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
         "CAERUS_GENERIC_LIVE_ELIGIBLE_SLEEVE": "caerus_lyra",
         "CAERUS_GENERIC_LIVE_OWNER_DECISION_HASH": preflight["owner_decision_hash"],
         "CAERUS_GENERIC_LIVE_PREFLIGHT_HASH": preflight["content_hash"],
-        "CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED": "0",
+        "CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED": "1",
         "CAERUS_GENERIC_LIVE_INPUT_ROOT": "/home/brettolson/.caerus/generic_live_v1_inputs",
         "CAERUS_GENERIC_LIVE_STATE_ROOT": "/home/brettolson/.caerus/generic_live_v1_state",
         "CAERUS_GENERIC_LIVE_SESSION_GATE_PATH": "/home/brettolson/.caerus/generic_live_v1_state/session_gate.json",
@@ -433,5 +433,7 @@ def test_templates_remain_disabled_and_runtime_pinned() -> None:
     assert "CAERUS_GENERIC_LIVE_REPO_ROOT=/home/brettolson/quant-daily-report" in env_template
     assert "--effective-session" in cron_text
     assert "CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED:-0" in cron_text
+    assert "finalize_generic_live_v1_posttrade.py" in cron_text
+    assert "--collect-from-broker" in cron_text
     assert "CAERUS_GENERIC_LIVE_BOOTSTRAP_GUARD:-0" in cron_text
     assert os.access(cron_wrapper, os.X_OK)

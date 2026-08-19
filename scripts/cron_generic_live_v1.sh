@@ -47,7 +47,7 @@ fi
 [[ "${CAERUS_GENERIC_LIVE_PYTHON_BIN:-}" == "${PYTHON_BIN}" ]] || exit 78
 [[ "${CAERUS_GENERIC_LIVE_INPUT_ROOT:-}" == "${INPUT_ROOT}" ]] || exit 78
 [[ "${CAERUS_GENERIC_LIVE_STATE_ROOT:-}" == "${STATE_ROOT}" ]] || exit 78
-[[ "${CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED:-0}" == "0" ]] || exit 78
+[[ "${CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED:-0}" == "1" ]] || exit 78
 
 readonly PREFLIGHT_PATH="${CAERUS_GENERIC_LIVE_PREFLIGHT_PATH:?missing preflight path}"
 readonly OWNER_DECISION_PATH="${CAERUS_GENERIC_LIVE_OWNER_DECISION_PATH:?missing owner decision path}"
@@ -59,6 +59,19 @@ readonly SESSION_GATE_PATH="${CAERUS_GENERIC_LIVE_SESSION_GATE_PATH:?missing ses
 [[ "${SESSION_GATE_PATH}" == "${FIXED_SESSION_GATE}" ]] || exit 78
 readonly WAL_DIRECTORY="${CAERUS_GENERIC_LIVE_WAL_DIRECTORY:?missing WAL directory}"
 readonly RESULT_PATH="${CAERUS_GENERIC_LIVE_RESULT_PATH:?missing result path}"
+readonly EXISTING_JOURNAL_PATH="${CAERUS_GENERIC_LIVE_EXISTING_JOURNAL_PATH:?missing journal path}"
+readonly PRIOR_VALUATIONS_PATH="${CAERUS_GENERIC_LIVE_PRIOR_VALUATIONS_PATH:?missing valuations path}"
+readonly DEPLOYMENT_POLICY_PATH="${CAERUS_GENERIC_LIVE_DEPLOYMENT_POLICY_PATH:?missing deployment policy path}"
+readonly KNOWN_SLEEVE_IDS_PATH="${CAERUS_GENERIC_LIVE_KNOWN_SLEEVE_IDS_PATH:?missing sleeve ids path}"
+readonly DEPLOYMENT_STATE_PATH="${CAERUS_GENERIC_LIVE_DEPLOYMENT_STATE_PATH:?missing deployment state path}"
+readonly CAPITAL_PATH="${CAERUS_GENERIC_LIVE_CAPITAL_PATH:?missing capital path}"
+readonly OTHER_LANE_AUDITS_PATH="${CAERUS_GENERIC_LIVE_OTHER_LANE_AUDITS_PATH:?missing other lane audits path}"
+readonly BROKER_EVIDENCE_DIRECTORY="${STATE_ROOT}/broker_evidence/${REQUESTED_SESSION}"
+readonly REPORTING_ARTIFACT_DIRECTORY="${STATE_ROOT}/reporting/${REQUESTED_SESSION}"
+readonly ROLLBACK_EVIDENCE_DIRECTORY="${STATE_ROOT}/rollback_evidence"
+readonly BASE_POSTTRADE_RESULT_PATH="${STATE_ROOT}/posttrade-base-${REQUESTED_SESSION}.json"
+readonly CLOSURE_RESULT_PATH="${STATE_ROOT}/posttrade-closure-${REQUESTED_SESSION}.json"
+readonly PUBLISHED_POINTER_PATH="${STATE_ROOT}/posttrade-published-${REQUESTED_SESSION}.json"
 readonly EXECUTED_AT="$(${PYTHON_BIN} -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"
 
 rearm_on_wrapper_failure() {
@@ -87,4 +100,43 @@ cd "${REPO_ROOT}"
     --session-gate-path "${SESSION_GATE_PATH}" \
     --result-path "${RESULT_PATH}" \
     --submit-exact-session
+
+install -d -m 700 \
+    "${BROKER_EVIDENCE_DIRECTORY}" \
+    "${REPORTING_ARTIFACT_DIRECTORY}" \
+    "${ROLLBACK_EVIDENCE_DIRECTORY}"
+readonly FINALIZED_AT="$(${PYTHON_BIN} -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"
+readonly CRON_DAY="$((10#${REQUESTED_SESSION:8:2}))"
+readonly CRON_MONTH="$((10#${REQUESTED_SESSION:5:2}))"
+readonly EXACT_CRON_LINE="36 9 ${CRON_DAY} ${CRON_MONTH} * ${BOOTSTRAP_GUARD} --effective-session ${REQUESTED_SESSION} >> ${REPO_ROOT}/logs/cron_generic_live_v1.log 2>&1 # CAERUS_GENERIC_LIVE_V1_SESSION=${REQUESTED_SESSION}"
+"${PYTHON_BIN}" scripts/finalize_generic_live_v1_posttrade.py \
+    --input-root "${INPUT_ROOT}" \
+    --state-root "${STATE_ROOT}" \
+    --submission-result "${RESULT_PATH}" \
+    --exact-plan "${PLAN_PATH}" \
+    --collect-from-broker \
+    --broker-evidence-directory "${BROKER_EVIDENCE_DIRECTORY}" \
+    --published-pointer-path "${PUBLISHED_POINTER_PATH}" \
+    --existing-journal "${EXISTING_JOURNAL_PATH}" \
+    --prior-valuations "${PRIOR_VALUATIONS_PATH}" \
+    --deployment-policy "${DEPLOYMENT_POLICY_PATH}" \
+    --known-sleeve-ids "${KNOWN_SLEEVE_IDS_PATH}" \
+    --deployment-state "${DEPLOYMENT_STATE_PATH}" \
+    --capital "${CAPITAL_PATH}" \
+    --other-lane-audits "${OTHER_LANE_AUDITS_PATH}" \
+    --session-gate-path "${SESSION_GATE_PATH}" \
+    --base-result-path "${BASE_POSTTRADE_RESULT_PATH}" \
+    --closure-result-path "${CLOSURE_RESULT_PATH}" \
+    --reporting-artifact-directory "${REPORTING_ARTIFACT_DIRECTORY}" \
+    --exact-cron-line "${EXACT_CRON_LINE}" \
+    --active-config-path "${GENERIC_ENV}" \
+    --backup-config-path "/home/brettolson/.caerus/generic_live_v1.env.rollback" \
+    --paper-root "${REPO_ROOT}" \
+    --paper-path "${REPO_ROOT}/scripts/cron_precompute.sh" \
+    --paper-path "${REPO_ROOT}/scripts/cron_execute.sh" \
+    --paper-path "${REPO_ROOT}/scripts/crontab.txt" \
+    --rollback-evidence-directory "${ROLLBACK_EVIDENCE_DIRECTORY}" \
+    --reconciled-at "${FINALIZED_AT}" \
+    --valuation-date "${REQUESTED_SESSION}" \
+    --finalized-at "${FINALIZED_AT}"
 trap - ERR INT TERM HUP

@@ -129,7 +129,25 @@ def test_cron_timezone_is_installed_once_and_conflicts_fail_closed() -> None:
         update_crontab("CRON_TZ=UTC\n", exact_line=exact, install=True)
 
 
-def test_external_guard_rolls_back_pre_python_failure_without_secret_leak(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("child_body", "expected_returncode"),
+    [
+        (
+            "#!/usr/bin/env bash\necho SENTINEL_SECRET\necho SENTINEL_SECRET >&2\nexit 78\n",
+            78,
+        ),
+        (
+            "#!/usr/bin/env bash\n"
+            "echo SENTINEL_SECRET\n"
+            "printf '{\"trigger\":\"ORDER_BREAK\"}\\n' >\"${CAERUS_GENERIC_LIVE_GUARD_TEST_ROOT}/.caerus/generic_live_v1_state/session_gate.json\"\n"
+            "exit 1\n",
+            1,
+        ),
+    ],
+)
+def test_external_guard_fully_rolls_back_bootstrap_and_terminal_order_failures(
+    tmp_path: Path, child_body: str, expected_returncode: int,
+) -> None:
     test_home = tmp_path / "home"
     repo = test_home / "quant-daily-report"
     scripts = repo / "scripts"
@@ -143,11 +161,7 @@ def test_external_guard_rolls_back_pre_python_failure_without_secret_leak(tmp_pa
     shutil.copy2(ROOT / "scripts/generic_live_v1_bootstrap_guard.sh", guard)
     guard.chmod(0o700)
     child = scripts / "cron_generic_live_v1.sh"
-    _write(
-        child,
-        "#!/usr/bin/env bash\necho SENTINEL_SECRET\necho SENTINEL_SECRET >&2\nexit 78\n",
-        0o700,
-    )
+    _write(child, child_body, 0o700)
     paper_paths = [scripts / "cron_precompute.sh", scripts / "cron_execute.sh", scripts / "crontab.txt"]
     for index, paper in enumerate(paper_paths):
         _write(paper, f"paper-{index}\n", 0o700 if paper.suffix == ".sh" else 0o600)
@@ -190,7 +204,7 @@ def test_external_guard_rolls_back_pre_python_failure_without_secret_leak(tmp_pa
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 78
+    assert result.returncode == expected_returncode
     assert "SENTINEL_SECRET" not in result.stdout + result.stderr
     gate = json.loads((state / "session_gate.json").read_text())
     assert gate["status"] == "ARMED"
@@ -221,6 +235,16 @@ def test_runner_masks_forced_secret_from_stdout_and_stderr(
     captured = capsys.readouterr()
     assert "SENTINEL_SECRET" not in captured.out + captured.err
     assert "failed closed" in captured.err
+
+
+@pytest.mark.parametrize(
+    "status", ["ORDER_BREAK_REARMED", "UNRESOLVED_ORDER_REARMED"],
+)
+def test_order_break_and_unresolved_results_both_require_outer_rollback(
+    status: str,
+) -> None:
+    assert runner._requires_external_rollback(status) is True
+    assert runner._requires_external_rollback("FILLED_REARMED") is False
 
 
 def test_posttrade_cli_missing_link_performs_full_rollback(
@@ -346,3 +370,81 @@ def test_posttrade_cli_accepts_only_exact_canonical_config_paths() -> None:
             Path("/home/brettolson/.caerus/generic_live_v1_state/generic_live_v1.env"),
             posttrade_cli.CANONICAL_BACKUP_CONFIG,
         )
+
+
+def test_posttrade_cli_connected_mode_collects_broker_truth_then_calls_raw_builder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = tmp_path / "inputs"
+    state = tmp_path / "state"
+    paper = tmp_path / "paper"
+    ops = tmp_path / "ops"
+    rollback = state / "rollback"
+    for directory in (inputs, state, paper, ops, rollback):
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
+    payloads = {
+        "submission.json": {"preflight_hash": "a" * 64},
+        "plan.json": {"content_hash": "b" * 64},
+        "journal.json": {"journal_entries": []},
+        "valuations.json": {"valuations": []},
+        "policy.json": {},
+        "sleeves.json": {"known_sleeve_ids": ["caerus_lyra"]},
+        "deployment.json": {}, "capital.json": {},
+        "other.json": {"lane_audits": []},
+    }
+    for name, payload in payloads.items():
+        _write(inputs / name, json.dumps(payload))
+    gate = state / "gate.json"
+    _write(gate, "{}")
+    paper_paths = [paper / "one", paper / "two"]
+    for path in paper_paths:
+        _write(path, "paper")
+    active = ops / "generic_live_v1.env"
+    backup = ops / "generic_live_v1.env.rollback"
+    monkeypatch.setattr(posttrade_cli, "CANONICAL_OPS_ROOT", ops)
+    monkeypatch.setattr(posttrade_cli, "CANONICAL_ACTIVE_CONFIG", active)
+    monkeypatch.setattr(posttrade_cli, "CANONICAL_BACKUP_CONFIG", backup)
+    broker = object()
+    monkeypatch.setattr(posttrade_cli.AlpacaBroker, "from_env", lambda: broker)
+    captured = {}
+
+    def collect(**kwargs):
+        captured.update(kwargs)
+        return {"closure": {"status": "GREEN_REARMED"}}
+
+    monkeypatch.setattr(
+        posttrade_cli, "collect_and_finalize_generic_live_v1_posttrade", collect,
+    )
+    argv = [
+        "--input-root", str(inputs), "--state-root", str(state),
+        "--submission-result", str(inputs / "submission.json"),
+        "--exact-plan", str(inputs / "plan.json"), "--collect-from-broker",
+        "--broker-evidence-directory", str(state / "broker-evidence"),
+        "--published-pointer-path", str(state / "published.json"),
+        "--existing-journal", str(inputs / "journal.json"),
+        "--prior-valuations", str(inputs / "valuations.json"),
+        "--deployment-policy", str(inputs / "policy.json"),
+        "--known-sleeve-ids", str(inputs / "sleeves.json"),
+        "--deployment-state", str(inputs / "deployment.json"),
+        "--capital", str(inputs / "capital.json"),
+        "--other-lane-audits", str(inputs / "other.json"),
+        "--session-gate-path", str(gate),
+        "--base-result-path", str(state / "base.json"),
+        "--closure-result-path", str(state / "closure.json"),
+        "--reporting-artifact-directory", str(state / "reporting"),
+        "--exact-cron-line", "GENERIC", "--active-config-path", str(active),
+        "--backup-config-path", str(backup), "--paper-root", str(paper),
+        "--rollback-evidence-directory", str(rollback),
+        "--reconciled-at", "2026-08-19T20:00:00+00:00",
+        "--valuation-date", "2026-08-19",
+        "--finalized-at", "2026-08-19T20:00:01+00:00",
+    ]
+    for path in paper_paths:
+        argv.extend(["--paper-path", str(path)])
+
+    assert posttrade_cli.main(argv) == 0
+    assert captured["broker"] is broker
+    assert captured["submission_result"] == payloads["submission.json"]
+    assert captured["exact_plan"] == payloads["plan.json"]
+    assert captured["published_pointer_path"] == state / "published.json"

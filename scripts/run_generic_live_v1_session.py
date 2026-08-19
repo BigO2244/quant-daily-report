@@ -30,6 +30,10 @@ from core.generic_live_v1_ops import (
 )
 
 
+def _requires_external_rollback(status: object) -> bool:
+    return status in {"ORDER_BREAK_REARMED", "UNRESOLVED_ORDER_REARMED"}
+
+
 def _require_exact_env(preflight: dict, *, submit: bool) -> None:
     expected = {
         "CAERUS_GENERIC_LIVE_ACCOUNT_ID_HASH": preflight["account_id_hash"],
@@ -42,7 +46,7 @@ def _require_exact_env(preflight: dict, *, submit: bool) -> None:
         "CAERUS_GENERIC_LIVE_ELIGIBLE_SLEEVE": "caerus_lyra",
         "CAERUS_GENERIC_LIVE_OWNER_DECISION_HASH": preflight["owner_decision_hash"],
         "CAERUS_GENERIC_LIVE_PREFLIGHT_HASH": preflight["content_hash"],
-        "CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED": "0",
+        "CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED": "1" if submit else "0",
         "CAERUS_GENERIC_LIVE_INPUT_ROOT": "/home/brettolson/.caerus/generic_live_v1_inputs",
         "CAERUS_GENERIC_LIVE_STATE_ROOT": "/home/brettolson/.caerus/generic_live_v1_state",
         "CAERUS_GENERIC_LIVE_SESSION_GATE_PATH": "/home/brettolson/.caerus/generic_live_v1_state/session_gate.json",
@@ -189,8 +193,12 @@ def main() -> int:
             rearm_state_path=args.session_gate_path,
             result_path=args.result_path,
         )
-        if args.submit_exact_session and result.get("status") == "ORDER_BREAK_REARMED":
-            raise RuntimeError("generic Live v1 order break requires external rollback")
+        if args.submit_exact_session and _requires_external_rollback(
+            result.get("status")
+        ):
+            raise RuntimeError(
+                "generic Live v1 order break or unresolved order requires external rollback"
+            )
     except Exception:
         if args.submit_exact_session and safe_rearm_path is not None:
             ensure_generic_live_v1_rearmed_after_failure(

@@ -1317,6 +1317,98 @@ def validate_generic_live_v1_order_lifecycle(
     return _validate_order_lifecycle(payload, submission_result=checked_submission)
 
 
+def validate_generic_live_v1_order_reconciliation_causality(
+    *, submission_result: Mapping[str, Any], exact_plan: Mapping[str, Any],
+    order_lifecycle: Mapping[str, Any], reconciliation: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Prove the terminal order outcome against exact broker reconciliation."""
+
+    submission = _validate_submission_result(submission_result)
+    if (
+        exact_plan.get("content_hash") != submission.get("plan_hash")
+        or validate_lane_exact_execution_plan(exact_plan)
+    ):
+        raise GenericLiveV1SubmissionError(
+            "posttrade exact plan lineage is invalid"
+        )
+    order = _validate_order_lifecycle(
+        order_lifecycle, submission_result=submission,
+    )
+    reconciled = validate_lane_reconciliation(reconciliation, exact_plan=exact_plan)
+    if (
+        reconciled["account_id_hash"] != submission["account_id_hash"]
+        or reconciled["lane_id"] != "generic-live-v1"
+        or reconciled["plan_hash"] != submission["plan_hash"]
+    ):
+        raise GenericLiveV1SubmissionError(
+            "reconciliation scope differs from submission"
+        )
+    if order["status"] == "FILLED" and (
+        reconciled["status"] != "PASS" or reconciled["accounting_ready"] is not True
+    ):
+        raise GenericLiveV1SubmissionError(
+            "filled order is not PASS/accounting-ready"
+        )
+    if order["status"] == "PARTIAL_CANCELED" and (
+        reconciled["status"] != "PARTIAL"
+        or reconciled["accounting_ready"] is not True
+    ):
+        raise GenericLiveV1SubmissionError(
+            "partial order is not PARTIAL/accounting-ready"
+        )
+    if order["status"] in {"REJECTED", "CANCELED", "EXPIRED"} and (
+        reconciled["status"] not in {"REJECTED", "PARTIAL"}
+        or reconciled["accounting_ready"] is not False
+        or reconciled["reconciled_fills"]
+    ):
+        raise GenericLiveV1SubmissionError(
+            "zero-fill order break is not exactly reconciled"
+        )
+    if order["status"] == "UNRESOLVED" and (
+        reconciled["status"] != "UNRESOLVED"
+        or reconciled["accounting_ready"] is not False
+    ):
+        raise GenericLiveV1SubmissionError(
+            "unresolved order is not fail-closed reconciled"
+        )
+    if order["status"] == "NO_TRADE" and (
+        reconciled["status"] != "PASS" or reconciled["reconciled_fills"]
+    ):
+        raise GenericLiveV1SubmissionError(
+            "no-trade session is not exactly reconciled"
+        )
+    summaries = reconciled["broker_orders"]
+    if order["status"] == "NO_TRADE":
+        if summaries or reconciled["broker_fills"]:
+            raise GenericLiveV1SubmissionError(
+                "no-trade reconciliation carries broker activity"
+            )
+    else:
+        if len(summaries) != 1:
+            raise GenericLiveV1SubmissionError(
+                "reconciliation does not contain exact broker order"
+            )
+        summary = summaries[0]
+        if (
+            summary["order_id"] != order["exact_order_id"]
+            or summary["broker_order_id"] != order["broker_order_id"]
+            or abs(
+                float(summary["filled_quantity"])
+                - float(order["filled_quantity"])
+            ) > 1e-9
+            or sorted(reconciled["source_hashes"]["broker_fills"])
+            != order["broker_fill_evidence_hashes"]
+            or reconciled["source_hashes"]["broker_orders"]
+            != [order["broker_order_evidence_hash"]]
+            or reconciled["source_hashes"]["wal_intents"]
+            != [submission["intent_hash"]]
+        ):
+            raise GenericLiveV1SubmissionError(
+                "reconciliation order/fill causality differs"
+            )
+    return reconciled
+
+
 def finalize_generic_live_v1_posttrade(
     *, submission_result: Mapping[str, Any], exact_plan: Mapping[str, Any],
     order_lifecycle: Mapping[str, Any], reconciliation: Mapping[str, Any],
@@ -1514,5 +1606,6 @@ __all__ = [
     "ensure_generic_live_v1_rearmed_after_failure", "rearm_generic_live_v1_session",
     "seal_generic_live_v1_order_lifecycle",
     "validate_generic_live_v1_order_lifecycle",
+    "validate_generic_live_v1_order_reconciliation_causality",
     "validate_generic_live_v1_submission_result",
 ]
