@@ -16,6 +16,7 @@ from core.generic_live_v1_activation import (
     GenericLiveV1ActivationError,
     build_generic_live_v1_activation_preflight,
     recompute_generic_live_v1_activation_preflight,
+    require_generic_live_v1_owner_current_at_execution,
     validate_generic_live_v1_activation_preflight,
 )
 from core.lane_allocator import allocate_lane
@@ -258,3 +259,13 @@ def test_fabricated_ready_status_is_rejected() -> None:
     forged["reason_codes"] = ["ALL_OWNER_APPROVED_LIVE_V1_GATES_GREEN"]
     with pytest.raises(GenericLiveV1ActivationError, match="every gate green"):
         validate_generic_live_v1_activation_preflight(forged)
+
+
+def test_owner_approval_must_still_be_current_at_execution() -> None:
+    require_generic_live_v1_owner_current_at_execution(
+        owner_decision=OWNER, executed_at="2026-08-19T13:31:00+00:00",
+    )
+    with pytest.raises(GenericLiveV1ActivationError, match="expired before"):
+        require_generic_live_v1_owner_current_at_execution(
+            owner_decision=OWNER, executed_at="2026-08-20T20:00:01+00:00",
+        )

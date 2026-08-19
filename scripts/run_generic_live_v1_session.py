@@ -14,7 +14,10 @@ from pathlib import Path
 
 from brokers.alpaca_broker import AlpacaBroker
 from authority.lane_exact_plan import canonical_json
-from core.generic_live_v1_activation import recompute_generic_live_v1_activation_preflight
+from core.generic_live_v1_activation import (
+    recompute_generic_live_v1_activation_preflight,
+    require_generic_live_v1_owner_current_at_execution,
+)
 from core.generic_live_v1_submission import (
     ensure_generic_live_v1_rearmed_after_failure,
     execute_generic_live_v1_session,
@@ -158,6 +161,9 @@ def main() -> int:
         account_observation = secure_read_json(args.account_observation, allowed_roots=read_roots)
         lyra_decision = secure_read_json(args.lyra_decision, allowed_roots=read_roots)
         operational_proofs = secure_read_json(args.operational_proofs, allowed_roots=read_roots)
+        require_generic_live_v1_owner_current_at_execution(
+            owner_decision=owner_decision, executed_at=args.executed_at,
+        )
         _require_source_pins(
             owner_decision=owner_decision,
             account_observation=account_observation,

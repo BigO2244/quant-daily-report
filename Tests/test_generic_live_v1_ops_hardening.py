@@ -215,13 +215,19 @@ def test_atomic_config_backup_install_and_rollback(tmp_path: Path) -> None:
     candidate = root / "candidate.env"
     active = root / "active.env"
     backup = root / "backup.env"
-    _protected_file(candidate, "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\nNEW=1\n")
+    _protected_file(
+        candidate,
+        "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\n"
+        "CAERUS_GENERIC_LIVE_CAPITAL_CEILING_USD=460\n",
+    )
     _protected_file(active, "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\nOLD=1\n")
     installed = install_config_with_backup(
-        candidate_path=candidate, active_path=active, backup_path=backup, allowed_roots=[root]
+        candidate_path=candidate, active_path=active, backup_path=backup,
+        allowed_roots=[root],
+        expected_candidate_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
     )
     assert installed["backup_created"] is True
-    assert "NEW=1" in active.read_text()
+    assert "CAERUS_GENERIC_LIVE_CAPITAL_CEILING_USD=460" in active.read_text()
     assert "OLD=1" in backup.read_text()
     restore_config_backup(active_path=active, backup_path=backup, allowed_roots=[root])
     assert "OLD=1" in active.read_text()
@@ -244,8 +250,85 @@ def test_generic_config_rejects_secret_and_raw_account_sentinels(tmp_path: Path)
                 active_path=active,
                 backup_path=root / f"{key}.backup",
                 allowed_roots=[root],
+                expected_candidate_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
             )
         assert not active.exists()
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    (
+        (
+            "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\nCAERUS_DUPLICATE=one\nCAERUS_DUPLICATE=two\n",
+            "duplicate key",
+        ),
+        (
+            "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\nCAERUS_COMMAND=$(touch /tmp/forbidden)\n",
+            "command-free literal",
+        ),
+        (
+            "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\nCAERUS_COMMAND=`id`\n",
+            "command-free literal",
+        ),
+        (
+            "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\nexport VALUE=one\n",
+            "command-free literal",
+        ),
+        (
+            "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\nPATH=/tmp/attacker\n",
+            "command-free literal",
+        ),
+    ),
+)
+def test_generic_config_requires_unique_command_free_literal_assignments(
+    tmp_path: Path, body: str, message: str,
+) -> None:
+    root = tmp_path / "protected"
+    root.mkdir(mode=0o700)
+    candidate = root / "candidate.env"
+    _protected_file(candidate, body)
+    with pytest.raises(GenericLiveV1OpsError, match=message):
+        install_config_with_backup(
+            candidate_path=candidate,
+            active_path=root / "active.env",
+            backup_path=root / "backup.env",
+            allowed_roots=[root],
+            expected_candidate_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
+        )
+
+
+def test_generic_config_candidate_hash_is_verified_before_install(tmp_path: Path) -> None:
+    root = tmp_path / "protected"
+    root.mkdir(mode=0o700)
+    candidate = root / "candidate.env"
+    active = root / "active.env"
+    _protected_file(
+        candidate,
+        "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\nCAERUS_VALUE=literal\n",
+    )
+    with pytest.raises(GenericLiveV1OpsError, match="byte hash differs"):
+        install_config_with_backup(
+            candidate_path=candidate, active_path=active,
+            backup_path=root / "backup.env", allowed_roots=[root],
+            expected_candidate_sha256="0" * 64,
+        )
+    assert not active.exists()
+
+
+def test_generic_config_template_satisfies_literal_install_grammar(tmp_path: Path) -> None:
+    root = tmp_path / "protected"
+    root.mkdir(mode=0o700)
+    candidate = root / "candidate.env"
+    candidate.write_bytes((ROOT / "config/templates/generic_live_v1.env.example").read_bytes())
+    candidate.chmod(0o600)
+    active = root / "active.env"
+    result = install_config_with_backup(
+        candidate_path=candidate, active_path=active,
+        backup_path=root / "backup.env", allowed_roots=[root],
+        expected_candidate_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
+    )
+    assert result["candidate_sha256"] == hashlib.sha256(active.read_bytes()).hexdigest()
+    assert active.read_bytes() == candidate.read_bytes()
 
 
 def test_cron_entry_is_date_bound_duplicate_free_and_conflict_closed(tmp_path: Path) -> None:

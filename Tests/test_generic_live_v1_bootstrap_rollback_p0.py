@@ -19,6 +19,7 @@ from core.generic_live_v1_ops import (
 from core.generic_live_v1_submission import rearm_generic_live_v1_session
 from authority.lane_exact_plan import canonical_json
 from scripts.manage_generic_live_v1_cron import update_crontab
+import scripts.finalize_generic_live_v1_posttrade as posttrade_cli
 import scripts.run_generic_live_v1_session as runner
 
 
@@ -220,3 +221,119 @@ def test_runner_masks_forced_secret_from_stdout_and_stderr(
     captured = capsys.readouterr()
     assert "SENTINEL_SECRET" not in captured.out + captured.err
     assert "failed closed" in captured.err
+
+
+def test_posttrade_cli_missing_link_performs_full_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inputs = tmp_path / "inputs"
+    state = tmp_path / "state"
+    paper = tmp_path / "paper"
+    ops = tmp_path / "ops"
+    rollback = state / "rollback"
+    for directory in (inputs, state, paper, ops, rollback):
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
+
+    input_payloads = {
+        "submission.json": {"preflight_hash": "a" * 64},
+        "plan.json": {"content_hash": "b" * 64},
+        "order.json": {},
+        "reconciliation.json": {},
+        "journal.json": {"journal_entries": []},
+        "valuations.json": {"valuations": []},
+        "performance.json": {},
+        "daily.json": {},
+        "dashboard.json": {},
+    }
+    for name, payload in input_payloads.items():
+        _write(inputs / name, json.dumps(payload))
+    missing_all_lane = inputs / "missing-all-lane.json"
+    gate = state / "session-gate.json"
+    _write(gate, json.dumps({"status": "DISARMED_FOR_EXACT_SESSION"}))
+    active = ops / "generic_live_v1.env"
+    backup = ops / "generic_live_v1.env.rollback"
+    _write(active, "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=1\nNEW=1\n")
+    _write(backup, "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\nPRIOR=1\n")
+    paper_paths = [paper / "cron_precompute.sh", paper / "cron_execute.sh"]
+    for index, path in enumerate(paper_paths):
+        _write(path, f"paper-{index}\n")
+    paper_before = {
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paper_paths
+    }
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(mode=0o700)
+    cron_store = tmp_path / "crontab.txt"
+    exact = "36 9 19 8 * /fixed/guard --effective-session 2026-08-19 # CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-19"
+    cron_store.write_text(f"PAPER_LINE\n{exact}\n", encoding="utf-8")
+    _write(
+        fake_bin / "crontab",
+        "#!/usr/bin/env bash\n"
+        "if [[ \"${1:-}\" == '-l' ]]; then cat \"${FAKE_CRONTAB_STORE}\"; exit 0; fi\n"
+        "if [[ \"${1:-}\" == '-' ]]; then cat >\"${FAKE_CRONTAB_STORE}\"; exit 0; fi\n"
+        "exit 2\n",
+        0o700,
+    )
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_CRONTAB_STORE", str(cron_store))
+    monkeypatch.setattr(posttrade_cli, "CANONICAL_OPS_ROOT", ops)
+    monkeypatch.setattr(posttrade_cli, "CANONICAL_ACTIVE_CONFIG", active)
+    monkeypatch.setattr(posttrade_cli, "CANONICAL_BACKUP_CONFIG", backup)
+
+    argv = [
+        "--input-root", str(inputs), "--state-root", str(state),
+        "--submission-result", str(inputs / "submission.json"),
+        "--exact-plan", str(inputs / "plan.json"),
+        "--order-lifecycle", str(inputs / "order.json"),
+        "--reconciliation", str(inputs / "reconciliation.json"),
+        "--journal", str(inputs / "journal.json"),
+        "--valuations", str(inputs / "valuations.json"),
+        "--performance", str(inputs / "performance.json"),
+        "--daily-lane-audit", str(inputs / "daily.json"),
+        "--all-lane-audit", str(missing_all_lane),
+        "--dashboard-projection", str(inputs / "dashboard.json"),
+        "--session-gate-path", str(gate),
+        "--base-result-path", str(state / "base.json"),
+        "--closure-result-path", str(state / "closure.json"),
+        "--exact-cron-line", exact,
+        "--active-config-path", str(active),
+        "--backup-config-path", str(backup),
+        "--paper-root", str(paper),
+        "--rollback-evidence-directory", str(rollback),
+        "--finalized-at", "2026-08-19T21:00:00+00:00",
+    ]
+    for path in paper_paths:
+        argv.extend(["--paper-path", str(path)])
+
+    with pytest.raises(GenericLiveV1OpsError, match="required path does not exist"):
+        posttrade_cli.main(argv)
+
+    gate_payload = json.loads(gate.read_text())
+    assert gate_payload["status"] == "ARMED"
+    assert gate_payload["trigger"] == "REPORTING_BREAK"
+    assert exact not in cron_store.read_text()
+    assert "PAPER_LINE" in cron_store.read_text()
+    assert active.read_bytes() == backup.read_bytes()
+    assert b"PRIOR=1" in active.read_bytes()
+    assert paper_before == {
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paper_paths
+    }
+    evidence = json.loads((rollback / "reporting_break.json").read_text())
+    assert evidence["status"] == "ROLLED_BACK_ARMED"
+    assert evidence["cron_exact_line_removed"] is True
+    assert evidence["config_action"] == "RESTORED_BACKUP"
+    assert evidence["paper_bytes_unchanged"] is True
+    assert not (state / "generic_live_v1.env").exists()
+
+
+def test_posttrade_cli_accepts_only_exact_canonical_config_paths() -> None:
+    posttrade_cli._require_canonical_config_paths(
+        posttrade_cli.CANONICAL_ACTIVE_CONFIG,
+        posttrade_cli.CANONICAL_BACKUP_CONFIG,
+    )
+    with pytest.raises(RuntimeError, match="config paths are fixed"):
+        posttrade_cli._require_canonical_config_paths(
+            Path("/home/brettolson/.caerus/generic_live_v1_state/generic_live_v1.env"),
+            posttrade_cli.CANONICAL_BACKUP_CONFIG,
+        )

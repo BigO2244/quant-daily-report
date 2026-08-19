@@ -537,6 +537,20 @@ def recompute_generic_live_v1_activation_preflight(
     return rebuilt
 
 
+def require_generic_live_v1_owner_current_at_execution(
+    *, owner_decision: Mapping[str, Any], executed_at: str,
+) -> None:
+    """Reject an approval that expired after preflight but before execution."""
+
+    owner = parse_owner_decision(owner_decision)
+    _, executed = _timestamp(executed_at, label="executed_at")
+    _, expires = _timestamp(owner.expires_at, label="owner expires_at")
+    if executed > expires:
+        raise GenericLiveV1ActivationError(
+            "owner decision expired before generic Live v1 execution"
+        )
+
+
 def validate_generic_live_v1_lyra_plan_chain(
     *, lyra_decision: Mapping[str, Any], exact_plan: Mapping[str, Any],
     effective_session: str, account_id_hash: str,
@@ -566,6 +580,7 @@ def validate_generic_live_v1_lyra_plan_chain(
 __all__ = [
     "GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA", "GenericLiveV1ActivationError",
     "build_generic_live_v1_activation_preflight",
+    "require_generic_live_v1_owner_current_at_execution",
     "recompute_generic_live_v1_activation_preflight",
     "validate_generic_live_v1_lyra_plan_chain",
     "validate_generic_live_v1_activation_preflight",

@@ -80,6 +80,8 @@ def _inputs(tmp_path) -> dict:
         "closure_result_path": tmp_path / "closure" / "result.json",
         "rollback_handler": lambda trigger: {
             "status": "ROLLED_BACK_ARMED", "trigger": trigger,
+            "paper_bytes_unchanged": True, "cron_exact_line_removed": True,
+            "rearm_hash": "d" * 64, "config_action": "RESTORED_BACKUP",
         },
     }
 
@@ -121,36 +123,53 @@ def test_seals_exact_production_causal_chain_and_is_idempotent(tmp_path, validat
 
 
 @pytest.mark.parametrize(
-    ("mutation", "message"),
+    ("mutation", "message", "expected_trigger"),
     [
-        (lambda values: values["journal_entries"].clear(), "journal history"),
+        (
+            lambda values: values["journal_entries"].clear(),
+            "journal history", "ACCOUNTING_BREAK",
+        ),
         (
             lambda values: values["valuations"][0].update(source_hashes=[]),
             "journal/reconciliation",
+            "ACCOUNTING_BREAK",
         ),
         (
             lambda values: values["performance"].update(source_valuation_hashes=[]),
             "factual valuations",
+            "REPORTING_BREAK",
         ),
         (
             lambda values: values["daily_lane_audit"].update(source_hashes=[]),
             "Live performance",
+            "REPORTING_BREAK",
         ),
         (
             lambda values: values["all_lane_audit"].update(lane_audit_hashes=[]),
             "exact Live daily audit",
+            "REPORTING_BREAK",
         ),
         (
             lambda values: values["dashboard_projection"].update(source_audit_hashes=[]),
             "Live audit/performance",
+            "REPORTING_BREAK",
         ),
     ],
 )
-def test_rejects_any_missing_causal_link(tmp_path, validators, mutation, message) -> None:
+def test_rejects_any_missing_causal_link(
+    tmp_path, validators, mutation, message, expected_trigger,
+) -> None:
     arguments = _inputs(tmp_path)
+    observed_triggers = []
+    arguments["rollback_handler"] = lambda trigger: observed_triggers.append(trigger) or {
+        "status": "ROLLED_BACK_ARMED", "trigger": trigger,
+        "paper_bytes_unchanged": True, "cron_exact_line_removed": True,
+        "rearm_hash": "d" * 64, "config_action": "RESTORED_BACKUP",
+    }
     mutation(arguments)
     with pytest.raises(subject.GenericLiveV1PosttradeError, match=message):
         subject.finalize_generic_live_v1_production_posttrade(**arguments)
+    assert observed_triggers == [expected_trigger]
 
 
 def test_immutable_closure_path_rejects_different_evidence(tmp_path, validators) -> None:
