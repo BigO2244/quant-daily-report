@@ -87,6 +87,52 @@ Only after inspecting that result may an operator repeat the command with
 advisory evidence beneath the explicitly supplied output root. It still cannot
 call a broker, build an executable schedule, or submit an order.
 
+## Date-bound advisory capture boundary
+
+`scripts/cron_governed_lyra_capture_20260825.sh` is a thin one-date wrapper for
+the first eligible capture. It is intentionally not installed. Its template at
+`config/templates/governed_lyra_capture_20260825.env.example` defaults to
+`CAERUS_GOVERNED_LYRA_CAPTURE_ENABLED=0`; in that state it exits successfully
+without reading any capture input or writing any file. When the literal flag is
+changed to `1`, it accepts only the exact 2026-08-25 execution session and
+2026-08-24 signal, at or after 08:15 ET, after the 07:00 ET precompute. It reads
+the config as command-free literals rather than sourcing it and rejects every
+unresolved `REPLACE_WITH_` token.
+
+Do not install this boundary until the exact evidence-policy owner decision,
+final policy, and session Live owner decision have been approved and placed at
+the template paths. Enabling capture does not enable Live, PAPER, submission,
+post-trade processing, a kill switch, or an execution schedule.
+
+After those approvals, stage the disabled template first:
+
+```bash
+install -m 600 config/templates/governed_lyra_capture_20260825.env.example \
+  /home/brettolson/.caerus/governed_lyra_capture_20260825.env
+```
+
+Replace the three pending policy/owner paths, independently verify their
+hashes, and only then change the single capture-enable value to `1`. The exact
+one-date 08:15 ET install command is:
+
+```bash
+CAPTURE_CRON='15 8 25 8 * /home/brettolson/quant-daily-report/scripts/cron_governed_lyra_capture_20260825.sh >> /home/brettolson/quant-daily-report/logs/governed_lyra_capture_20260825.log 2>&1 # CAERUS_GOVERNED_LYRA_CAPTURE=2026-08-25'
+(crontab -l 2>/dev/null || true; printf '%s\n' 'CRON_TZ=America/New_York' "${CAPTURE_CRON}") \
+  | awk '!seen[$0]++' | crontab -
+```
+
+This task does not run that command. Verify the exact line with `crontab -l`
+before August 25. Remove only that line after success, failure, or abandonment:
+
+```bash
+CAPTURE_CRON='15 8 25 8 * /home/brettolson/quant-daily-report/scripts/cron_governed_lyra_capture_20260825.sh >> /home/brettolson/quant-daily-report/logs/governed_lyra_capture_20260825.log 2>&1 # CAERUS_GOVERNED_LYRA_CAPTURE=2026-08-25'
+crontab -l | grep -Fvx "${CAPTURE_CRON}" | crontab -
+mv /home/brettolson/.caerus/governed_lyra_capture_20260825.env \
+  /home/brettolson/.caerus/governed_lyra_capture_20260825.env.disabled
+```
+
+The rollback removes no PAPER line and does not change either Live kill gate.
+
 ## Activation binding
 
 The Live v1 activation preflight v4 binds the decision hash, full capture hash,
