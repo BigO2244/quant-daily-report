@@ -313,6 +313,17 @@ pinned owner hash, a dynamic no-ceiling capital-policy hash, and an independentl
 pinned current broker fee schedule. Missing history, stale bytes, an untrusted
 fee schedule, or a fixed-capital plan fails closed before any authority exists.
 
+Independent review approved exact source `9497bd51e287696819a5fe151ee358334fe40cd7`
+for source-only deployment. It is now active on the VM with 52 focused tests
+green and a clean checkout. The pre/post generic config, legacy env, and
+crontab hashes are identical; the generic gate remains `ARMED` and submit,
+schedule, and posttrade flags remain zero. The sealed deployment evidence is
+[`generic_live_dynamic_source_deployment_2026-08-19.json`](evidence/generic_live_dynamic_source_deployment_2026-08-19.json),
+content hash `d4354e2ab1a45d1b23ef46c17d6fd865fd86d67fe1ae01b956142e0f09d42dcf`.
+The dynamic config is deliberately not installed because its reviewed fee
+schedule hash is still unresolved. This deployment grants no runtime or
+activation authority.
+
 A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),
 with its owner brief at

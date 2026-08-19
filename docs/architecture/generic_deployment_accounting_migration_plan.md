@@ -1467,6 +1467,14 @@ and an independently pinned current broker fee schedule. No green proof is
 emitted when a 95% gross or 5% settled-cash reserve check fails. This source is
 not runtime authority and must pass independent review before deployment.
 
+That source review passed at exact SHA
+`9497bd51e287696819a5fe151ee358334fe40cd7`, and the source is deployed on the
+active VM. The deployment changed no config, cron, gate, PAPER authority, or
+broker state; 52 VM focused tests pass. Runtime integration remains blocked on
+connected protected provenance, a reviewed current fee schedule, completed
+2026-08-24 inputs, and explicit 2026-08-25 session authority. See
+[`generic_live_dynamic_source_deployment_2026-08-19.json`](../evidence/generic_live_dynamic_source_deployment_2026-08-19.json).
+
 The Monday rehearsal is sealed at
 [`generic_live_v1_dynamic_monday_rehearsal_20260824.json`](../evidence/generic_live_v1_dynamic_monday_rehearsal_20260824.json),
 content hash
