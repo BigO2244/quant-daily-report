@@ -82,7 +82,7 @@ def _validate_live_owner_policy_binding(
     *, live_owner_decision: Mapping[str, Any],
     policy_proposal: Mapping[str, Any],
     policy_owner_decision: Mapping[str, Any], policy: Mapping[str, Any],
-    execution_session: str,
+    execution_session: str, generated_at: str,
 ) -> dict[str, Any]:
     """Use the independently protected session owner decision as trust anchor."""
 
@@ -93,6 +93,15 @@ def _validate_live_owner_policy_binding(
             "Live owner policy trust anchor is invalid"
         ) from exc
     patch = owner.approved_policy_patch
+    _, proposed = _timestamp(
+        policy_proposal.get("proposed_at"), label="policy proposed_at"
+    )
+    _, policy_decided = _timestamp(
+        policy_owner_decision.get("decided_at"), label="policy decided_at"
+    )
+    _, live_decided = _timestamp(owner.decided_at, label="Live owner decided_at")
+    _, captured = _timestamp(generated_at, label="capture generated_at")
+    _, live_expires = _timestamp(owner.expires_at, label="Live owner expires_at")
     expected = {
         "lyra_evidence_policy_proposal_hash": policy_proposal["content_hash"],
         "lyra_evidence_policy_owner_decision_hash": (
@@ -107,6 +116,7 @@ def _validate_live_owner_policy_binding(
         or any(patch.get(key) != value for key, value in expected.items())
         or policy["owner_decision_hash"] != policy_owner_decision["content_hash"]
         or policy["live_owner_decision_hash"] != owner.content_hash
+        or not proposed <= policy_decided <= live_decided <= captured <= live_expires
     ):
         raise GenericLyraV2ProducerError(
             "Live owner decision does not bind the exact evidence-policy chain"
@@ -392,6 +402,7 @@ def build_generic_lyra_v2_decision_batch(
         policy_owner_decision=policy_owner_decision,
         policy=policy,
         execution_session=trade_date,
+        generated_at=generated_at,
     )
     if (
         selection["frozen_universe_symbols"] != sorted(members)
@@ -625,6 +636,7 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
         policy_owner_decision=policy_owner_decision,
         policy=policy,
         execution_session=str(payload.get("execution_session") or ""),
+        generated_at=str(payload.get("captured_at") or ""),
     )
     session = validate_lyra_governed_session_snapshot(payload.get("session_snapshot"))
     # Revalidate the freeze against the protected prospective session.  This

@@ -175,7 +175,7 @@ def _sources() -> dict:
     risk_policy_proposal = {
         "schema_version": LYRA_RISK_POLICY_PROPOSAL_SCHEMA,
         "proposal_id": "lyra-risk-policy-proposal:test-v1",
-        "proposed_at": "2026-08-19T11:00:00+00:00",
+        "proposed_at": "2026-08-19T01:00:00+00:00",
         "proposed_by": "CAERUS_OPERATING_MODEL_MIGRATION",
         "policy_terms": {
             "sleeve_id": "caerus_lyra", "metric": "annualized_volatility",
@@ -203,7 +203,7 @@ def _sources() -> dict:
         "proposal_id": risk_policy_proposal["proposal_id"],
         "proposal_hash": risk_policy_proposal["content_hash"],
         "decision": "APPROVE", "owner": "Brett Olson",
-        "decided_at": "2026-08-19T12:00:00+00:00",
+        "decided_at": "2026-08-19T02:00:00+00:00",
         "expires_at": "2026-08-26T20:00:00+00:00",
         "execution_authority": False, "activation_authority": False,
     }
@@ -244,7 +244,7 @@ def _sources() -> dict:
         "turnover_formula_id": "FULL_L1_TARGET_WEIGHT_CHANGE_V1",
         "calendar_policy_id": "XNYS_US_EQUITIES_HOLIDAY_RULES_V1",
         "approved_by": "OWNER",
-        "approved_at": "2026-08-19T12:00:00+00:00",
+        "approved_at": "2026-08-19T02:00:00+00:00",
         "effective_from": "2026-08-19",
         "owner_decision_hash": risk_policy_owner_decision["content_hash"],
         "live_owner_decision_hash": live_owner_decision["content_hash"],
@@ -623,6 +623,22 @@ def test_wholly_resealed_policy_chain_cannot_replace_live_owner_anchor() -> None
     })
     policy = arguments["forecast_risk_policy"]
     policy["owner_decision_hash"] = policy_owner["content_hash"]
+    policy["content_hash"] = content_hash({
+        key: value for key, value in policy.items() if key != "content_hash"
+    })
+    with pytest.raises(GenericLyraV2ProducerError, match="evidence-policy chain"):
+        build_generic_lyra_v2_decision_batch(**arguments)
+
+
+def test_future_dated_live_owner_cannot_authorize_earlier_capture() -> None:
+    arguments = _sources()
+    live_owner = arguments["live_owner_decision"]
+    live_owner["decided_at"] = "2026-08-25T12:00:00+00:00"
+    live_owner["content_hash"] = content_hash({
+        key: value for key, value in live_owner.items() if key != "content_hash"
+    })
+    policy = arguments["forecast_risk_policy"]
+    policy["live_owner_decision_hash"] = live_owner["content_hash"]
     policy["content_hash"] = content_hash({
         key: value for key, value in policy.items() if key != "content_hash"
     })
