@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from brokers.alpaca_broker import AlpacaBroker
+from brokers.alpaca_broker import AlpacaBroker, _normalize_asset_obj
 from core.generic_live_dynamic_account import (
     GenericLiveDynamicAccountError,
     build_generic_live_dynamic_account_observation,
@@ -156,3 +156,15 @@ def test_dynamic_strict_read_is_separate_from_shared_paper_account_path():
     assert paper.get_account()["cash"] == "200.00"
     with pytest.raises(RuntimeError, match="cannot use a PAPER broker"):
         paper.get_generic_live_dynamic_account()
+
+
+def test_asset_normalization_preserves_fractional_eligibility_evidence():
+    asset = _normalize_asset_obj({
+        "id": "asset-id", "symbol": "DELL", "name": "Dell",
+        "status": "active", "tradable": True, "fractionable": True,
+        "min_order_size": "0.000001", "min_trade_increment": "0.000001",
+        "asset_class": "us_equity", "exchange": "NYSE",
+    })
+    assert asset["fractionable"] is True
+    assert asset["min_order_size"] == "0.000001"
+    assert asset["min_trade_increment"] == "0.000001"

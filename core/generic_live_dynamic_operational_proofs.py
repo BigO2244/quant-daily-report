@@ -176,6 +176,13 @@ def validate_generic_live_dynamic_operational_proofs(
         status = str(row.get("status") or "").lower().split(".")[-1]
         if str(row.get("symbol") or "").upper() != str(orders[0]["symbol"]).upper() or status != "active" or row.get("tradable") is not True:
             raise GenericLiveDynamicOperationalProofError("fresh asset does not match the exact order")
+        if (
+            exact_plan.get("constraints", {}).get("allow_fractional_shares") is True
+            and row.get("fractionable") is not True
+        ):
+            raise GenericLiveDynamicOperationalProofError(
+                "fresh asset is not proven fractionable"
+            )
     elif asset.get("row") is not None:
         raise GenericLiveDynamicOperationalProofError("NO_TRADE must not invent asset evidence")
 

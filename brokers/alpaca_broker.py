@@ -419,6 +419,21 @@ def _normalize_asset_obj(asset: Any) -> Dict[str, Any]:
         "name": _safe_str(d.get("name") or getattr(asset, "name", "")),
         "status": _safe_str(d.get("status") or getattr(asset, "status", "")),
         "tradable": _safe_bool(d.get("tradable") if "tradable" in d else getattr(asset, "tradable", False)),
+        "fractionable": _safe_bool(
+            d.get("fractionable")
+            if "fractionable" in d
+            else getattr(asset, "fractionable", False)
+        ),
+        "min_order_size": _safe_str(
+            d.get("min_order_size")
+            if "min_order_size" in d
+            else getattr(asset, "min_order_size", "")
+        ),
+        "min_trade_increment": _safe_str(
+            d.get("min_trade_increment")
+            if "min_trade_increment" in d
+            else getattr(asset, "min_trade_increment", "")
+        ),
         "asset_class": _safe_str(d.get("asset_class") or getattr(asset, "asset_class", "")),
         "exchange": _safe_str(d.get("exchange") or getattr(asset, "exchange", "")),
         "raw": d,
