@@ -106,7 +106,7 @@ def _plan(decision: dict) -> dict:
         "risk_policy": {"policy_id": "generic-live-v1-risk"},
         "capital_policy": {
             "policy_id": "generic-live-v1-capital", "capital_basis": "FULL_ACCOUNT_EQUITY",
-            "capital_ceiling": 460.0,
+            "capital_ceiling_usd": 460.0,
         },
         "execution_policy": {
             "policy_id": "generic-live-v1-execution", "order_type": "limit",

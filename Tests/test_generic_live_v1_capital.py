@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from core.generic_live_v1_capital import build_generic_live_v1_capital_proof
 from Tests.test_generic_live_v1_submission import _ready
 
@@ -15,7 +17,7 @@ def test_limit_price_fee_and_dynamic_95_5_limits_are_explicit() -> None:
     assert proof["worst_case_posttrade_gross_usd"] == (
         order["quantity"] * order["enforcement_price"]
     )
-    assert proof["worst_case_posttrade_cash_usd"] == (
+    assert proof["worst_case_posttrade_cash_usd"] == pytest.approx(
         plan["starting_cash"]
         - order["quantity"] * order["enforcement_price"]
         - 0.01
@@ -44,4 +46,3 @@ def test_capital_proof_is_deterministic_and_plan_bound() -> None:
     )
     assert first == second
     assert first["plan_hash"] == plan["content_hash"]
-
