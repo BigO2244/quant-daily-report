@@ -1,0 +1,53 @@
+{
+  "activation_authority": false,
+  "adaptive_allocation": {
+    "first_lane": "SHADOW",
+    "paper_activation_requires_owner_evidence_review": true,
+    "required_migration_scope": true
+  },
+  "content_hash": "deaadea238da9505e5c0a85cb18e1db32303fa12308eb7807a7d3a7f637f0e59",
+  "correction": {
+    "corrected_at": "2026-08-18T20:17:32-04:00",
+    "invalidated_content_hash": "5b6ec1feda6e46c9dbf885c530b5a9db67f64cb7152251dc79329ccf36fd5381",
+    "reason": "LOCAL_LYRA_REGISTRY_EDIT_WAS_NOT_OWNER_AUTHORITY"
+  },
+  "decided_at": "2026-08-18T20:12:49-04:00",
+  "directive_id": "owner-directive-2026-08-18-generic-lane-migration-v1",
+  "execution_authority": false,
+  "live_authority": {
+    "broker_submission_before_preflights": false,
+    "generic_lane_neutral_path_required": true,
+    "kill_switch_target_state": "DISENGAGED_ONLY_AT_VERIFIED_GENERIC_LIVE_CUTOVER",
+    "legacy_live_executor_authorized": false
+  },
+  "orion_authority": {
+    "generic_parity_use_approved": true,
+    "permanent_sleeve_status_granted": false,
+    "role": "FROZEN_LEGACY_PAPER_COMPARISON_FIXTURE_ONLY"
+  },
+  "owner": "Brett Olson",
+  "paper_authority": {
+    "active_generic_authority_state": "NOT_YET_CUT_OVER",
+    "candidate_activation_granted": false,
+    "hold_legacy_runtime_unchanged_until_evidence": true,
+    "legacy_runtime_authority_change_approved": false
+  },
+  "prohibited_actions": [
+    "ACTIVE_PAPER_AUTHORITY_CHANGE_BEFORE_OWNER_EVIDENCE_REVIEW",
+    "BROKER_ORDER_SUBMISSION_BEFORE_ALL_PREFLIGHTS",
+    "BROKER_STATE_MUTATION_BEFORE_ALL_PREFLIGHTS",
+    "LEGACY_LIVE_EXECUTOR_REACTIVATION",
+    "ORION_PERMANENT_SLEEVE_STATUS_INFERENCE"
+  ],
+  "required_preconditions": [
+    "ADAPTIVE_ALLOCATOR_SHADOW_EVIDENCE_RETURNED_TO_OWNER",
+    "GENERIC_LIVE_ENVIRONMENT_ADAPTER_VERIFIED",
+    "GENERIC_ORION_PARITY_EXACT_OR_OWNER_REVIEWED",
+    "IDENTICAL_PAPER_LIVE_SAFETY_RECONCILIATION_ACCOUNTING_GATES",
+    "LIVE_ACCOUNT_PIN_AND_CAPITAL_CEILING_VERIFIED",
+    "OWNER_APPROVES_EFFECTIVE_CUTOVER_SESSION"
+  ],
+  "schema_version": "caerus.owner_migration_directive.v1",
+  "source_instruction_hash": "216041dfc3386e3acef525a5b0d0168160aaf08e0973fb68ec25e18e88cd4cb6",
+  "status": "APPROVED_CONDITIONAL_SCOPE"
+}

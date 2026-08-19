@@ -1,0 +1,90 @@
+{
+  "access_method": "ssh caerus-vm",
+  "account_id_hash": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+  "activation_authority": false,
+  "allocation_hash": "30969d8e5a57bf6e577ae0f514426699845e4193cc827688d046a507d495b621",
+  "allocation_id": "allocation:2026-08-18:6d8f4327c1f8249f9fc6967e",
+  "approved_target_hash": "0c624ec699cafecdd6467476ddeca28d75f2a8fdee7bab43597f5ae3dbca073d",
+  "artifacts": [
+    {
+      "artifact_role": "COMMITTED_ORION_POLICY",
+      "remote_path": "git:1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac:config/research/strategy_registry.json",
+      "sha256": "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd"
+    },
+    {
+      "artifact_role": "SESSION_MANIFEST",
+      "remote_path": "outputs/precompute/2026-08-18/session_manifest.json",
+      "sha256": "7a27c7f57621ce76f030418f02bea325aaed3fbf43281abf4d5b700f762d94aa"
+    },
+    {
+      "artifact_role": "ORION_SOURCE_ARTIFACT",
+      "remote_path": "outputs/shadow_candidates/2026-08-17/caerus_orion.json",
+      "sha256": "01c0f32d4774dc192c0efa6390cb65acf0bc57d7dac8033c222322e91889f73f"
+    },
+    {
+      "artifact_role": "SLEEVE_DECISION_BATCH",
+      "remote_path": "outputs/precompute/2026-08-18/sleeve_decisions.json",
+      "sha256": "3dbaf6fcc3efae9d03b6bca511a343824e39369345cab33bec9a0f475ffc3247"
+    },
+    {
+      "artifact_role": "PORTFOLIO_ALLOCATION",
+      "remote_path": "outputs/precompute/2026-08-18/portfolio_allocation.json",
+      "sha256": "81e69d795f826e8d08d43caeeb993e6e4a72871ea0ba5e79f2a3b8e4baccbfb2"
+    },
+    {
+      "artifact_role": "PAPER_TARGET_PACKAGE",
+      "remote_path": "outputs/precompute/2026-08-18/paper_target_package.json",
+      "sha256": "31c671589b4796822a075951821aac706675b1459579912794af4a88ca1f3201"
+    },
+    {
+      "artifact_role": "EXECUTION_PAYLOAD",
+      "remote_path": "outputs/paper_lane/runs/2026-08-18T20260818T093504-0400_paper_cron_submit/execution_payload.json",
+      "sha256": "ec1a7e50fc720e8956e6234759d7e6a623b3f7dfcb1efd46f18654105269b346"
+    },
+    {
+      "artifact_role": "BROKER_PRETRADE_STATE",
+      "remote_path": "outputs/paper_lane/runs/2026-08-18T20260818T093504-0400_paper_cron_submit/live_pilot_broker_snapshot_pre.json",
+      "sha256": "ad91ea001f0491638d379984dcc062e9de6f2faba9234435553df343b4b467a4"
+    },
+    {
+      "artifact_role": "INTENDED_ORDERS",
+      "remote_path": "outputs/paper_lane/runs/2026-08-18T20260818T093504-0400_paper_cron_submit/live_pilot_orders_intended.json",
+      "sha256": "4a65f364445127927f8d7508d60799e62b2e91c1b16688dee929e64ce11fbca8"
+    }
+  ],
+  "broker_contacted": false,
+  "broker_state_as_of": "2026-08-18T13:35:22+00:00",
+  "broker_submission_allowed": false,
+  "captured_at": "2026-08-19T00:52:30Z",
+  "content_hash": "2ad07325762cc2efcb68e05413b2bf8bba1c730d57d7fd291e26d4d797d24be5",
+  "decision_batch_hash": "650fd2657050e98365b20ae1fa91a8e783afc87ec41c343dba42a59735f02333",
+  "decision_hash": "bb0c2d054bcc983d328ed37f8344ef0917e5887c8096fab985bfa57f3566f158",
+  "decision_id": "sleeve-decision:2026-08-18:caerus_orion:61d7ac69673ba7f49cbca2ce",
+  "exact_plan_hash": "2dc385bb239e096ef59e643b62139dc03027d733d60079a818e941e976190edc",
+  "exact_plan_id": "plan:2026-08-18:7981af134eb9a950cf02cf31",
+  "execution_authority": false,
+  "factual_fixture_hash": "c9d37d63f48282d2421a427f08e0aa3eaee4b31ca07228cdd47196446a498cfb",
+  "factual_fixture_id": "orion-paper-fixture:2026-08-18:60067e5d48e01629e615f4c1",
+  "factual_parity_input_status": "READY",
+  "kill_switch_state": "ARMED",
+  "legacy_runtime_unchanged": true,
+  "live_environment_sha256": "3896bec8adc485a136f1d636fad2b37e6a45c0fcbc86f8095c827ff6d62a3597",
+  "lineage_assertions": {
+    "allocation_binds_decision": true,
+    "broker_state_account_hash_matches_plan": true,
+    "decision_session_matches_manifest": true,
+    "fixture_orders_match_intended_orders": true,
+    "fixture_target_matches_target_package": true,
+    "intended_orders_bind_exact_plan": true,
+    "plan_binds_session_target_allocation_and_decision": true,
+    "target_binds_allocation_and_decision_batch": true
+  },
+  "remote_files_written": false,
+  "remote_repo": "~/quant-daily-report",
+  "schema_version": "caerus.orion_vm_factual_capture_sources.v1",
+  "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+  "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+  "trade_date": "2026-08-18",
+  "vm_head": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+  "vm_status_entry_count": 0
+}

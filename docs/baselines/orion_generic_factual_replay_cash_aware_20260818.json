@@ -1,0 +1,2285 @@
+{
+  "activation_authority": false,
+  "active_paper_runtime": "UNCHANGED_LEGACY_RUNTIME",
+  "broker_call_performed": false,
+  "broker_snapshot": {
+    "account_id_hash": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+    "broker_environment": "alpaca_paper",
+    "captured_at": "2026-08-18T13:35:17+00:00",
+    "cash": 889.14,
+    "content_hash": "8c6cd3aeb9eed7d0960c2849626b802f705badc08ec61eaeba0882b7702ad4a6",
+    "currency": "USD",
+    "equity": 11402.145,
+    "positions": [
+      {
+        "quantity": 24.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "quantity": 24.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "INTC"
+      },
+      {
+        "quantity": 7.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "quantity": 7.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "LRCX"
+      },
+      {
+        "quantity": 2.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "quantity": 2.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "MU"
+      },
+      {
+        "quantity": 2.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "quantity": 2.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "STX"
+      },
+      {
+        "quantity": 4.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "quantity": 4.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "WDC"
+      }
+    ],
+    "price_marks": [
+      {
+        "as_of": "2026-08-18T13:35:17.984927+00:00",
+        "price": 98.13,
+        "symbol": "INTC"
+      },
+      {
+        "as_of": "2026-08-18T13:34:40.042575+00:00",
+        "price": 324.345,
+        "symbol": "LRCX"
+      },
+      {
+        "as_of": "2026-08-18T13:35:17.051612+00:00",
+        "price": 973.815,
+        "symbol": "MU"
+      },
+      {
+        "as_of": "2026-08-18T13:35:04.641068+00:00",
+        "price": 950.28,
+        "symbol": "STX"
+      },
+      {
+        "as_of": "2026-08-18T13:35:15.030200+00:00",
+        "price": 509.82,
+        "symbol": "WDC"
+      }
+    ],
+    "schema_version": "caerus.broker_account_snapshot.v1",
+    "snapshot_id": "broker-snapshot:orion-factual-replay:2026-08-18",
+    "trade_date": "2026-08-18"
+  },
+  "broker_submission_allowed": false,
+  "content_hash": "8a457120158c92fd456fc98681aaa45286ac1c29b5745da9f3be08e3322cb8ad",
+  "decision_batch_v2": {
+    "complete_registry_coverage": true,
+    "content_hash": "2759834a04715cc90b9fd81cf438b36b8de60662d680fd77c7d5c0eab2c30478",
+    "decisions": [
+      {
+        "capacity": {
+          "source_decision_hash": "4c2d075f1589ab856868a661dd76fdaca220ea86f18f24cdb1f7751a0b3b9000",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 0.0,
+        "content_hash": "ae7118adf6e139e3ef1f88423b98f958a49299d3f1524770efebf1ea9b133ae7",
+        "decision_grade": "INCOMPLETE",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_argo:61242bbab18692f1a6f45872",
+        "expected_turnover": 0.0,
+        "forecast_risk": {
+          "source_decision_hash": "4c2d075f1589ab856868a661dd76fdaca220ea86f18f24cdb1f7751a0b3b9000",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "UNAVAILABLE",
+        "reason_codes": [
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_BLOCKED",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "PROFILE_GAPS_EXPLICIT",
+          "SOURCE_DEPENDENCY_BLOCKED"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "caerus_argo",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "4c2d075f1589ab856868a661dd76fdaca220ea86f18f24cdb1f7751a0b3b9000",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "caerus_argo"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "093fca97f5e2b33b893a323c7f69f8a4dc3048a90cda257f947ff559fd442f91",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "caerus_argo"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "8ede73711d9ca2f9dd46eb26a889e3fa9f8a0d8c2e0214832f3b82b7252c2244",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 0.0,
+        "content_hash": "3849ade7175114ef20a71cf05e3948a4751eafcd0ed0bae8941c66dd27912e5a",
+        "decision_grade": "INCOMPLETE",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_cassiopeia:809848334691e87495b125b8",
+        "expected_turnover": 0.0,
+        "forecast_risk": {
+          "source_decision_hash": "8ede73711d9ca2f9dd46eb26a889e3fa9f8a0d8c2e0214832f3b82b7252c2244",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "UNAVAILABLE",
+        "reason_codes": [
+          "CANONICAL_EVENT_DRIVEN_RUNNER_NOT_IMPLEMENTED",
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_BLOCKED",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "GOVERNANCE_BLOCK",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "PROFILE_GAPS_EXPLICIT"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "caerus_cassiopeia",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "8ede73711d9ca2f9dd46eb26a889e3fa9f8a0d8c2e0214832f3b82b7252c2244",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "caerus_cassiopeia"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "d9ad58af5a9390972334cb12d06d785ff48820d6cb8f3a04ecb26647c0d57ce6",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "caerus_cassiopeia"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "a12fe4404decaa79d4d12e106ea0e455789f57483e387eb021aeb7ebf0ccc794",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 0.0,
+        "content_hash": "5c3fe82ffbd8fe62191cd618210f5b3c0406088d8a31db18d81412abe25138ad",
+        "decision_grade": "INCOMPLETE",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_cygnus:8352663419f73e6e6a9c1c2e",
+        "expected_turnover": 0.0,
+        "forecast_risk": {
+          "source_decision_hash": "a12fe4404decaa79d4d12e106ea0e455789f57483e387eb021aeb7ebf0ccc794",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "UNAVAILABLE",
+        "reason_codes": [
+          "CYGNUS_V0_SHELVED_V1_VENDOR_GATED",
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_BLOCKED",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "GOVERNANCE_BLOCK",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "PROFILE_GAPS_EXPLICIT"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "caerus_cygnus",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "a12fe4404decaa79d4d12e106ea0e455789f57483e387eb021aeb7ebf0ccc794",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "caerus_cygnus"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "8925fe9e9d5cbbe1cac701544716f51fef24a2a47d2e07c7dcb3373c5f945889",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "caerus_cygnus"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "599730f65fc2f3e48383841d22367c85f775aaf2a39daa39b6e9fbb3da001a7f",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 1.0,
+        "content_hash": "389c71cd7fe6d6b6dcee9caf35fd2d42e60834097288cd358679b0583edd322f",
+        "decision_grade": "READY",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_lyra:ff4aa9a7fb05d4fe18529aec",
+        "expected_turnover": 1.0,
+        "forecast_risk": {
+          "source_decision_hash": "599730f65fc2f3e48383841d22367c85f775aaf2a39daa39b6e9fbb3da001a7f",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "RECOMMENDATION",
+        "reason_codes": [
+          "CONFIDENCE_IS_SEALED_TARGET_COMPLETENESS",
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_OK",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "OPPORTUNITY_AVAILABLE",
+          "PROFILE_GAPS_EXPLICIT",
+          "TURNOVER_FULL_FROM_CASH_UPPER_BOUND"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "caerus_lyra",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "599730f65fc2f3e48383841d22367c85f775aaf2a39daa39b6e9fbb3da001a7f",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "caerus_lyra"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "fc8360534020e04127a6c3baa4f6e92768ad161ce544eb60406c77ff0ba8fae2",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "caerus_lyra"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [
+          {
+            "symbol": "DELL",
+            "target_weight": 0.2
+          },
+          {
+            "symbol": "INTC",
+            "target_weight": 0.2
+          },
+          {
+            "symbol": "MU",
+            "target_weight": 0.2
+          },
+          {
+            "symbol": "STX",
+            "target_weight": 0.2
+          },
+          {
+            "symbol": "WDC",
+            "target_weight": 0.2
+          }
+        ],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "bb0c2d054bcc983d328ed37f8344ef0917e5887c8096fab985bfa57f3566f158",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 1.0,
+        "content_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+        "decision_grade": "READY",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+        "expected_turnover": 1.0,
+        "forecast_risk": {
+          "source_decision_hash": "bb0c2d054bcc983d328ed37f8344ef0917e5887c8096fab985bfa57f3566f158",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "RECOMMENDATION",
+        "reason_codes": [
+          "CONFIDENCE_IS_SEALED_TARGET_COMPLETENESS",
+          "EVALUATION_STATUS_OK",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "OPPORTUNITY_AVAILABLE",
+          "PROFILE_GAPS_EXPLICIT",
+          "TURNOVER_FULL_FROM_CASH_UPPER_BOUND"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "caerus_orion",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "bb0c2d054bcc983d328ed37f8344ef0917e5887c8096fab985bfa57f3566f158",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "caerus_orion"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "b47edcf3881e53a90a970b190b33c72c2c9c5971a4bea60f138842f9dd48d26b",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [
+          {
+            "symbol": "INTC",
+            "target_weight": 0.2
+          },
+          {
+            "symbol": "LRCX",
+            "target_weight": 0.2
+          },
+          {
+            "symbol": "MU",
+            "target_weight": 0.2
+          },
+          {
+            "symbol": "STX",
+            "target_weight": 0.2
+          },
+          {
+            "symbol": "WDC",
+            "target_weight": 0.2
+          }
+        ],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "be5aa9a78af286a96aeb0f1bb7c53f2ef62c6380a1dba8e106b3c7ec3cad4250",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 1.0,
+        "content_hash": "c9b1a537b182d672c737bfb68c553fb2a23d35f6ba67d1e33f71367851fbefc8",
+        "decision_grade": "READY",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion_alpha:11a3b22cb410527bf3df7f3c",
+        "expected_turnover": 0.9999999999990001,
+        "forecast_risk": {
+          "source_decision_hash": "be5aa9a78af286a96aeb0f1bb7c53f2ef62c6380a1dba8e106b3c7ec3cad4250",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "RECOMMENDATION",
+        "reason_codes": [
+          "CONFIDENCE_IS_SEALED_TARGET_COMPLETENESS",
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_OK",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "OPPORTUNITY_AVAILABLE",
+          "PROFILE_GAPS_EXPLICIT",
+          "TURNOVER_FULL_FROM_CASH_UPPER_BOUND"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "caerus_orion_alpha",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "be5aa9a78af286a96aeb0f1bb7c53f2ef62c6380a1dba8e106b3c7ec3cad4250",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "caerus_orion_alpha"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "0fb7df007173cf813eb2355d4d37db9a00cb6975faa6924e4b355ee0729663e6",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "caerus_orion_alpha"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [
+          {
+            "symbol": "MU",
+            "target_weight": 0.333333333333
+          },
+          {
+            "symbol": "STX",
+            "target_weight": 0.333333333333
+          },
+          {
+            "symbol": "WDC",
+            "target_weight": 0.333333333333
+          }
+        ],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "c2583aee5010b403e5d4656c075ab18c574efba70e8eda226e51e3999b61590f",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 0.0,
+        "content_hash": "132f62361ad06f02a55d65020f92b9616708ee17e3cfe4d1aaab933bf71b15f3",
+        "decision_grade": "INCOMPLETE",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_phoenix:b0737d0d351d5ed32248b414",
+        "expected_turnover": 0.0,
+        "forecast_risk": {
+          "source_decision_hash": "c2583aee5010b403e5d4656c075ab18c574efba70e8eda226e51e3999b61590f",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "UNAVAILABLE",
+        "reason_codes": [
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_BLOCKED",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "PROFILE_GAPS_EXPLICIT",
+          "SOURCE_DEPENDENCY_BLOCKED"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "caerus_phoenix",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "c2583aee5010b403e5d4656c075ab18c574efba70e8eda226e51e3999b61590f",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "caerus_phoenix"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "8190351513cbabd545ca6487e863ee45ef456e3067fc3ea7852eb9a3cce7b2d2",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "caerus_phoenix"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "8ce2a09cd0dcfebba0deee2c2b4146a5b7ed19e5b5f717a5e4bc4101981e2d03",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 1.0,
+        "content_hash": "7bc5e6ec6059a533efc3d9e772694feb1cdf9b1369162edb30bdf6a739ce2e97",
+        "decision_grade": "READY",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_polaris:b3432a87084c73b032001349",
+        "expected_turnover": 1.0,
+        "forecast_risk": {
+          "source_decision_hash": "8ce2a09cd0dcfebba0deee2c2b4146a5b7ed19e5b5f717a5e4bc4101981e2d03",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "RECOMMENDATION",
+        "reason_codes": [
+          "CONFIDENCE_IS_SEALED_TARGET_COMPLETENESS",
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_OK",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "OPPORTUNITY_AVAILABLE",
+          "PROFILE_GAPS_EXPLICIT",
+          "TURNOVER_FULL_FROM_CASH_UPPER_BOUND"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "caerus_polaris",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "8ce2a09cd0dcfebba0deee2c2b4146a5b7ed19e5b5f717a5e4bc4101981e2d03",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "caerus_polaris"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "3d4fb13d90306f9724aeff77e4c62be6ad1fc145edd81dc08230921928b9fa2a",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "caerus_polaris"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [
+          {
+            "symbol": "AMAT",
+            "target_weight": 0.1
+          },
+          {
+            "symbol": "AMD",
+            "target_weight": 0.1
+          },
+          {
+            "symbol": "DELL",
+            "target_weight": 0.1
+          },
+          {
+            "symbol": "FTNT",
+            "target_weight": 0.1
+          },
+          {
+            "symbol": "INTC",
+            "target_weight": 0.1
+          },
+          {
+            "symbol": "LRCX",
+            "target_weight": 0.1
+          },
+          {
+            "symbol": "MU",
+            "target_weight": 0.1
+          },
+          {
+            "symbol": "PANW",
+            "target_weight": 0.1
+          },
+          {
+            "symbol": "STX",
+            "target_weight": 0.1
+          },
+          {
+            "symbol": "WDC",
+            "target_weight": 0.1
+          }
+        ],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "2f2b5d83b068799f34e5bd570876a64843c425add39a7821011e63909e9b988b",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 1.0,
+        "content_hash": "567a0b26ac412f85a481a15f28ec844560647c96ab2344dbf6becd3356347c9e",
+        "decision_grade": "READY",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_polaris_alpha:42752ed93a10023586dde04f",
+        "expected_turnover": 1.0,
+        "forecast_risk": {
+          "source_decision_hash": "2f2b5d83b068799f34e5bd570876a64843c425add39a7821011e63909e9b988b",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "RECOMMENDATION",
+        "reason_codes": [
+          "CONFIDENCE_IS_SEALED_TARGET_COMPLETENESS",
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_OK",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "OPPORTUNITY_AVAILABLE",
+          "PROFILE_GAPS_EXPLICIT",
+          "TURNOVER_FULL_FROM_CASH_UPPER_BOUND"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "caerus_polaris_alpha",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "2f2b5d83b068799f34e5bd570876a64843c425add39a7821011e63909e9b988b",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "caerus_polaris_alpha"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "52ca606604fc4c0870daf31886db210dcd1c7b6a3299bbfbfb15d162101ba73e",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "caerus_polaris_alpha"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [
+          {
+            "symbol": "INTC",
+            "target_weight": 0.25
+          },
+          {
+            "symbol": "MU",
+            "target_weight": 0.25
+          },
+          {
+            "symbol": "STX",
+            "target_weight": 0.25
+          },
+          {
+            "symbol": "WDC",
+            "target_weight": 0.25
+          }
+        ],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "fe435b09d61fa0f1010d78fd83ced88e033fbac51c362c41ca0a362046f0608b",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 0.0,
+        "content_hash": "c214e36e8b6278116f089c9b5e451c651adf1df274903b3267b5122bf8ae6a75",
+        "decision_grade": "INCOMPLETE",
+        "decision_id": "sleeve-decision:v2:2026-08-18:sleeve_2:ab5c9228ef6e37dcf753afa7",
+        "expected_turnover": 0.0,
+        "forecast_risk": {
+          "source_decision_hash": "fe435b09d61fa0f1010d78fd83ced88e033fbac51c362c41ca0a362046f0608b",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "NO_TRADE",
+        "reason_codes": [
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_NO_OPPORTUNITY",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "PROFILE_GAPS_EXPLICIT",
+          "ZERO_FUNCTIONAL_ALLOCATION"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "sleeve_2",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "fe435b09d61fa0f1010d78fd83ced88e033fbac51c362c41ca0a362046f0608b",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "sleeve_2"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "d0f10795127c40ef0bf1ff3b98418dd24c791477d717a370d0d0ddb5172a9363",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "sleeve_2"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "168cb724073c5cb61cf169bd10071160e9cdf8e78375dfb160b4542688f37b47",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 0.0,
+        "content_hash": "b3bd82aae1bce578d50ea1c945b17b160322f2c5e06fb0137c4636191d3baba6",
+        "decision_grade": "INCOMPLETE",
+        "decision_id": "sleeve-decision:v2:2026-08-18:sleeve_defensive_etf:13129f443b2f702a7e0de1eb",
+        "expected_turnover": 0.0,
+        "forecast_risk": {
+          "source_decision_hash": "168cb724073c5cb61cf169bd10071160e9cdf8e78375dfb160b4542688f37b47",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "NO_TRADE",
+        "reason_codes": [
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_NO_OPPORTUNITY",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "PROFILE_GAPS_EXPLICIT",
+          "ZERO_FUNCTIONAL_ALLOCATION"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "sleeve_defensive_etf",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "168cb724073c5cb61cf169bd10071160e9cdf8e78375dfb160b4542688f37b47",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "sleeve_defensive_etf"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "333ff44a940c6e25d9084a8547cc235bec200a704d9fdf48b21044f7a94590ba",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "sleeve_defensive_etf"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "358e1a6b4ff0c0a0dd6ee1d911bcef672a0228b44db8895f79aff765be0064f8",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 0.0,
+        "content_hash": "711c600a7db7c4389a95bb0d3c7e7ca680ff098369c63f9b1613ea531ac940f3",
+        "decision_grade": "INCOMPLETE",
+        "decision_id": "sleeve-decision:v2:2026-08-18:sleeve_mean_reversion:f22696f30027e6cb611b4a6e",
+        "expected_turnover": 0.0,
+        "forecast_risk": {
+          "source_decision_hash": "358e1a6b4ff0c0a0dd6ee1d911bcef672a0228b44db8895f79aff765be0064f8",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "NO_TRADE",
+        "reason_codes": [
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_NO_OPPORTUNITY",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "PROFILE_GAPS_EXPLICIT",
+          "ZERO_FUNCTIONAL_ALLOCATION"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "sleeve_mean_reversion",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "358e1a6b4ff0c0a0dd6ee1d911bcef672a0228b44db8895f79aff765be0064f8",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "sleeve_mean_reversion"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "35b1001a5dbea98654e92eb8edf00847432a47a44abaf1ea923c358d795a78f4",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "sleeve_mean_reversion"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "06a4813d0fe110eac37271fe616be4e7a0a447b8ba0743264afa9401e59f011c",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 0.0,
+        "content_hash": "e3fc4bc799112b48e13da52214fb2800e28a41958ece3c5c3190b55c53361bc2",
+        "decision_grade": "OBSERVATION",
+        "decision_id": "sleeve-decision:v2:2026-08-18:sleeve_quality:637bb4425424d8638b11304e",
+        "expected_turnover": 0.0,
+        "forecast_risk": {
+          "source_decision_hash": "06a4813d0fe110eac37271fe616be4e7a0a447b8ba0743264afa9401e59f011c",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "OBSERVATION",
+        "reason_codes": [
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_OK",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "FUNCTIONAL_ALLOCATION_OBSERVED",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "PROFILE_GAPS_EXPLICIT",
+          "TARGETLESS_DIAGNOSTIC_AS_OBSERVATION"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "sleeve_quality",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "06a4813d0fe110eac37271fe616be4e7a0a447b8ba0743264afa9401e59f011c",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "sleeve_quality"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "1704cb799292e130893f74bda856175dd67addcaf2c9e6338df0fefb9bb15b58",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "sleeve_quality"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "5f3ed3837108f42ea35041d6574e0d095b7b1f4d71751f407e41b57f562e297a",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 0.0,
+        "content_hash": "979cd9772bc2adc8a3ddec7a2a0bedd16b2fb59ef711e111bdbd55a5130801cd",
+        "decision_grade": "INCOMPLETE",
+        "decision_id": "sleeve-decision:v2:2026-08-18:sleeve_trend:2c8dc48076b567594e795bac",
+        "expected_turnover": 0.0,
+        "forecast_risk": {
+          "source_decision_hash": "5f3ed3837108f42ea35041d6574e0d095b7b1f4d71751f407e41b57f562e297a",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "UNAVAILABLE",
+        "reason_codes": [
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_FAILED",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "NON_DECISION_GRADE_UNIVERSE",
+          "PROFILE_GAPS_EXPLICIT",
+          "SLEEVE_INVALID_ROUTED_TO_CASH"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "sleeve_trend",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "5f3ed3837108f42ea35041d6574e0d095b7b1f4d71751f407e41b57f562e297a",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "sleeve_trend"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "77bda3e88f2acfbc5c524d574c30167af0ec48e52f61ef627e5e4e4ac329d838",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "sleeve_trend"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [],
+        "trade_date": "2026-08-18"
+      },
+      {
+        "capacity": {
+          "source_decision_hash": "ea62fc06249fa1fae1f030dd8b4b212297e6f08e0bfcf101785bb3500f15515b",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "confidence": 0.0,
+        "content_hash": "bb7c328557e257b908cea33d5d1d12c47a3cf422c954ccd61849d4feca239360",
+        "decision_grade": "OBSERVATION",
+        "decision_id": "sleeve-decision:v2:2026-08-18:spy_benchmark:bdb2802ff64a9288d9fdb096",
+        "expected_turnover": 0.0,
+        "forecast_risk": {
+          "source_decision_hash": "ea62fc06249fa1fae1f030dd8b4b212297e6f08e0bfcf101785bb3500f15515b",
+          "status": "NOT_RECORDED_IN_LEGACY_V1"
+        },
+        "liquidity_status": "UNKNOWN",
+        "outcome": "OBSERVATION",
+        "reason_codes": [
+          "BENCHMARK_OBSERVED",
+          "EVALUATION_ONLY",
+          "EVALUATION_STATUS_OK",
+          "FACTUAL_LEGACY_V1_REPLAY",
+          "LIQUIDITY_NOT_RECORDED",
+          "PROFILE_GAPS_EXPLICIT"
+        ],
+        "schema_version": "caerus.sleeve_decision.v2",
+        "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+        "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+        "sleeve_id": "spy_benchmark",
+        "source_artifacts": [
+          {
+            "artifact_type": "legacy_sleeve_decision",
+            "content_hash": "ea62fc06249fa1fae1f030dd8b4b212297e6f08e0bfcf101785bb3500f15515b",
+            "schema_version": "caerus.sleeve_decision.v1",
+            "sleeve_id": "spy_benchmark"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_batch",
+            "content_hash": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+            "schema_version": "caerus_all_sleeve_evaluation_v1"
+          },
+          {
+            "artifact_type": "sleeve_evaluation_envelope",
+            "content_hash": "a48dc06294beea3ab2d1ce286d10b0385a5b38f92e9e0ba470c00803824991d1",
+            "schema_version": "caerus_sleeve_evaluation_v1",
+            "sleeve_id": "spy_benchmark"
+          }
+        ],
+        "source_method": "factual_legacy_v1_replay",
+        "target_rows": [],
+        "trade_date": "2026-08-18"
+      }
+    ],
+    "expected_sleeve_ids": [
+      "caerus_argo",
+      "caerus_cassiopeia",
+      "caerus_cygnus",
+      "caerus_lyra",
+      "caerus_orion",
+      "caerus_orion_alpha",
+      "caerus_phoenix",
+      "caerus_polaris",
+      "caerus_polaris_alpha",
+      "sleeve_2",
+      "sleeve_defensive_etf",
+      "sleeve_mean_reversion",
+      "sleeve_quality",
+      "sleeve_trend",
+      "spy_benchmark"
+    ],
+    "generated_at": "2026-08-18T13:35:18+00:00",
+    "schema_version": "caerus.sleeve_decision_batch.v2",
+    "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+    "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+    "trade_date": "2026-08-18"
+  },
+  "decision_derivation_method": "FACTUAL_LEGACY_V1_FORMULAS_V1",
+  "exact_plan_v4": {
+    "account_id_hash": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+    "allocation_hash": "40762e2dfe382d9fefa2e9508902c9504cf39b52ff3b480a9fb008971da2617d",
+    "allocation_id": "lane-allocation:paper:2026-08-18:2320540ac2a9dc7931d4c810",
+    "allocator_policy_hash": "753dc2228f9971921183af61ff9fb222caa45be8a5aead0b605058a318930ed0",
+    "approved_cash_weight": 0.05,
+    "approved_target_hash": "3096227dae5e9dd6cb4d283d70e5f7cf452486c788ed7d3c766ab1c4b35651a2",
+    "approved_target_rows": [
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "INTC",
+        "target_weight": 0.19,
+        "ticker": "INTC"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "LRCX",
+        "target_weight": 0.19,
+        "ticker": "LRCX"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "MU",
+        "target_weight": 0.19,
+        "ticker": "MU"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "STX",
+        "target_weight": 0.19,
+        "ticker": "STX"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "WDC",
+        "target_weight": 0.19,
+        "ticker": "WDC"
+      }
+    ],
+    "broker_environment": "alpaca_paper",
+    "broker_snapshot_captured_at": "2026-08-18T13:35:17+00:00",
+    "broker_snapshot_hash": "8c6cd3aeb9eed7d0960c2849626b802f705badc08ec61eaeba0882b7702ad4a6",
+    "broker_snapshot_id": "broker-snapshot:orion-factual-replay:2026-08-18",
+    "buy_orders": [
+      {
+        "client_order_id": "cx4-e06ebea2621fc576c677836761fc5c997ff10d6",
+        "enforcement_price": 514.91,
+        "estimated_fee": 0.0,
+        "extended_hours": false,
+        "notional": 514.91,
+        "order_id": "order:buy:1:e06ebea2621fc576",
+        "order_type": "limit",
+        "quantity": 1.0,
+        "reference_price": 509.82,
+        "side": "BUY",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "order_fraction": 1.0,
+            "order_quantity": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "WDC",
+        "time_in_force": "day"
+      }
+    ],
+    "capital_basis": "FULL_ACCOUNT_EQUITY",
+    "capital_policy_hash": "9a671b808221913adbe13df44c43b2694e1b5ccec8aadc48486278ae2d40dca3",
+    "constraints": {
+      "allow_extended_hours": false,
+      "allow_fractional_shares": false,
+      "cash_target_tolerance_usd": 7.0921,
+      "fee_per_order_usd": 0.0,
+      "max_adverse_slippage_bps": 100.0,
+      "max_broker_snapshot_age_seconds": 120,
+      "max_price_age_seconds": 120,
+      "max_risk_age_seconds": 120,
+      "maximum_optimizer_candidates": 5000000,
+      "maximum_order_notional_usd": 11402.145,
+      "maximum_orders": 50,
+      "maximum_total_buy_notional_usd": 11402.145,
+      "minimum_cash_weight": 0.025,
+      "minimum_order_notional_usd": 0.0,
+      "order_type": "limit",
+      "plan_ttl_seconds": 120,
+      "policy_id": "factual_legacy_protective_limit_replay",
+      "price_precision": 2,
+      "quantity_precision": 0,
+      "realization_method": "cash_aware_nearest_feasible_v1",
+      "snapshot_reconciliation_tolerance_usd": 7.0921,
+      "time_in_force": "day"
+    },
+    "content_hash": "45e7e6d53dd40acba50aeb0125bd9c192ca095863024e9a0cfbd1a6f7eba5c5b",
+    "deployable_capital": 11402.145,
+    "deployment_version": "deployment:generic-parity-replay:2026-08-18",
+    "execution_authority": false,
+    "execution_policy_hash": "d40802a20b3a45c8fdd1cbf683f5d95f43548581355726aa6f3d8c9bcbb8491a",
+    "expected_posttrade_cash": 568.5300000000001,
+    "expected_posttrade_positions": [
+      {
+        "quantity": 22.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "order_fraction": 1.0,
+            "order_quantity": 22.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "INTC"
+      },
+      {
+        "quantity": 7.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "order_fraction": 1.0,
+            "order_quantity": 7.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "LRCX"
+      },
+      {
+        "quantity": 2.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "order_fraction": 1.0,
+            "order_quantity": 2.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "MU"
+      },
+      {
+        "quantity": 2.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "order_fraction": 1.0,
+            "order_quantity": 2.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "STX"
+      },
+      {
+        "quantity": 5.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "order_fraction": 1.0,
+            "order_quantity": 5.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "WDC"
+      }
+    ],
+    "expires_at": "2026-08-18T13:37:18+00:00",
+    "lane_id": "paper",
+    "lane_kind": "PAPER",
+    "lane_policy_hash": "d98a6e591cc0e5272f1e7fe84c63e47bd651ab4b97c3a50d825350d70eccc294",
+    "plan_id": "lane-plan:paper:2026-08-18:b0ab64a81cffbf98458e799d",
+    "planned_at": "2026-08-18T13:35:18+00:00",
+    "price_marks": [
+      {
+        "as_of": "2026-08-18T13:35:17.984927+00:00",
+        "price": 98.13,
+        "symbol": "INTC"
+      },
+      {
+        "as_of": "2026-08-18T13:34:40.042575+00:00",
+        "price": 324.345,
+        "symbol": "LRCX"
+      },
+      {
+        "as_of": "2026-08-18T13:35:17.051612+00:00",
+        "price": 973.815,
+        "symbol": "MU"
+      },
+      {
+        "as_of": "2026-08-18T13:35:04.641068+00:00",
+        "price": 950.28,
+        "symbol": "STX"
+      },
+      {
+        "as_of": "2026-08-18T13:35:15.030200+00:00",
+        "price": 509.82,
+        "symbol": "WDC"
+      }
+    ],
+    "reconciliation_policy_hash": "14406e10f2b28d5d2022e515a0efd552ad2b5f07d54fc103c92400bc55062512",
+    "risk_decision": "APPROVE",
+    "risk_package_hash": "8d92d8fbbb05786ca5dbb93cbbb62cd08546dff52b7415db129449298f7e177b",
+    "risk_package_id": "lane-risk:paper:2026-08-18:2d2fe2067b60d41dcf529283",
+    "risk_policy_hash": "8593e68d8c7356471d0debc2f8c4075ea88992e0c4678a93f89019a278a2bfc6",
+    "schema_version": "caerus.execution_plan.v4",
+    "sell_orders": [
+      {
+        "client_order_id": "cx4-c362a055a989cc21ea257ee88c4442295199c86",
+        "enforcement_price": 97.15,
+        "estimated_fee": 0.0,
+        "extended_hours": false,
+        "notional": 194.3,
+        "order_id": "order:sell:1:c362a055a989cc21",
+        "order_type": "limit",
+        "quantity": 2.0,
+        "reference_price": 98.13,
+        "side": "SELL",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "order_fraction": 1.0,
+            "order_quantity": 2.0,
+            "quantity": 24.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "INTC",
+        "time_in_force": "day"
+      }
+    ],
+    "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+    "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+    "source_hashes": {
+      "allocation": "40762e2dfe382d9fefa2e9508902c9504cf39b52ff3b480a9fb008971da2617d",
+      "allocator_policy": "753dc2228f9971921183af61ff9fb222caa45be8a5aead0b605058a318930ed0",
+      "approved_target": "3096227dae5e9dd6cb4d283d70e5f7cf452486c788ed7d3c766ab1c4b35651a2",
+      "broker_snapshot": "8c6cd3aeb9eed7d0960c2849626b802f705badc08ec61eaeba0882b7702ad4a6",
+      "capital_policy": "9a671b808221913adbe13df44c43b2694e1b5ccec8aadc48486278ae2d40dca3",
+      "execution_policy": "d40802a20b3a45c8fdd1cbf683f5d95f43548581355726aa6f3d8c9bcbb8491a",
+      "lane_policy": "d98a6e591cc0e5272f1e7fe84c63e47bd651ab4b97c3a50d825350d70eccc294",
+      "reconciliation_policy": "14406e10f2b28d5d2022e515a0efd552ad2b5f07d54fc103c92400bc55062512",
+      "risk_package": "8d92d8fbbb05786ca5dbb93cbbb62cd08546dff52b7415db129449298f7e177b",
+      "risk_policy": "8593e68d8c7356471d0debc2f8c4075ea88992e0c4678a93f89019a278a2bfc6",
+      "session": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+      "target": "3096227dae5e9dd6cb4d283d70e5f7cf452486c788ed7d3c766ab1c4b35651a2",
+      "target_package": "fbdb997b61c921a50370f72af21162f6afc2e9c0720ea6a5ecfbfe3df7edd678"
+    },
+    "starting_cash": 889.14,
+    "starting_equity": 11402.145,
+    "starting_positions": [
+      {
+        "quantity": 24.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "quantity": 24.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "INTC"
+      },
+      {
+        "quantity": 7.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "quantity": 7.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "LRCX"
+      },
+      {
+        "quantity": 2.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "quantity": 2.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "MU"
+      },
+      {
+        "quantity": 2.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "quantity": 2.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "STX"
+      },
+      {
+        "quantity": 4.0,
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "quantity": 4.0,
+            "sleeve_id": "caerus_orion"
+          }
+        ],
+        "symbol": "WDC"
+      }
+    ],
+    "starting_state_hash": "f53c34f7ff1f2840590e6c36427e38745452071452435854acf9719e9cb6df9a",
+    "status": "ADVISORY",
+    "target_hash": "3096227dae5e9dd6cb4d283d70e5f7cf452486c788ed7d3c766ab1c4b35651a2",
+    "target_package_hash": "fbdb997b61c921a50370f72af21162f6afc2e9c0720ea6a5ecfbfe3df7edd678",
+    "target_package_id": "lane-target:paper:2026-08-18:034d97f646a9c8debe96c766",
+    "trade_date": "2026-08-18",
+    "whole_share_realization": {
+      "absolute_tracking_error": 0.08598818906442607,
+      "allocations": [
+        {
+          "projected_weight": 0.18933805875999643,
+          "projected_weight_drift": -0.0006619412400035718,
+          "sleeve_contributions": [
+            {
+              "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+              "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+              "lane_allocation_weight": 1.0,
+              "sleeve_id": "caerus_orion",
+              "sleeve_internal_weight": 0.2,
+              "target_weight": 0.19
+            }
+          ],
+          "symbol": "INTC",
+          "target_quantity": 22.0,
+          "target_weight": 0.19
+        },
+        {
+          "projected_weight": 0.19912174419813114,
+          "projected_weight_drift": 0.009121744198131138,
+          "sleeve_contributions": [
+            {
+              "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+              "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+              "lane_allocation_weight": 1.0,
+              "sleeve_id": "caerus_orion",
+              "sleeve_internal_weight": 0.2,
+              "target_weight": 0.19
+            }
+          ],
+          "symbol": "LRCX",
+          "target_quantity": 7.0,
+          "target_weight": 0.19
+        },
+        {
+          "projected_weight": 0.17081259710343974,
+          "projected_weight_drift": -0.019187402896560263,
+          "sleeve_contributions": [
+            {
+              "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+              "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+              "lane_allocation_weight": 1.0,
+              "sleeve_id": "caerus_orion",
+              "sleeve_internal_weight": 0.2,
+              "target_weight": 0.19
+            }
+          ],
+          "symbol": "MU",
+          "target_quantity": 2.0,
+          "target_weight": 0.19
+        },
+        {
+          "projected_weight": 0.16668442648291176,
+          "projected_weight_drift": -0.02331557351708824,
+          "sleeve_contributions": [
+            {
+              "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+              "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+              "lane_allocation_weight": 1.0,
+              "sleeve_id": "caerus_orion",
+              "sleeve_internal_weight": 0.2,
+              "target_weight": 0.19
+            }
+          ],
+          "symbol": "STX",
+          "target_quantity": 2.0,
+          "target_weight": 0.19
+        },
+        {
+          "projected_weight": 0.22356319797722268,
+          "projected_weight_drift": 0.03356319797722268,
+          "sleeve_contributions": [
+            {
+              "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+              "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+              "lane_allocation_weight": 1.0,
+              "sleeve_id": "caerus_orion",
+              "sleeve_internal_weight": 0.2,
+              "target_weight": 0.19
+            }
+          ],
+          "symbol": "WDC",
+          "target_quantity": 5.0,
+          "target_weight": 0.19
+        }
+      ],
+      "bounded_search_space_candidate_count": 66,
+      "buy_prices": {
+        "INTC": 99.11,
+        "LRCX": 327.58,
+        "MU": 983.55,
+        "STX": 959.78,
+        "WDC": 514.91
+      },
+      "candidate_count_evaluated": 66,
+      "cash_target_error_usd": -1.5772499999999354,
+      "cash_target_status": "WITHIN_TOLERANCE",
+      "cash_target_tolerance_usd": 7.0921,
+      "cash_target_usd": 570.10725,
+      "cash_target_within_tolerance": true,
+      "content_hash": "d42c3e72a1a0528ccda42811e80a5c2513a93c1690d8c0782800ec28d2d1758d",
+      "equity_basis": 11402.145,
+      "feasible_candidate_count": 56,
+      "fee_per_order_usd": 0.0,
+      "incumbent_squared_tracking_error": 0.002121924175202649,
+      "marks": {
+        "INTC": 98.13,
+        "LRCX": 324.345,
+        "MU": 973.815,
+        "STX": 950.28,
+        "WDC": 509.82
+      },
+      "minimum_cash_weight": 0.025,
+      "objective": "MINIMIZE_SQUARED_POSITION_AND_CASH_WEIGHT_TRACKING_ERROR",
+      "objective_bound_position_error_radius": 0.046064348202213584,
+      "projected_cash": 568.5300000000001,
+      "projected_cash_weight": 0.04986167076457983,
+      "projected_order_count": 2,
+      "projected_turnover_including_fees": 709.21,
+      "proof_method": "EXHAUSTIVE_PROVABLY_BOUNDED_PRECISION_GRID",
+      "quantity_precision": 0,
+      "quantity_step": 1.0,
+      "schema_version": "caerus.lane_whole_share_realization.v1",
+      "sell_prices": {
+        "INTC": 97.15,
+        "LRCX": 321.11,
+        "MU": 964.08,
+        "STX": 940.78,
+        "WDC": 504.73
+      },
+      "squared_tracking_error": 0.002121924175202649,
+      "starting_cash": 889.14,
+      "starting_positions_hash": "c06fd8045dc861b2e0bf6d1914e66cdcd7fed9cdf9c04bcb9824571be29b5baa",
+      "status": "PASS",
+      "target_cash_weight": 0.05,
+      "target_rows_hash": "be803a0ab011cac52b8e1b9a0199523c7caa1bde41aaace2455fa0de178f9c11",
+      "tie_breakers": [
+        "absolute_tracking_error",
+        "turnover_including_fees",
+        "order_count",
+        "symbol_quantity_vector"
+      ],
+      "transitions": [
+        {
+          "cash_effect": 194.3,
+          "enforcement_price": 97.15,
+          "estimated_fee": 0.0,
+          "notional": 194.3,
+          "quantity": 2.0,
+          "reference_price": 98.13,
+          "side": "SELL",
+          "symbol": "INTC"
+        },
+        {
+          "cash_effect": -514.91,
+          "enforcement_price": 514.91,
+          "estimated_fee": 0.0,
+          "notional": 514.91,
+          "quantity": 1.0,
+          "reference_price": 509.82,
+          "side": "BUY",
+          "symbol": "WDC"
+        }
+      ]
+    }
+  },
+  "execution_authority": false,
+  "generic_candidate": {
+    "account_id_hash": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+    "activation_authority": false,
+    "as_of": "2026-08-18T13:35:22+00:00",
+    "broker_state_hash": "ad91ea001f0491638d379984dcc062e9de6f2faba9234435553df343b4b467a4",
+    "candidate_id": "generic-parity-candidate:2026-08-18:fa2bfef5829daa756576f846",
+    "candidate_role": "DUAL_COMPUTE_ONLY",
+    "content_hash": "921e6aed7cc8c34b432ef8f09d61557e5a607b52d77719ea57259269aa50a284",
+    "deployment_version": "deployment:generic-parity-replay:2026-08-18",
+    "economic_target": {
+      "positions": [
+        {
+          "symbol": "INTC",
+          "target_weight": 0.19
+        },
+        {
+          "symbol": "LRCX",
+          "target_weight": 0.19
+        },
+        {
+          "symbol": "MU",
+          "target_weight": 0.19
+        },
+        {
+          "symbol": "STX",
+          "target_weight": 0.19
+        },
+        {
+          "symbol": "WDC",
+          "target_weight": 0.19
+        }
+      ],
+      "target_cash_weight": 0.05
+    },
+    "execution_authority": false,
+    "generated_at": "2026-08-18T13:35:18+00:00",
+    "generic_paper_cutover_status": "NOT_YET_CUT_OVER",
+    "orders": [
+      {
+        "limit_price": 514.91,
+        "order_type": "LIMIT",
+        "quantity": 1.0,
+        "side": "BUY",
+        "symbol": "WDC",
+        "time_in_force": "DAY"
+      },
+      {
+        "limit_price": 97.15,
+        "order_type": "LIMIT",
+        "quantity": 2.0,
+        "side": "SELL",
+        "symbol": "INTC",
+        "time_in_force": "DAY"
+      }
+    ],
+    "paper_authority_changed": false,
+    "schema_version": "caerus.generic_parity_candidate.v1",
+    "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+    "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+    "source_artifact_hashes": {
+      "broker_snapshot": "8c6cd3aeb9eed7d0960c2849626b802f705badc08ec61eaeba0882b7702ad4a6",
+      "decision_batch_v2": "2759834a04715cc90b9fd81cf438b36b8de60662d680fd77c7d5c0eab2c30478",
+      "exact_plan_v4": "45e7e6d53dd40acba50aeb0125bd9c192ca095863024e9a0cfbd1a6f7eba5c5b",
+      "lane_allocation": "40762e2dfe382d9fefa2e9508902c9504cf39b52ff3b480a9fb008971da2617d",
+      "lane_target": "fbdb997b61c921a50370f72af21162f6afc2e9c0720ea6a5ecfbfe3df7edd678",
+      "risk_package": "8d92d8fbbb05786ca5dbb93cbbb62cd08546dff52b7415db129449298f7e177b"
+    },
+    "target_substitution_allowed": false,
+    "trade_date": "2026-08-18"
+  },
+  "generic_paper_cutover_status": "NOT_YET_CUT_OVER",
+  "lane_allocation": {
+    "account_id_hash": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+    "allocated_at": "2026-08-18T13:35:18+00:00",
+    "allocation_id": "lane-allocation:paper:2026-08-18:2320540ac2a9dc7931d4c810",
+    "allocator_id": "caerus_paper_allocator",
+    "allocator_policy_hash": "753dc2228f9971921183af61ff9fb222caa45be8a5aead0b605058a318930ed0",
+    "allocator_version": "configured_risk_budget_v1",
+    "broker_environment": "alpaca_paper",
+    "capital_basis": "FULL_ACCOUNT_EQUITY",
+    "constraints": {
+      "sleeve_weight_bounds": [
+        {
+          "maximum_weight": 1.0,
+          "minimum_weight": 0.0,
+          "sleeve_id": "caerus_orion"
+        }
+      ],
+      "target_cash_weight": 0.05,
+      "unavailable_policy": "fail_closed"
+    },
+    "content_hash": "40762e2dfe382d9fefa2e9508902c9504cf39b52ff3b480a9fb008971da2617d",
+    "decision_batch_hash": "2759834a04715cc90b9fd81cf438b36b8de60662d680fd77c7d5c0eab2c30478",
+    "decision_hashes": [
+      "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b"
+    ],
+    "decision_ids": [
+      "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531"
+    ],
+    "deployment_version": "deployment:generic-parity-replay:2026-08-18",
+    "eligible_sleeves": [
+      "caerus_orion"
+    ],
+    "invested_target_weight": 0.95,
+    "lane_id": "paper",
+    "lane_kind": "PAPER",
+    "lane_policy_hash": "d98a6e591cc0e5272f1e7fe84c63e47bd651ab4b97c3a50d825350d70eccc294",
+    "method": "configured_risk_budget",
+    "performance_surface": "REALIZED_PAPER_LEDGER",
+    "policy_hashes": {
+      "allocator": "753dc2228f9971921183af61ff9fb222caa45be8a5aead0b605058a318930ed0",
+      "capital": "9a671b808221913adbe13df44c43b2694e1b5ccec8aadc48486278ae2d40dca3",
+      "execution": "d40802a20b3a45c8fdd1cbf683f5d95f43548581355726aa6f3d8c9bcbb8491a",
+      "lane": "d98a6e591cc0e5272f1e7fe84c63e47bd651ab4b97c3a50d825350d70eccc294",
+      "reconciliation": "14406e10f2b28d5d2022e515a0efd552ad2b5f07d54fc103c92400bc55062512",
+      "risk": "8593e68d8c7356471d0debc2f8c4075ea88992e0c4678a93f89019a278a2bfc6"
+    },
+    "schema_version": "caerus.lane_allocation.v1",
+    "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+    "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+    "sleeve_weights": [
+      {
+        "account_target_weight": 0.95,
+        "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+        "execution_eligible": true,
+        "maximum_weight": 1.0,
+        "minimum_weight": 0.0,
+        "sleeve_id": "caerus_orion",
+        "weight": 1.0
+      }
+    ],
+    "target_cash_weight": 0.05,
+    "targets": [
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "INTC",
+        "target_weight": 0.19,
+        "ticker": "INTC"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "LRCX",
+        "target_weight": 0.19,
+        "ticker": "LRCX"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "MU",
+        "target_weight": 0.19,
+        "ticker": "MU"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "STX",
+        "target_weight": 0.19,
+        "ticker": "STX"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "WDC",
+        "target_weight": 0.19,
+        "ticker": "WDC"
+      }
+    ],
+    "trade_date": "2026-08-18",
+    "unavailable_policy": "fail_closed"
+  },
+  "lane_policy": {
+    "account_id_hash": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+    "allocator_policy": {
+      "allocator_id": "caerus_paper_allocator",
+      "allocator_version": "configured_risk_budget_v1",
+      "method": "configured_risk_budget",
+      "target_cash_weight": 0.05,
+      "unavailable_policy": "fail_closed"
+    },
+    "broker_environment": "alpaca_paper",
+    "capital_policy": {
+      "capital_basis": "FULL_ACCOUNT_EQUITY",
+      "policy_id": "factual_legacy_full_account_replay"
+    },
+    "content_hash": "d98a6e591cc0e5272f1e7fe84c63e47bd651ab4b97c3a50d825350d70eccc294",
+    "deployment_version": "deployment:generic-parity-replay:2026-08-18",
+    "eligible_sleeves": [
+      {
+        "allocation_eligible": true,
+        "execution_eligible": true,
+        "initial_weight": 1.0,
+        "maximum_weight": 1.0,
+        "minimum_weight": 0.0,
+        "observation_enabled": true,
+        "sleeve_id": "caerus_orion"
+      }
+    ],
+    "enabled": true,
+    "execution_policy": {
+      "allow_extended_hours": false,
+      "allow_fractional_shares": false,
+      "cash_target_tolerance_usd": 7.0921,
+      "fee_per_order_usd": 0.0,
+      "max_adverse_slippage_bps": 100.0,
+      "max_broker_snapshot_age_seconds": 120.0,
+      "max_price_age_seconds": 120.0,
+      "max_risk_age_seconds": 120.0,
+      "maximum_optimizer_candidates": 5000000,
+      "maximum_order_notional_usd": 11402.145,
+      "maximum_orders": 50,
+      "maximum_total_buy_notional_usd": 11402.145,
+      "minimum_cash_weight": 0.025,
+      "minimum_order_notional_usd": 0.0,
+      "order_type": "limit",
+      "plan_ttl_seconds": 120.0,
+      "policy_id": "factual_legacy_protective_limit_replay",
+      "price_precision": 2,
+      "quantity_precision": 0,
+      "realization_method": "cash_aware_nearest_feasible_v1",
+      "snapshot_reconciliation_tolerance_usd": 7.0921,
+      "time_in_force": "day"
+    },
+    "lane_id": "paper",
+    "lane_kind": "PAPER",
+    "performance_surface": "REALIZED_PAPER_LEDGER",
+    "reconciliation_policy": {
+      "cash_tolerance_usd": 7.0921,
+      "policy_id": "factual_legacy_tolerance_replay"
+    },
+    "risk_policy": {
+      "policy_id": "factual_legacy_risk_replay",
+      "source_risk_hash": "24a928dd1d23714a884872558ac9b1b9a565374b3cf4a0001bc5ba2f6aad458d"
+    }
+  },
+  "lane_target": {
+    "account_id_hash": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+    "allocation_hash": "40762e2dfe382d9fefa2e9508902c9504cf39b52ff3b480a9fb008971da2617d",
+    "allocation_id": "lane-allocation:paper:2026-08-18:2320540ac2a9dc7931d4c810",
+    "allocator_policy_hash": "753dc2228f9971921183af61ff9fb222caa45be8a5aead0b605058a318930ed0",
+    "authority": "DECISION",
+    "broker_environment": "alpaca_paper",
+    "capital_basis": "FULL_ACCOUNT_EQUITY",
+    "constraints": {
+      "sleeve_weight_bounds": [
+        {
+          "maximum_weight": 1.0,
+          "minimum_weight": 0.0,
+          "sleeve_id": "caerus_orion"
+        }
+      ],
+      "target_cash_weight": 0.05,
+      "unavailable_policy": "fail_closed"
+    },
+    "content_hash": "fbdb997b61c921a50370f72af21162f6afc2e9c0720ea6a5ecfbfe3df7edd678",
+    "decision_batch_hash": "2759834a04715cc90b9fd81cf438b36b8de60662d680fd77c7d5c0eab2c30478",
+    "decision_hashes": [
+      "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b"
+    ],
+    "decision_ids": [
+      "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531"
+    ],
+    "deployment_version": "deployment:generic-parity-replay:2026-08-18",
+    "eligible_sleeves": [
+      "caerus_orion"
+    ],
+    "execution_authority": false,
+    "lane_id": "paper",
+    "lane_kind": "PAPER",
+    "lane_policy_hash": "d98a6e591cc0e5272f1e7fe84c63e47bd651ab4b97c3a50d825350d70eccc294",
+    "performance_surface": "REALIZED_PAPER_LEDGER",
+    "policy_hashes": {
+      "allocator": "753dc2228f9971921183af61ff9fb222caa45be8a5aead0b605058a318930ed0",
+      "capital": "9a671b808221913adbe13df44c43b2694e1b5ccec8aadc48486278ae2d40dca3",
+      "execution": "d40802a20b3a45c8fdd1cbf683f5d95f43548581355726aa6f3d8c9bcbb8491a",
+      "lane": "d98a6e591cc0e5272f1e7fe84c63e47bd651ab4b97c3a50d825350d70eccc294",
+      "reconciliation": "14406e10f2b28d5d2022e515a0efd552ad2b5f07d54fc103c92400bc55062512",
+      "risk": "8593e68d8c7356471d0debc2f8c4075ea88992e0c4678a93f89019a278a2bfc6"
+    },
+    "risk_status": "PENDING",
+    "schema_version": "caerus.lane_target_package.v1",
+    "sealed_at": "2026-08-18T13:35:18+00:00",
+    "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+    "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+    "sleeve_weights": [
+      {
+        "account_target_weight": 0.95,
+        "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+        "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+        "execution_eligible": true,
+        "maximum_weight": 1.0,
+        "minimum_weight": 0.0,
+        "sleeve_id": "caerus_orion",
+        "weight": 1.0
+      }
+    ],
+    "source_hashes": {
+      "allocator_policy": "753dc2228f9971921183af61ff9fb222caa45be8a5aead0b605058a318930ed0",
+      "decision_batch": "2759834a04715cc90b9fd81cf438b36b8de60662d680fd77c7d5c0eab2c30478",
+      "lane_allocation": "40762e2dfe382d9fefa2e9508902c9504cf39b52ff3b480a9fb008971da2617d",
+      "lane_policy": "d98a6e591cc0e5272f1e7fe84c63e47bd651ab4b97c3a50d825350d70eccc294"
+    },
+    "target_cash_weight": 0.05,
+    "target_hash": "3096227dae5e9dd6cb4d283d70e5f7cf452486c788ed7d3c766ab1c4b35651a2",
+    "target_package_id": "lane-target:paper:2026-08-18:034d97f646a9c8debe96c766",
+    "target_rows": [
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "INTC",
+        "target_weight": 0.19,
+        "ticker": "INTC"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "LRCX",
+        "target_weight": 0.19,
+        "ticker": "LRCX"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "MU",
+        "target_weight": 0.19,
+        "ticker": "MU"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "STX",
+        "target_weight": 0.19,
+        "ticker": "STX"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "WDC",
+        "target_weight": 0.19,
+        "ticker": "WDC"
+      }
+    ],
+    "trade_date": "2026-08-18"
+  },
+  "parity_evidence": {
+    "account_id_hash": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+    "activation_authority": false,
+    "active_paper_authority_change_authorized": false,
+    "active_paper_runtime": "UNCHANGED_LEGACY_RUNTIME",
+    "as_of": "2026-08-18T13:35:22+00:00",
+    "broker_state_hash": "ad91ea001f0491638d379984dcc062e9de6f2faba9234435553df343b4b467a4",
+    "compared_at": "2026-08-19T02:15:00Z",
+    "comparison_id": "dual-compute:2026-08-18:fae9dc80d1a35d6da5a03cc5",
+    "comparison_method": "EXACT_NORMALIZED_ECONOMICS_V1",
+    "content_hash": "7d157357247788666e6ac5836d31958119e2a4bd553a5b5f62bcaf0077483362",
+    "deployment_version": "deployment:generic-parity-replay:2026-08-18",
+    "differences": [],
+    "execution_authority": false,
+    "generic_candidate_hash": "921e6aed7cc8c34b432ef8f09d61557e5a607b52d77719ea57259269aa50a284",
+    "generic_candidate_id": "generic-parity-candidate:2026-08-18:fa2bfef5829daa756576f846",
+    "generic_paper_cutover_status": "NOT_YET_CUT_OVER",
+    "legacy_fixture_hash": "c9d37d63f48282d2421a427f08e0aa3eaee4b31ca07228cdd47196446a498cfb",
+    "legacy_fixture_id": "orion-paper-fixture:2026-08-18:60067e5d48e01629e615f4c1",
+    "order_parity": true,
+    "owner_review_required": false,
+    "paper_authority_changed": false,
+    "parity_status": "EXACT_PARITY",
+    "schema_version": "caerus.dual_compute_parity.v1",
+    "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+    "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+    "target_parity": true,
+    "target_substitution_allowed": false,
+    "trade_date": "2026-08-18"
+  },
+  "remote_files_written": false,
+  "risk_package": {
+    "account_id_hash": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+    "account_state_hash": "8c6cd3aeb9eed7d0960c2849626b802f705badc08ec61eaeba0882b7702ad4a6",
+    "allocation_hash": "40762e2dfe382d9fefa2e9508902c9504cf39b52ff3b480a9fb008971da2617d",
+    "allocation_id": "lane-allocation:paper:2026-08-18:2320540ac2a9dc7931d4c810",
+    "allocator_policy_hash": "753dc2228f9971921183af61ff9fb222caa45be8a5aead0b605058a318930ed0",
+    "approved_cash_weight": 0.05,
+    "approved_target_hash": "3096227dae5e9dd6cb4d283d70e5f7cf452486c788ed7d3c766ab1c4b35651a2",
+    "approved_target_rows": [
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "INTC",
+        "target_weight": 0.19,
+        "ticker": "INTC"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "LRCX",
+        "target_weight": 0.19,
+        "ticker": "LRCX"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "MU",
+        "target_weight": 0.19,
+        "ticker": "MU"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "STX",
+        "target_weight": 0.19,
+        "ticker": "STX"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "WDC",
+        "target_weight": 0.19,
+        "ticker": "WDC"
+      }
+    ],
+    "authority": "RISK",
+    "capital_basis": "FULL_ACCOUNT_EQUITY",
+    "capital_policy_hash": "9a671b808221913adbe13df44c43b2694e1b5ccec8aadc48486278ae2d40dca3",
+    "constraints": {},
+    "content_hash": "8d92d8fbbb05786ca5dbb93cbbb62cd08546dff52b7415db129449298f7e177b",
+    "decision": "APPROVE",
+    "decision_target_cash_weight": 0.05,
+    "decision_target_rows": [
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "INTC",
+        "target_weight": 0.19,
+        "ticker": "INTC"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "LRCX",
+        "target_weight": 0.19,
+        "ticker": "LRCX"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "MU",
+        "target_weight": 0.19,
+        "ticker": "MU"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "STX",
+        "target_weight": 0.19,
+        "ticker": "STX"
+      },
+      {
+        "sleeve": "caerus_orion",
+        "sleeve_contributions": [
+          {
+            "decision_hash": "f484660bd077c2f92ff3435c06aced2672968e245270149a9479ce7488d8616b",
+            "decision_id": "sleeve-decision:v2:2026-08-18:caerus_orion:2b8779aa514e88ca7aacc531",
+            "lane_allocation_weight": 1.0,
+            "sleeve_id": "caerus_orion",
+            "sleeve_internal_weight": 0.2,
+            "target_weight": 0.19
+          }
+        ],
+        "symbol": "WDC",
+        "target_weight": 0.19,
+        "ticker": "WDC"
+      }
+    ],
+    "deployment_version": "deployment:generic-parity-replay:2026-08-18",
+    "evaluated_at": "2026-08-18T13:35:17+00:00",
+    "execution_authority": false,
+    "execution_policy_hash": "d40802a20b3a45c8fdd1cbf683f5d95f43548581355726aa6f3d8c9bcbb8491a",
+    "lane_id": "paper",
+    "lane_kind": "PAPER",
+    "lane_policy_hash": "d98a6e591cc0e5272f1e7fe84c63e47bd651ab4b97c3a50d825350d70eccc294",
+    "reason_codes": [
+      "FACTUAL_LEGACY_RISK_APPROVAL_REPLAY"
+    ],
+    "reconciliation_policy_hash": "14406e10f2b28d5d2022e515a0efd552ad2b5f07d54fc103c92400bc55062512",
+    "risk_package_id": "lane-risk:paper:2026-08-18:2d2fe2067b60d41dcf529283",
+    "risk_policy_hash": "8593e68d8c7356471d0debc2f8c4075ea88992e0c4678a93f89019a278a2bfc6",
+    "schema_version": "caerus.lane_risk_package.v1",
+    "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+    "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+    "source_hashes": {
+      "account_id": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+      "account_state": "8c6cd3aeb9eed7d0960c2849626b802f705badc08ec61eaeba0882b7702ad4a6",
+      "allocation": "40762e2dfe382d9fefa2e9508902c9504cf39b52ff3b480a9fb008971da2617d",
+      "allocator_policy": "753dc2228f9971921183af61ff9fb222caa45be8a5aead0b605058a318930ed0",
+      "capital_policy": "9a671b808221913adbe13df44c43b2694e1b5ccec8aadc48486278ae2d40dca3",
+      "execution_policy": "d40802a20b3a45c8fdd1cbf683f5d95f43548581355726aa6f3d8c9bcbb8491a",
+      "lane_policy": "d98a6e591cc0e5272f1e7fe84c63e47bd651ab4b97c3a50d825350d70eccc294",
+      "reconciliation_policy": "14406e10f2b28d5d2022e515a0efd552ad2b5f07d54fc103c92400bc55062512",
+      "risk_policy": "8593e68d8c7356471d0debc2f8c4075ea88992e0c4678a93f89019a278a2bfc6",
+      "session": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+      "target": "3096227dae5e9dd6cb4d283d70e5f7cf452486c788ed7d3c766ab1c4b35651a2",
+      "target_package": "fbdb997b61c921a50370f72af21162f6afc2e9c0720ea6a5ecfbfe3df7edd678"
+    },
+    "target_hash": "3096227dae5e9dd6cb4d283d70e5f7cf452486c788ed7d3c766ab1c4b35651a2",
+    "target_package_hash": "fbdb997b61c921a50370f72af21162f6afc2e9c0720ea6a5ecfbfe3df7edd678",
+    "target_package_id": "lane-target:paper:2026-08-18:034d97f646a9c8debe96c766",
+    "trade_date": "2026-08-18"
+  },
+  "schema_version": "caerus.orion_generic_factual_replay.v1",
+  "source_hashes": {
+    "evaluation_batch": "24970f3efe0e902b5ffc2d4d73732f981c903c805df8060b3ef68a5d6dd48d7c",
+    "execution_payload": "d7ccba76af4d527b33bfb72d094126cfc9891437ae6ea88ba4a14b66844c5eaf",
+    "legacy_decision_batch": "650fd2657050e98365b20ae1fa91a8e783afc87ec41c343dba42a59735f02333",
+    "legacy_fixture": "c9d37d63f48282d2421a427f08e0aa3eaee4b31ca07228cdd47196446a498cfb",
+    "vm_source_manifest": "2ad07325762cc2efcb68e05413b2bf8bba1c730d57d7fd291e26d4d797d24be5"
+  }
+}

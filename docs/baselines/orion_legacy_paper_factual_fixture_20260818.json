@@ -1,0 +1,161 @@
+{
+  "account_id_hash": "7fd6e59e93a37648f756d0a82492f32d990dba559809c8763a3d9f4354efa1bb",
+  "activation_authority": false,
+  "active_paper_authority_change_authorized": false,
+  "as_of": "2026-08-18T13:35:22+00:00",
+  "assigns_current_deployment_status": false,
+  "baseline_scope": "COMMITTED_LEGACY_ECONOMICS_ONLY",
+  "broker_state_hash": "ad91ea001f0491638d379984dcc062e9de6f2faba9234435553df343b4b467a4",
+  "captured_at": "2026-08-19T00:52:30Z",
+  "committed_legacy_source_hash": "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd",
+  "comparison_sleeve_id": "caerus_orion",
+  "content_hash": "c9d37d63f48282d2421a427f08e0aa3eaee4b31ca07228cdd47196446a498cfb",
+  "economic_target": {
+    "positions": [
+      {
+        "symbol": "INTC",
+        "target_weight": 0.19
+      },
+      {
+        "symbol": "LRCX",
+        "target_weight": 0.19
+      },
+      {
+        "symbol": "MU",
+        "target_weight": 0.19
+      },
+      {
+        "symbol": "STX",
+        "target_weight": 0.19
+      },
+      {
+        "symbol": "WDC",
+        "target_weight": 0.19
+      }
+    ],
+    "target_cash_weight": 0.05
+  },
+  "execution_authority": false,
+  "fixture_id": "orion-paper-fixture:2026-08-18:60067e5d48e01629e615f4c1",
+  "fixture_role": "FROZEN_LEGACY_COMPARISON",
+  "generic_paper_cutover_status": "NOT_YET_CUT_OVER",
+  "legacy_policy": {
+    "account_target_attainment_policy": {
+      "account_scope": "PAPER",
+      "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+      "fixed_drift_tolerance": 0.02,
+      "minimum_cash_weight": 0.025,
+      "nearest_feasible_required": true,
+      "owner_approved_at": "2026-08-11",
+      "schema_version": "caerus.target_attainment_policy.v1",
+      "share_mode": "WHOLE_SHARES",
+      "strict_green_propagation": true,
+      "target_cash_weight": 0.05
+    },
+    "allocator_id": "caerus_paper_allocator",
+    "allocator_version": "configured_risk_budget_v1",
+    "governance": {
+      "automatic_promotion_enabled": false,
+      "capital_eligibility_requires_owner_approval": true,
+      "current_primary_sleeve": "caerus_orion",
+      "live_enabled": false
+    },
+    "method": "configured_risk_budget",
+    "schema_version": "caerus.paper_allocation_policy.v1",
+    "sleeve_risk_budgets": {
+      "caerus_orion": 1.0
+    },
+    "source_freshness": {
+      "allowed_sessions": "CURRENT_OR_PREVIOUS_TRADING_SESSION",
+      "calendar": "XNYS",
+      "max_trading_session_lag": 1
+    },
+    "target_cash_weight": 0.05,
+    "unavailable_policy": "fail_closed"
+  },
+  "legacy_policy_hash": "1c5bf03522f76fcf4039028b5364d49c6c10f0a4496972ac976a90223f5a2059",
+  "orders": [
+    {
+      "limit_price": 514.91,
+      "order_type": "LIMIT",
+      "quantity": 1.0,
+      "side": "BUY",
+      "symbol": "WDC",
+      "time_in_force": "DAY"
+    },
+    {
+      "limit_price": 97.15,
+      "order_type": "LIMIT",
+      "quantity": 2.0,
+      "side": "SELL",
+      "symbol": "INTC",
+      "time_in_force": "DAY"
+    }
+  ],
+  "orion_decision": {
+    "allocation_hint": null,
+    "capital_eligible": true,
+    "content_hash": "bb0c2d054bcc983d328ed37f8344ef0917e5887c8096fab985bfa57f3566f158",
+    "decision_id": "sleeve-decision:2026-08-18:caerus_orion:61d7ac69673ba7f49cbca2ce",
+    "display_name": "Caerus Orion",
+    "effective_as_of": "2026-08-17",
+    "execution_eligible": true,
+    "family": "core_momentum",
+    "lifecycle_status": "paper",
+    "message": "existing shadow opportunity snapshot observed",
+    "mode": "PAPER",
+    "outcome": "RECOMMENDATION",
+    "reason_codes": [
+      "NON_DECISION_GRADE_UNIVERSE",
+      "OPPORTUNITY_AVAILABLE"
+    ],
+    "schema_version": "caerus.sleeve_decision.v1",
+    "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+    "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+    "sleeve_id": "caerus_orion",
+    "source_artifacts": [
+      {
+        "exists": true,
+        "path": "outputs/shadow_candidates/2026-08-17/caerus_orion.json",
+        "sha256": "01c0f32d4774dc192c0efa6390cb65acf0bc57d7dac8033c222322e91889f73f"
+      }
+    ],
+    "source_cash_weight": 0.0,
+    "source_variant": "h2_rank_decay_exit_h6_top5",
+    "strategy_type": "security_selection",
+    "target_rows": [
+      {
+        "source_target_weight": 0.2,
+        "symbol": "INTC",
+        "target_weight": 0.2
+      },
+      {
+        "source_target_weight": 0.2,
+        "symbol": "LRCX",
+        "target_weight": 0.2
+      },
+      {
+        "source_target_weight": 0.2,
+        "symbol": "MU",
+        "target_weight": 0.2
+      },
+      {
+        "source_target_weight": 0.2,
+        "symbol": "STX",
+        "target_weight": 0.2
+      },
+      {
+        "source_target_weight": 0.2,
+        "symbol": "WDC",
+        "target_weight": 0.2
+      }
+    ],
+    "trade_date": "2026-08-18"
+  },
+  "orion_decision_hash": "bb0c2d054bcc983d328ed37f8344ef0917e5887c8096fab985bfa57f3566f158",
+  "paper_authority_changed": false,
+  "schema_version": "caerus.orion_legacy_paper_fixture.v1",
+  "session_hash": "a7c9d7166b568873fc2785def8f6981bf2f6590afd4610c11a3bc17da11cf295",
+  "session_id": "session:2026-08-18:d3eb9ae8a61f5e04fef93308",
+  "trade_date": "2026-08-18"
+}

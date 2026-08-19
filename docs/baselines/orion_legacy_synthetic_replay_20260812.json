@@ -1,0 +1,117 @@
+{
+  "activation_authority": false,
+  "active_paper_authority_change_authorized": false,
+  "committed_revision": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+  "committed_source_hashes": {
+    "Tests/test_exact_execution_choice2.py": "6a8587693715633c3dd829453d410a09224863fed9e1ee776016aea0a0038df0",
+    "authority/exact_plan.py": "34d2a8165a0cf9f54cbde47e5e95f246c8162f220b1f8e10d63d708fd72ac131",
+    "config/research/strategy_registry.json": "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd",
+    "core/regime_state_store.py": "11bd79e02593278afe9ab5fc7742253b0f1d9388574510c99718fe8d5636af4c"
+  },
+  "comparison_sleeve_id": "caerus_orion",
+  "content_hash": "19aa8014cebd49cda11dafc5782ddb3484d2f3ca556872ec93d6c82dd1a34dcc",
+  "economic_target": {
+    "positions": [
+      {
+        "symbol": "AAPL",
+        "target_weight": 0.1
+      }
+    ],
+    "target_cash_weight": 0.9
+  },
+  "eligible_for_factual_cutover": false,
+  "evidence_class": "SYNTHETIC_REPLAY",
+  "exact_plan_descriptor": {
+    "account_id_hash": "85dff1aca37dc7a9ebf92059fb804b158c9204541d937a90c9f53f95ac56b7d4",
+    "account_scope": "PAPER",
+    "content_hash": "447ca23a0bef01be392be0ed2618fb698b03f38a6f3448241a4467978da3b541",
+    "plan_id": "plan:2026-08-12:e3c994b36e3b3730cba65409",
+    "schema_version": "caerus.execution_plan.v3",
+    "source_artifact_hashes": {
+      "precompute": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "starting_state_hash": "8b7fbfb956c9531bf6999a8bd025739879f7a33d500297ce0ce5914f96c0000e",
+    "strategy_id": "caerus_orion"
+  },
+  "execution_authority": false,
+  "factual_parity_status": "BLOCKED",
+  "factual_return_evidence": false,
+  "fixture_id": "orion-synthetic-replay:2026-08-12:fd5a78d688d12951cb9505ba",
+  "generated_at": "2026-08-19T00:23:11Z",
+  "generic_paper_cutover_status": "NOT_YET_CUT_OVER",
+  "historical_broker_evidence": false,
+  "missing_factual_fields": [
+    "factual_orion_decision_id_and_content_hash",
+    "factual_pretrade_account_as_of_cash_and_positions",
+    "factual_approved_cash_and_symbol_target_weights",
+    "factual_complete_intended_order_economics_and_plan_lineage"
+  ],
+  "orders": [
+    {
+      "limit_price": 100.0,
+      "order_type": "LIMIT",
+      "quantity": 1.0,
+      "side": "SELL",
+      "source_client_order_id": "cx-5492becf46ba205aeca2b396293bee787e27d84c",
+      "source_order_id": "order:sell:1:5492becf46ba205a",
+      "symbol": "OLD",
+      "time_in_force": "DAY"
+    },
+    {
+      "limit_price": 50.0,
+      "order_type": "LIMIT",
+      "quantity": 2.0,
+      "side": "BUY",
+      "source_client_order_id": "cx-903374643f55f4f6de0958573cd5a0564ccd5ab3",
+      "source_order_id": "order:buy:1:903374643f55f4f6",
+      "symbol": "AAPL",
+      "time_in_force": "DAY"
+    }
+  ],
+  "paper_authority_changed": false,
+  "replay_inputs": {
+    "comparison_marks": {
+      "AAPL": 50.0
+    },
+    "constraints": {
+      "capital_cap_usd": 1000.0,
+      "cash_reconciliation_tolerance_usd": 0.01,
+      "max_adverse_fill_slippage_bps": 100.0,
+      "max_orders": 2,
+      "new_order_execution_style": "protective_day_limit"
+    },
+    "expected_posttrade_cash": 900.0,
+    "expected_posttrade_positions": [
+      {
+        "quantity": 2.0,
+        "symbol": "AAPL"
+      }
+    ],
+    "portfolio_nav": 1000.0,
+    "sleeve_allocations": [
+      {
+        "capital_eligible": true,
+        "sleeve_id": "caerus_orion",
+        "weight": 1.0
+      }
+    ],
+    "starting_cash": 900.0,
+    "starting_positions": [
+      {
+        "quantity": 1.0,
+        "symbol": "OLD"
+      }
+    ]
+  },
+  "replay_purpose": "STRUCTURAL_COMPARISON_ONLY",
+  "schema_version": "caerus.orion_legacy_synthetic_replay.v1",
+  "source_builder": {
+    "broker_submission": false,
+    "fixture": "Tests.test_exact_execution_choice2._plan",
+    "function": "build_exact_execution_plan",
+    "module": "authority.exact_plan"
+  },
+  "structural_replay_status": "REPRODUCIBLE",
+  "target_substitution_allowed": false,
+  "trade_date": "2026-08-12"
+}

@@ -1,0 +1,47 @@
+{
+  "schema_version": "caerus.generic_live_no_submit_staging_deployment.v1",
+  "recorded_at": "2026-08-19T00:53:28Z",
+  "status": "STAGED_NO_SUBMIT",
+  "source_deployed_sha": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+  "branch": "codex/generic-live-no-submit-staging-20260818",
+  "commit_sha": "13f07fdd34e819d3b1c211c421c683445049dcfa",
+  "remote_ref": "refs/heads/codex/generic-live-no-submit-staging-20260818",
+  "remote_ref_sha": "13f07fdd34e819d3b1c211c421c683445049dcfa",
+  "staging": {
+    "host_alias": "caerus-vm",
+    "path": "$HOME/caerus-staging/generic-live-no-submit-13f07fd",
+    "head_sha": "13f07fdd34e819d3b1c211c421c683445049dcfa",
+    "branch": "codex/generic-live-no-submit-staging-20260818",
+    "upstream": "origin/codex/generic-live-no-submit-staging-20260818",
+    "dirty_entry_count": 0
+  },
+  "validation": {
+    "focused_test_count": 41,
+    "focused_test_status": "PASS",
+    "default_disabled_no_action_test_status": "PASS",
+    "python_compile_status": "PASS",
+    "legacy_executor_reachable": false,
+    "default_scheduler_status": "DISABLED_NO_ACTION",
+    "broker_submission_allowed": false
+  },
+  "active_vm_unchanged_proof": {
+    "active_head_sha": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+    "active_dirty_entry_count": 0,
+    "cron_wrapper_hash": "5dc4d92edfe4d410fb8a4734c1f2f511f33bdc9ba6ecb83570318fd0c418991f",
+    "legacy_executor_hash": "dc414be8d6387db933d35f3f7c8a3abca041fea5cd53597d06564d27c7bd8053",
+    "live_environment_hash": "3896bec8adc485a136f1d636fad2b37e6a45c0fcbc86f8095c827ff6d62a3597",
+    "crontab_hash": "e053c2ea0de7738798705f11556db9c69c6beabab59b1cd3c631f53b37ce6033",
+    "generic_schedule_entry_count": 0
+  },
+  "rollback_removal_command": "ssh caerus-vm 'set -euo pipefail; P=\"$HOME/caerus-staging/generic-live-no-submit-13f07fd\"; Q=\"$HOME/caerus-staging/quarantine/generic-live-no-submit-13f07fd\"; test \"$(git -C \"$P\" rev-parse HEAD)\" = \"13f07fdd34e819d3b1c211c421c683445049dcfa\"; test ! -e \"$Q\"; mkdir -p \"$(dirname \"$Q\")\"; mv \"$P\" \"$Q\"'",
+  "rollback_is_recoverable": true,
+  "active_config_mutated": false,
+  "active_schedule_mutated": false,
+  "active_repository_mutated": false,
+  "broker_call_performed": false,
+  "broker_write_performed": false,
+  "kill_switch_mutated": false,
+  "execution_authority": false,
+  "activation_authority": false,
+  "content_hash": "52b674a8c47287b741875de87aef502099cbfeb2995661e056f397c3228e0e87"
+}

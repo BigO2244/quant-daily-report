@@ -1,0 +1,82 @@
+{
+  "schema_version": "caerus.adaptive_shadow_owner_policy_candidate.v1",
+  "candidate_id": "adaptive-shadow-v1-conservative-2026-08-18",
+  "status": "PENDING_OWNER_APPROVAL",
+  "owner_directive_hash": "deaadea238da9505e5c0a85cb18e1db32303fa12308eb7807a7d3a7f637f0e59",
+  "registry_revision": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+  "registry_hash": "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd",
+  "lane_kind": "SHADOW",
+  "eligible_set_rule": {
+    "source": "intersection of owner-approved Shadow deployment membership and the hash-bound registry revision",
+    "must_all_hold": [
+      "status=shadow",
+      "eligible_for_shadow=true",
+      "execution_impact=NON_EXECUTIONAL",
+      "role in {baseline,challenger}",
+      "complete causal sleeve-decision-v2 coverage",
+      "minimum history, freshness, capacity, liquidity, and lineage gates pass"
+    ],
+    "permanently_excluded_ids": ["caerus_orion", "spy_benchmark"],
+    "minimum_valid_sessions": 60,
+    "minimum_consecutive_green_sessions": 20,
+    "maximum_signal_age_hours": 18,
+    "expected_initial_set_if_all_gates_pass": ["caerus_lyra", "caerus_polaris"],
+    "no_silent_renormalization": true
+  },
+  "initial_allocation": {
+    "caerus_lyra": 0.5,
+    "caerus_polaris": 0.5
+  },
+  "objective": {
+    "method": "maximize normalized causal risk-adjusted expected excess return net of turnover costs and overlap",
+    "lookback_sessions": 60,
+    "benchmark": "SPY",
+    "normalized_component_weights": {
+      "expected_excess_return": 0.45,
+      "forecast_volatility_penalty": 0.25,
+      "expected_shortfall_95_penalty": 0.15,
+      "turnover_cost_penalty": 0.10,
+      "holdings_overlap_penalty": 0.05
+    },
+    "tie_break_order": ["higher evidence quality", "lower estimated cost", "lower overlap", "lexical sleeve_id"]
+  },
+  "constraints": {
+    "numeric_limits": {
+      "minimum_sleeve_weight": 0.4,
+      "maximum_sleeve_weight": 0.6,
+      "maximum_one_way_turnover_per_session": 0.1,
+      "maximum_rolling_20_session_turnover": 0.25,
+      "maximum_pairwise_holdings_overlap": 0.7,
+      "maximum_aggregate_security_weight": 0.25,
+      "maximum_aggregate_industry_weight": 0.4,
+      "maximum_order_fraction_of_adv": 0.01,
+      "maximum_liquidation_days_at_five_percent_adv": 1.0,
+      "minimum_capacity_multiple": 20.0
+    },
+    "no_leverage": true,
+    "no_shorting": true,
+    "cash_residual_allowed": true,
+    "overlap_breach_action": "HOLD_PRIOR_WEIGHTS_AND_ESCALATE",
+    "liquidity_or_capacity_breach_action": "EXCLUDE_SESSION_AND_HOLD_PRIOR_WEIGHTS"
+  },
+  "evidence_gate": {
+    "minimum_completed_adaptive_shadow_sessions_before_owner_review": 20,
+    "maximum_unresolved_reconciliation_or_lineage_breaks": 0,
+    "required_surfaces": ["modeled Shadow NAV", "turnover", "cost estimate", "risk", "overlap", "capacity", "constraint decisions"],
+    "paper_activation_requires_new_owner_decision": true
+  },
+  "fallback": {
+    "action": "HOLD_STATIC_POLARIS_SHADOW_BASELINE",
+    "triggers": ["missing sleeve", "stale signal", "failed lineage", "infeasible bounds", "overlap breach", "liquidity breach", "capacity breach", "nonfinite objective"],
+    "automatic_recovery": false
+  },
+  "authority": {
+    "automatic_promotion_enabled": false,
+    "paper_live_eligible": false,
+    "produces_executable_target": false,
+    "execution_authority": false,
+    "activation_authority": false,
+    "approval_authority": false
+  },
+  "content_hash": "0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e"
+}

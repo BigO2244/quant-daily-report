@@ -1,0 +1,48 @@
+{
+  "activation_authority": false,
+  "artifact_kind": "SLEEVE_WEIGHT_RESEARCH_EVIDENCE_RUNNER",
+  "content_hash": "d1700f2ed879333b309a151c8ee00970c648885973562f009e0f883fca83dbf0",
+  "default_enabled": false,
+  "enable_requested": true,
+  "evidence_emitted": false,
+  "evidence_hash": null,
+  "executable_target": false,
+  "execution_authority": false,
+  "input_inventory": [
+    {
+      "content_hash": null,
+      "input_role": "ADAPTIVE_POLICY",
+      "status": "MISSING"
+    },
+    {
+      "content_hash": null,
+      "input_role": "CAUSAL_SIGNALS",
+      "status": "MISSING"
+    },
+    {
+      "content_hash": null,
+      "input_role": "DECISION_BATCH_V2",
+      "status": "MISSING"
+    },
+    {
+      "content_hash": null,
+      "input_role": "DEPLOYMENT_POLICY",
+      "status": "MISSING"
+    }
+  ],
+  "lane_kind": "SHADOW",
+  "live_lane_eligible": false,
+  "missing_inputs": [
+    "ADAPTIVE_POLICY",
+    "CAUSAL_SIGNALS",
+    "DECISION_BATCH_V2",
+    "DEPLOYMENT_POLICY"
+  ],
+  "observed_at": "2026-08-19T00:23:11Z",
+  "paper_authority_changed": false,
+  "paper_lane_eligible": false,
+  "produces_portfolio_target": false,
+  "readiness_status": "BLOCKED",
+  "runner_id": "adaptive-shadow-evidence-v1",
+  "schema_version": "caerus.adaptive_shadow_runner_status.v1"
+}

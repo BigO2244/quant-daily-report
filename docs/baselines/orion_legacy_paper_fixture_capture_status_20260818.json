@@ -1,0 +1,109 @@
+{
+  "activation_authority": false,
+  "active_paper_authority_change_authorized": false,
+  "active_paper_runtime": "UNCHANGED_LEGACY_RUNTIME",
+  "baseline_scope": "COMMITTED_LEGACY_ECONOMICS_ONLY",
+  "capture_id": "orion-fixture-capture:8230292004d81381121da924",
+  "capture_status": "BLOCKED",
+  "committed_registry_hash": "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd",
+  "committed_registry_path": "config/research/strategy_registry.json",
+  "committed_revision": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+  "comparison_sleeve_id": "caerus_orion",
+  "content_hash": "5e97d7abda57d0231039961770dc2423f21dfb0e6604ac24292fe4bebe2897ea",
+  "evidence_inventory": [
+    {
+      "artifact_role": "COMMITTED_LEGACY_POLICY",
+      "content_hash": "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd",
+      "missing_fields": [],
+      "source_path": "git:1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac:config/research/strategy_registry.json",
+      "status": "AVAILABLE"
+    },
+    {
+      "artifact_role": "SAME_SESSION_BROKER_STATE",
+      "content_hash": null,
+      "missing_fields": [
+        "account_id_hash",
+        "as_of",
+        "broker_state_hash",
+        "cash",
+        "positions"
+      ],
+      "source_path": null,
+      "status": "MISSING"
+    },
+    {
+      "artifact_role": "SAME_SESSION_ECONOMIC_TARGET",
+      "content_hash": "218ff2e4d57924816ae596d1b05519f726a9307391384fe8f9e3dceec4cc7486",
+      "missing_fields": [
+        "broker_state_hash",
+        "session_id",
+        "symbol_target_weights",
+        "target_cash_weight",
+        "target_content_hash"
+      ],
+      "source_path": "git:1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac:Tests/fixtures/incidents/2026-08-12/replay.json",
+      "status": "PARTIAL"
+    },
+    {
+      "artifact_role": "SAME_SESSION_ORDER_VECTOR",
+      "content_hash": "218ff2e4d57924816ae596d1b05519f726a9307391384fe8f9e3dceec4cc7486",
+      "missing_fields": [
+        "broker_state_hash",
+        "complete_intended_orders",
+        "limit_price",
+        "order_type",
+        "session_id",
+        "source_plan_hash",
+        "time_in_force"
+      ],
+      "source_path": "git:1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac:Tests/fixtures/incidents/2026-08-12/replay.json",
+      "status": "PARTIAL"
+    },
+    {
+      "artifact_role": "SAME_SESSION_ORION_DECISION",
+      "content_hash": null,
+      "missing_fields": [
+        "decision_content_hash",
+        "decision_id",
+        "decision_target_rows",
+        "session_hash",
+        "session_id"
+      ],
+      "source_path": null,
+      "status": "MISSING"
+    }
+  ],
+  "execution_authority": false,
+  "fixture_emitted": false,
+  "generic_paper_cutover_status": "NOT_YET_CUT_OVER",
+  "missing_requirements": [
+    "SAME_SESSION_BROKER_STATE.account_id_hash",
+    "SAME_SESSION_BROKER_STATE.as_of",
+    "SAME_SESSION_BROKER_STATE.broker_state_hash",
+    "SAME_SESSION_BROKER_STATE.cash",
+    "SAME_SESSION_BROKER_STATE.positions",
+    "SAME_SESSION_ECONOMIC_TARGET.broker_state_hash",
+    "SAME_SESSION_ECONOMIC_TARGET.session_id",
+    "SAME_SESSION_ECONOMIC_TARGET.symbol_target_weights",
+    "SAME_SESSION_ECONOMIC_TARGET.target_cash_weight",
+    "SAME_SESSION_ECONOMIC_TARGET.target_content_hash",
+    "SAME_SESSION_ORDER_VECTOR.broker_state_hash",
+    "SAME_SESSION_ORDER_VECTOR.complete_intended_orders",
+    "SAME_SESSION_ORDER_VECTOR.limit_price",
+    "SAME_SESSION_ORDER_VECTOR.order_type",
+    "SAME_SESSION_ORDER_VECTOR.session_id",
+    "SAME_SESSION_ORDER_VECTOR.source_plan_hash",
+    "SAME_SESSION_ORDER_VECTOR.time_in_force",
+    "SAME_SESSION_ORION_DECISION.decision_content_hash",
+    "SAME_SESSION_ORION_DECISION.decision_id",
+    "SAME_SESSION_ORION_DECISION.decision_target_rows",
+    "SAME_SESSION_ORION_DECISION.session_hash",
+    "SAME_SESSION_ORION_DECISION.session_id"
+  ],
+  "observed_at": "2026-08-19T00:23:11Z",
+  "paper_authority_changed": false,
+  "schema_version": "caerus.orion_fixture_capture_status.v1",
+  "worktree_differs_from_committed": true,
+  "worktree_is_authority_evidence": false,
+  "worktree_registry_hash": "5d6745d86b61067c7dcb4e48160e0be1b99fa9e0c54ea43a0f2315ffca9af9d9"
+}

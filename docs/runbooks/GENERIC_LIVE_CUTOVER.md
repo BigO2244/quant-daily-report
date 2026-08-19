@@ -65,3 +65,24 @@ changed source hash, or missing structural stop blocks the cutover candidate.
 The redacted environment template is
 `config/templates/generic_live.env.example`. It intentionally contains no API
 keys, account IDs, or usable capital authorization.
+
+## Current disabled observation evidence
+
+The read-only Live observation records $460.90 equity and cash and preserves
+only the account hash. The disabled candidate caps capital at $460 and retains
+the stricter safety posture: $100 minimum trade, one-order maximum, 95% gross,
+whole shares, long-only, no leverage, and no shorting.
+
+The source-bound Paper/Live structural rehearsal passes through the same
+generic adapter and returns `VALIDATED_NO_WRITE` for both lanes. It is not
+broker-factual execution evidence. The disabled consumption closure is staged
+only at `$HOME/caerus-staging/disabled-consumption-9af8ea9`; 103 observation
+tests and six explicit no-action proofs pass. The active checkout, config,
+crontab, protected environment, dashboard, notification sender, broker state,
+and kill switch remain unchanged.
+
+The candidate preflight remains `BLOCKED` until all eight gates are resolved at
+an approved cutover: active account pin, capital ceiling, and maximum orders;
+active generic checkout and schedule; and owner, submission, and schedule
+approvals. Do not treat shared-adapter parity as permission to bypass any one of
+those gates.
