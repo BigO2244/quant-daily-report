@@ -34,14 +34,18 @@ For the 2026-08-25 capture, provide these files explicitly:
 - the exact frozen bytes at `data/universe.csv`
 - `outputs/research/flow_detection_v1/price_panel.parquet`, complete through
   2026-08-24
-- an immutable `caerus.lyra_forecast_risk_policy_proposal.v1` artifact;
+- the canonical pending `caerus.lyra_forecast_risk_policy_proposal.v1` at
+  `docs/governance/proposals/lyra_governed_evidence_policy_v1.pending.json`
+  (content hash
+  `c6c12f954757f5ee020ff27e5c10705462a0a24a689c018290995c83de878e0e`);
 - a separate immutable owner decision approving that exact proposal hash; and
 - the resulting `caerus.lyra_forecast_risk_policy.v1` artifact, which must bind
   the exact owner-decision hash.
 - the protected session `caerus.owner_decision.v1`, whose approved patch must
   bind the exact proposal hash, policy-owner-decision hash, and policy terms.
 
-The proposal/decision/policy chain does not yet exist. The code deliberately
+The proposal exists but remains pending; the approving owner decisions and
+final policy do not yet exist. The code deliberately
 will not manufacture approval or accept a self-sealed `approved_by` string. The
 required policy is Lyra-only, owner-approved, effective no later than
 2026-08-24, and binds the named 20-session annualized static-target return
@@ -111,22 +115,28 @@ install -m 600 config/templates/governed_lyra_capture_20260825.env.example \
   /home/brettolson/.caerus/governed_lyra_capture_20260825.env
 ```
 
-Replace the three pending policy/owner paths, independently verify their
-hashes, and only then change the single capture-enable value to `1`. The exact
+Replace every pending policy/owner placeholder. The proposal placeholder must
+resolve to the deployed copy of
+`docs/governance/proposals/lyra_governed_evidence_policy_v1.pending.json` with
+the exact hash named above. Independently verify it and every resulting
+artifact hash, then change only the capture-enable value to `1`. The exact
 one-date 08:15 ET install command is:
 
 ```bash
-CAPTURE_CRON='15 8 25 8 * /home/brettolson/quant-daily-report/scripts/cron_governed_lyra_capture_20260825.sh >> /home/brettolson/quant-daily-report/logs/governed_lyra_capture_20260825.log 2>&1 # CAERUS_GOVERNED_LYRA_CAPTURE=2026-08-25'
-(crontab -l 2>/dev/null || true; printf '%s\n' 'CRON_TZ=America/New_York' "${CAPTURE_CRON}") \
-  | awk '!seen[$0]++' | crontab -
+python3 scripts/manage_governed_lyra_capture_cron.py --install
 ```
 
-This task does not run that command. Verify the exact line with `crontab -l`
-before August 25. Remove only that line after success, failure, or abandonment:
+The manager fails without changing crontab if it finds a conflicting
+`CRON_TZ`, ambiguous capture-owned timezone state, or a noncanonical line using
+the capture marker. It never deduplicates or rewrites unrelated lines. When it
+must add `CRON_TZ=America/New_York`, it adds a separate ownership marker so
+rollback removes that timezone only when this capture installed it. This task
+does not run that command. Verify the exact line with `crontab -l` before
+August 25. Remove only capture-owned lines after success, failure, or
+abandonment:
 
 ```bash
-CAPTURE_CRON='15 8 25 8 * /home/brettolson/quant-daily-report/scripts/cron_governed_lyra_capture_20260825.sh >> /home/brettolson/quant-daily-report/logs/governed_lyra_capture_20260825.log 2>&1 # CAERUS_GOVERNED_LYRA_CAPTURE=2026-08-25'
-crontab -l | grep -Fvx "${CAPTURE_CRON}" | crontab -
+python3 scripts/manage_governed_lyra_capture_cron.py --remove
 mv /home/brettolson/.caerus/governed_lyra_capture_20260825.env \
   /home/brettolson/.caerus/governed_lyra_capture_20260825.env.disabled
 ```

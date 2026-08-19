@@ -9,6 +9,13 @@ from pathlib import Path
 import pytest
 
 from scripts import run_governed_lyra_capture_20260825 as subject
+from scripts.manage_governed_lyra_capture_cron import (
+    CAPTURE_CRON,
+    CRON_TZ,
+    TZ_OWNER_MARKER,
+    GovernedLyraCaptureCronError,
+    render_crontab,
+)
 from Tests.test_generic_lyra_v2_producer import _path_sources
 
 
@@ -152,6 +159,9 @@ def test_template_and_wrapper_are_inert_and_credential_free(tmp_path: Path) -> N
         ROOT / "scripts/cron_governed_lyra_capture_20260825.sh"
     ).read_text()
     assert "CAERUS_GOVERNED_LYRA_CAPTURE_ENABLED=0" in template
+    assert "REPLACE_WITH_ABSOLUTE_CANONICAL_POLICY_PROPOSAL_PATH" in template
+    assert "c6c12f954757f5ee020ff27e5c10705462a0a24a689c018290995c83de878e0e" in template
+    assert "docs/evidence/lyra_forecast_risk_policy_proposal_2026-08-19.json" not in template
     assert "APCA_API" not in template + python_wrapper + shell_wrapper
     assert "ALPACA" not in template + python_wrapper + shell_wrapper
     assert "brokers" not in python_wrapper
@@ -167,3 +177,54 @@ def test_template_and_wrapper_are_inert_and_credential_free(tmp_path: Path) -> N
     )
     assert completed.returncode == 0
     assert json.loads(completed.stdout)["status"] == "DISABLED_NO_WRITE"
+
+
+def test_capture_cron_install_is_exact_idempotent_and_preserves_paper() -> None:
+    paper = "7 7 * * 1-5 /opt/caerus/paper.sh # CAERUS_PAPER\n"
+    unrelated_duplicate = "5 5 * * * /opt/unchanged\n"
+    original = paper + unrelated_duplicate + unrelated_duplicate
+    installed = render_crontab(original, install=True)
+    assert installed.startswith(original)
+    assert installed.count(unrelated_duplicate) == 2
+    assert installed.count(CRON_TZ) == 1
+    assert installed.count(TZ_OWNER_MARKER) == 1
+    assert installed.count(CAPTURE_CRON) == 1
+    assert render_crontab(installed, install=True) == installed
+
+    removed = render_crontab(installed, install=False)
+    assert removed == original
+    assert CAPTURE_CRON not in removed
+    assert CRON_TZ not in removed
+    assert TZ_OWNER_MARKER not in removed
+
+
+def test_capture_cron_reuses_unowned_canonical_timezone_and_preserves_it() -> None:
+    original = CRON_TZ + "\n7 7 * * 1-5 /opt/caerus/paper.sh\n"
+    installed = render_crontab(original, install=True)
+    assert TZ_OWNER_MARKER not in installed
+    assert installed.startswith(original)
+    assert render_crontab(installed, install=False) == original
+
+
+def test_capture_cron_install_rejects_timezone_and_marker_conflicts() -> None:
+    with pytest.raises(GovernedLyraCaptureCronError, match="conflicting CRON_TZ"):
+        render_crontab("CRON_TZ=UTC\n", install=True)
+
+    with pytest.raises(GovernedLyraCaptureCronError, match="noncanonical"):
+        render_crontab(
+            "0 9 25 8 * /tmp/not-canonical "
+            "# CAERUS_GOVERNED_LYRA_CAPTURE=2026-08-25\n",
+            install=True,
+        )
+
+    with pytest.raises(GovernedLyraCaptureCronError, match="ambiguous"):
+        render_crontab(TZ_OWNER_MARKER + "\n", install=True)
+
+    with pytest.raises(GovernedLyraCaptureCronError, match="terminal newline"):
+        render_crontab("7 7 * * * /opt/unchanged", install=True)
+
+    with pytest.raises(GovernedLyraCaptureCronError, match="not governed"):
+        render_crontab(CAPTURE_CRON + "\n", install=True)
+
+    with pytest.raises(GovernedLyraCaptureCronError, match="not governed"):
+        render_crontab(CAPTURE_CRON + "\n" + CRON_TZ + "\n", install=True)
