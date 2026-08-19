@@ -111,7 +111,7 @@ def _read_crontab() -> str:
         completed.stderr.strip(),
         flags=re.IGNORECASE,
     )
-    if completed.returncode == 1 and no_crontab:
+    if completed.returncode == 1 and no_crontab and completed.stdout == "":
         return ""
     raise GovernedLyraCaptureCronError("could not read crontab; no change made")
 

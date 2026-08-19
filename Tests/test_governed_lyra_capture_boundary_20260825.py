@@ -268,3 +268,22 @@ def test_capture_cron_positive_no_crontab_signal_can_install(
     monkeypatch.setattr(cron_subject.subprocess, "run", fake_run)
     assert cron_subject.main(["--install"]) == 0
     assert calls == [["crontab", "-l"], ["crontab", "-"]]
+
+
+def test_capture_cron_ambiguous_no_crontab_with_stdout_never_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=1,
+            stdout="partial-existing\n",
+            stderr="crontab: no crontab for brettolson\n",
+        )
+
+    monkeypatch.setattr(cron_subject.subprocess, "run", fake_run)
+    assert cron_subject.main(["--install"]) == 2
+    assert calls == [["crontab", "-l"]]
