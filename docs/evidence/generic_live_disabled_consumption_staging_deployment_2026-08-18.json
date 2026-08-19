@@ -1,0 +1,109 @@
+{
+  "activation_authority": false,
+  "active_checkout": {
+    "commit": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+    "dirty_entry_count": 0,
+    "reference": "$HOME/quant-daily-report",
+    "strategy_registry_hash": "23cef5a4273bb3c29f33d28502fe9eb7ce5f714c2e51f3749ec11eb7bc5f6edd"
+  },
+  "active_config_mutated": false,
+  "active_runtime": {
+    "active_generic_schedule_count": 0,
+    "installed_crontab_hash": "e053c2ea0de7738798705f11556db9c69c6beabab59b1cd3c631f53b37ce6033",
+    "kill_switch_state": "ARMED",
+    "legacy_live_executor_status": "DISABLED",
+    "live_env_hash": "3896bec8adc485a136f1d636fad2b37e6a45c0fcbc86f8095c827ff6d62a3597"
+  },
+  "active_schedule_mutated": false,
+  "approval_authority": false,
+  "branch": "codex/generic-live-no-submit-staging-20260818",
+  "broker_call_performed_during_deployment": false,
+  "broker_write_performed": false,
+  "candidate_execution_enabled": false,
+  "candidate_limits": {
+    "leverage_allowed": false,
+    "long_only": true,
+    "maximum_gross_fraction": 0.95,
+    "maximum_order_count": 1,
+    "minimum_trade_usd": 100.0,
+    "shorting_allowed": false,
+    "whole_share_only": true
+  },
+  "candidate_schedule_enabled": false,
+  "candidate_submission_enabled": false,
+  "content_hash": "c4257dff4c0f7e92ba8570dea3ad78edb14405f6e7781333666e85e1b0dddaa5",
+  "cutover_blockers": [
+    "ACTIVE_ACCOUNT_PIN_NOT_CONFIGURED",
+    "ACTIVE_CAPITAL_CEILING_NOT_CONFIGURED",
+    "ACTIVE_MAX_ORDERS_NOT_CONFIGURED",
+    "GENERIC_LIVE_ACTIVE_SCHEDULE_ABSENT",
+    "GENERIC_LIVE_NOT_IN_ACTIVE_CHECKOUT",
+    "OWNER_APPROVAL_NOT_RECORDED",
+    "SCHEDULE_APPROVAL_NOT_RECORDED",
+    "SUBMISSION_APPROVAL_NOT_RECORDED"
+  ],
+  "cutover_status": "BLOCKED",
+  "dashboard_publish_performed": false,
+  "deployment_classification": "ISOLATED_GENERIC_STAGING_NO_ACTIVE_CUTOVER",
+  "execution_authority": false,
+  "isolated_staging_only": true,
+  "kill_switch_mutated": false,
+  "legacy_live_executor_enabled": false,
+  "notification_send_performed": false,
+  "observed_at": "2026-08-19T02:08:19Z",
+  "observed_live_facts": {
+    "account_pin_redacted": true,
+    "cash_usd": 460.9,
+    "credentials_persisted": false,
+    "effective_candidate_ceiling_usd": 460.0,
+    "equity_usd": 460.9,
+    "raw_account_id_persisted": false
+  },
+  "prior_staging_commit": "13f07fdd34e819d3b1c211c421c683445049dcfa",
+  "prior_staging_reference": "$HOME/caerus-staging/generic-live-no-submit-13f07fd",
+  "recoverable_removal_command": "test \"$(git -C /home/brettolson/caerus-staging/disabled-consumption-9af8ea9 rev-parse HEAD)\" = 9af8ea9433d763cba3b61820d3a9291d7fe4dac6 && mkdir -p /home/brettolson/caerus-staging/quarantine && mv /home/brettolson/caerus-staging/disabled-consumption-9af8ea9 /home/brettolson/caerus-staging/quarantine/disabled-consumption-9af8ea9.removed",
+  "remote_files_written": true,
+  "remote_ref_commit": "9af8ea9433d763cba3b61820d3a9291d7fe4dac6",
+  "schema_version": "caerus.generic_live_disabled_consumption_staging_deployment.v1",
+  "sealed_artifacts": {
+    "disabled_live_candidate": {
+      "content_hash": "cc182585a35b6f2b842ebb20f832ee51c5366278b0380bd10a50f2a5a26f1070",
+      "file_hash": "6360d459b182ec422336c50c7dc3f28d2429c9e105d57ef3f4e1943b27344c5d"
+    },
+    "live_account_observation": {
+      "content_hash": "e5eb0400a8f9937fb3505983d867fd04e859c6a818e76695b7a62a3602bf58d8",
+      "file_hash": "99dfa5887a8fbe57b4f271de47889b93ccc11ec893f4cadf5f0a5ba08060a69e"
+    },
+    "paper_live_no_write_rehearsal": {
+      "content_hash": "d4fb653c5d7d8e8fcd39a9373bcbb12518da45426f93bb47e8a7223f73f84381",
+      "file_hash": "cc5b77e1a58254904d54a9f3ac35d39bdcdf6d0e262f6f860cc51558e2592238",
+      "source_pipeline_hash": "c7686e4f2b8f8d4a615b2a30b726334a977040e9d7be3478f17d1a0bc6410fe0"
+    }
+  },
+  "source_commit": "9af8ea9433d763cba3b61820d3a9291d7fe4dac6",
+  "staging_checkout": {
+    "commit": "9af8ea9433d763cba3b61820d3a9291d7fe4dac6",
+    "dirty_entry_count": 0
+  },
+  "validation": {
+    "explicit_defaults": {
+      "failed": 0,
+      "passed": 6,
+      "proofs": [
+        "GENERIC_SCHEDULER_DISABLED_NO_SUBMIT",
+        "SCHEDULED_PIPELINE_DISABLED_NO_WRITE",
+        "SCHEDULED_PIPELINE_CLI_NO_OUTPUT",
+        "OWNER_OUTBOX_NO_WRITE_NO_SEND",
+        "DASHBOARD_CONSUMER_DISABLED_EMPTY",
+        "LIVE_CANDIDATE_PREFLIGHT_BLOCKED"
+      ],
+      "status": "PASS"
+    },
+    "focused_vm_suite": {
+      "failed": 0,
+      "passed": 103,
+      "status": "PASS"
+    }
+  },
+  "vm_staging_reference": "$HOME/caerus-staging/disabled-consumption-9af8ea9"
+}

@@ -1,9 +1,11 @@
 import copy
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
+from authority.lane_exact_plan import canonical_json
 from core.generic_live_candidate_config import (
     GenericLiveCandidateError,
     build_generic_live_candidate_config,
@@ -138,3 +140,36 @@ def test_persisted_redacted_candidate_and_blocked_preflight_are_sealed():
     checked = validate_generic_live_candidate_preflight(preflight)
     assert checked["status"] == "BLOCKED"
     assert checked["paper_live_adapter_parity_proven"] is True
+    inventory, observation = _inputs()
+    rebuilt = build_generic_live_candidate_preflight(
+        candidate_config=candidate,
+        vm_inventory=inventory,
+        live_account_observation=observation,
+        evaluated_at="2026-08-19T02:10:00+00:00",
+        staging_commit="9af8ea9433d763cba3b61820d3a9291d7fe4dac6",
+        staging_evidence_hash="c4257dff4c0f7e92ba8570dea3ad78edb14405f6e7781333666e85e1b0dddaa5",
+        generic_staging_present=True,
+        paper_live_rehearsal=_rehearsal(),
+    )
+    assert preflight == rebuilt
+
+
+def test_staging_deployment_evidence_is_sealed_and_active_state_unchanged():
+    evidence = json.loads(
+        (ROOT / "docs/evidence/generic_live_disabled_consumption_staging_deployment_2026-08-18.json").read_text()
+    )
+    declared = evidence.pop("content_hash")
+    assert declared == hashlib.sha256(canonical_json(evidence).encode()).hexdigest()
+    assert evidence["deployment_classification"] == "ISOLATED_GENERIC_STAGING_NO_ACTIVE_CUTOVER"
+    assert evidence["active_checkout"]["commit"] == "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac"
+    assert evidence["staging_checkout"]["commit"] == "9af8ea9433d763cba3b61820d3a9291d7fe4dac6"
+    assert evidence["validation"]["focused_vm_suite"] == {"status": "PASS", "passed": 103, "failed": 0}
+    assert evidence["cutover_status"] == "BLOCKED"
+    for field in (
+        "broker_write_performed", "active_config_mutated", "active_schedule_mutated",
+        "kill_switch_mutated", "legacy_live_executor_enabled", "candidate_execution_enabled",
+        "candidate_submission_enabled", "candidate_schedule_enabled",
+        "notification_send_performed", "dashboard_publish_performed",
+        "execution_authority", "activation_authority", "approval_authority",
+    ):
+        assert evidence[field] is False
