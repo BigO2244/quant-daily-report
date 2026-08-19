@@ -1,0 +1,80 @@
+{
+  "action": "PROMOTE",
+  "confidence": 1.0,
+  "content_hash": "e70f35069c8fde796be9118cfc115c3458b54c6df653b2078c5403eaca33184f",
+  "current_stage": "SHADOW",
+  "destination_lane": "generic-live-v1",
+  "evidence_hashes": [
+    "e5eb0400a8f9937fb3505983d867fd04e859c6a818e76695b7a62a3602bf58d8",
+    "cc182585a35b6f2b842ebb20f832ee51c5366278b0380bd10a50f2a5a26f1070",
+    "5ebc0a035c6436509646200b5f69ee26e515c44280071832a3a0b0aa272dd0e7",
+    "c4257dff4c0f7e92ba8570dea3ad78edb14405f6e7781333666e85e1b0dddaa5",
+    "d4fb653c5d7d8e8fcd39a9373bcbb12518da45426f93bb47e8a7223f73f84381"
+  ],
+  "evidence_refs": [
+    "docs/evidence/generic_live_account_observation_2026-08-18.json",
+    "docs/evidence/generic_live_disabled_candidate_config_2026-08-18.json",
+    "docs/evidence/generic_live_disabled_candidate_preflight_2026-08-18.json",
+    "docs/evidence/generic_live_disabled_consumption_staging_deployment_2026-08-18.json",
+    "docs/evidence/generic_paper_live_no_write_rehearsal_2026-08-18.json"
+  ],
+  "execution_authority": false,
+  "expires_at": "2026-08-20T20:00:00+00:00",
+  "gate_results": {
+    "active_cutover_gates": "RESOLVE_DURING_APPROVED_CUTOVER",
+    "live_account_read_only_observation": "PASS",
+    "owner_terms_complete": "PASS",
+    "shared_generic_adapter_parity": "PASS"
+  },
+  "generated_at": "2026-08-19T02:33:12+00:00",
+  "proposed_capital_change": {
+    "currency": "USD",
+    "from_live_capital_usd": 0.0,
+    "to_live_capital_ceiling_usd": 460.0
+  },
+  "proposed_policy_patch": [
+    {
+      "op": "add",
+      "path": "/lanes/generic-live-v1",
+      "value": {
+        "adapter_contract": "CAERUS_GENERIC_LANE_V4",
+        "automatic_rearm_and_rollback_triggers": [
+          "ACCOUNTING_BREAK",
+          "ORDER_BREAK",
+          "PREFLIGHT_BREAK",
+          "RECONCILIATION_BREAK",
+          "REPORTING_BREAK",
+          "SUBMISSION_BREAK"
+        ],
+        "capital_ceiling_usd": 460.0,
+        "decision_schema": "caerus.sleeve_decision.v2",
+        "eligible_sleeve_ids": ["caerus_lyra"],
+        "generic_paper_cutover_allowed": false,
+        "lane_id": "generic-live-v1",
+        "lane_kind": "LIVE",
+        "legacy_live_executor_allowed": false,
+        "leverage_allowed": false,
+        "long_only": true,
+        "maximum_gross_fraction": 0.95,
+        "maximum_orders_per_session": 1,
+        "minimum_trade_usd": 100.0,
+        "opportunistic_test_orders_allowed": false,
+        "selection_rule": "LYRA_ONLY_VALID_NEXT_SESSION_V2_DECISION_AND_APPROVED_V4_PLAN",
+        "shorting_allowed": false,
+        "whole_share_only": true
+      }
+    }
+  ],
+  "proposed_stage": "LIVE",
+  "reason_codes": [
+    "OWNER_EXPLICITLY_APPROVED_EXACT_LIVE_V1_TERMS",
+    "LYRA_ONLY_LIVE_ELIGIBILITY",
+    "NO_OPPORTUNISTIC_TEST_ORDER",
+    "AUTOMATIC_REARM_AND_ROLLBACK_REQUIRED"
+  ],
+  "recommendation_id": "generic-live-v1-lyra-promotion-20260819",
+  "requires_owner_approval": true,
+  "schema_version": "caerus.lifecycle_recommendation.v1",
+  "sleeve_id": "caerus_lyra",
+  "source_lane": "shadow-lyra"
+}
