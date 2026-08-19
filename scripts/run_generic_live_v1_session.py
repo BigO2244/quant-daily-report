@@ -235,6 +235,7 @@ def main() -> int:
             forecast_risk_policy_owner_decision_path=(
                 args.lyra_risk_policy_owner_decision
             ),
+            live_owner_decision_path=args.owner_decision,
             price_panel_path=args.lyra_price_panel,
         )
         require_generic_live_v1_owner_current_at_execution(

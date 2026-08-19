@@ -38,6 +38,8 @@ For the 2026-08-25 capture, provide these files explicitly:
 - a separate immutable owner decision approving that exact proposal hash; and
 - the resulting `caerus.lyra_forecast_risk_policy.v1` artifact, which must bind
   the exact owner-decision hash.
+- the protected session `caerus.owner_decision.v1`, whose approved patch must
+  bind the exact proposal hash, policy-owner-decision hash, and policy terms.
 
 The proposal/decision/policy chain does not yet exist. The code deliberately
 will not manufacture approval or accept a self-sealed `approved_by` string. The
@@ -73,7 +75,8 @@ rejected.
 
 Run `scripts/capture_generic_lyra_v2.py` with all paths above, including
 `--forecast-risk-policy-proposal`,
-`--forecast-risk-policy-owner-decision`, and `--forecast-risk-policy`, plus
+`--forecast-risk-policy-owner-decision`, `--forecast-risk-policy`, and
+`--live-owner-decision` for the independently protected session approval, plus
 exact `--session-as-of` and `--captured-at` timestamps. Omit
 `--write-advisory-artifacts`. The command validates and returns the sealed
 capture in memory while reporting every broker, submission, activation, and
@@ -88,7 +91,7 @@ call a broker, build an executable schedule, or submit an order.
 
 The Live v1 activation preflight v3 binds the decision hash, full capture hash,
 and a sealed raw-source reproduction proof. Immediately before preflight and
-submission, runtime reads all eleven explicit source files, rehashes their exact
+submission, runtime reads all twelve explicit source files, rehashes their exact
 bytes and resolved paths, rebuilds the capture byte-for-byte, and passes that
 proof through both boundaries. Historical v1/v2 BLOCKED preflights remain valid
 evidence, but neither can authorize activation because they lack the complete

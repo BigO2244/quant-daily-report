@@ -210,6 +210,22 @@ def _sources() -> dict:
     risk_policy_owner_decision["content_hash"] = content_hash(
         risk_policy_owner_decision
     )
+    live_owner_decision = json.loads(
+        (ROOT / "docs/evidence/generic_live_v1_lyra_owner_decision_2026-08-19.json").read_text()
+    )
+    live_owner_decision["effective_session"] = "2026-08-25"
+    live_owner_decision["expires_at"] = "2026-08-26T20:00:00+00:00"
+    live_owner_decision["approved_policy_patch"].update({
+        "lyra_evidence_policy_proposal_hash": risk_policy_proposal["content_hash"],
+        "lyra_evidence_policy_owner_decision_hash": (
+            risk_policy_owner_decision["content_hash"]
+        ),
+        "lyra_evidence_policy_terms": risk_policy_proposal["policy_terms"],
+    })
+    live_owner_decision["content_hash"] = content_hash({
+        key: value for key, value in live_owner_decision.items()
+        if key != "content_hash"
+    })
     risk_policy = {
         "schema_version": LYRA_RISK_POLICY_SCHEMA,
         "policy_id": "lyra-risk-policy:test-owner-approved-v1",
@@ -231,6 +247,7 @@ def _sources() -> dict:
         "approved_at": "2026-08-19T12:00:00+00:00",
         "effective_from": "2026-08-19",
         "owner_decision_hash": risk_policy_owner_decision["content_hash"],
+        "live_owner_decision_hash": live_owner_decision["content_hash"],
         "execution_authority": False,
     }
     risk_policy["content_hash"] = content_hash(risk_policy)
@@ -251,6 +268,7 @@ def _sources() -> dict:
         "forecast_risk_policy": risk_policy,
         "forecast_risk_policy_proposal": risk_policy_proposal,
         "forecast_risk_policy_owner_decision": risk_policy_owner_decision,
+        "live_owner_decision": live_owner_decision,
         "session_as_of": "2026-08-25T11:05:00+00:00",
         "generated_at": "2026-08-25T11:06:00+00:00",
     }
@@ -269,6 +287,7 @@ def _path_sources(tmp_path: Path) -> tuple[dict, list[dict]]:
         "forecast_risk_policy_owner_decision_path": (
             tmp_path / "risk_policy_owner_decision.json"
         ),
+        "live_owner_decision_path": tmp_path / "live_owner_decision.json",
         "source_session_manifest_path": tmp_path / "session_manifest.json",
         "legacy_decision_batch_path": tmp_path / "sleeve_decisions.json",
         "price_panel_path": tmp_path / "price_panel.parquet",
@@ -306,6 +325,9 @@ def _path_sources(tmp_path: Path) -> tuple[dict, list[dict]]:
     )
     paths["forecast_risk_policy_owner_decision_path"].write_text(
         json.dumps(arguments["forecast_risk_policy_owner_decision"])
+    )
+    paths["live_owner_decision_path"].write_text(
+        json.dumps(arguments["live_owner_decision"])
     )
     paths["price_panel_path"].write_bytes(b"explicit-price-panel-fixture")
     universe_path = tmp_path / "universe.csv"
@@ -467,6 +489,7 @@ def test_runtime_raw_source_recompute_rejects_changed_bytes(tmp_path: Path) -> N
             "universe_freeze", "universe_bytes", "forecast_risk_policy",
             "forecast_risk_policy_proposal",
             "forecast_risk_policy_owner_decision", "price_panel",
+            "live_owner_decision",
         }
     )
     assert all(Path(row["path"]).is_absolute() for row in proof["source_files"])
@@ -559,7 +582,7 @@ def test_resealed_risk_policy_owner_approval_bypasses_fail_closed() -> None:
         key: value for key, value in arguments["forecast_risk_policy"].items()
         if key != "content_hash"
     })
-    with pytest.raises(Exception, match="owner approval binding"):
+    with pytest.raises(Exception, match="evidence-policy chain"):
         build_generic_lyra_v2_decision_batch(**arguments)
 
     arguments = _sources()
@@ -581,6 +604,29 @@ def test_resealed_risk_policy_owner_approval_bypasses_fail_closed() -> None:
         if key != "content_hash"
     })
     with pytest.raises(Exception, match="proposal terms differ"):
+        build_generic_lyra_v2_decision_batch(**arguments)
+
+
+def test_wholly_resealed_policy_chain_cannot_replace_live_owner_anchor() -> None:
+    arguments = _sources()
+    proposal = arguments["forecast_risk_policy_proposal"]
+    proposal["proposal_id"] = "lyra-risk-policy-proposal:invented-reseal"
+    proposal["content_hash"] = content_hash({
+        key: value for key, value in proposal.items() if key != "content_hash"
+    })
+    policy_owner = arguments["forecast_risk_policy_owner_decision"]
+    policy_owner["owner_decision_id"] = "owner-decision:invented-reseal"
+    policy_owner["proposal_id"] = proposal["proposal_id"]
+    policy_owner["proposal_hash"] = proposal["content_hash"]
+    policy_owner["content_hash"] = content_hash({
+        key: value for key, value in policy_owner.items() if key != "content_hash"
+    })
+    policy = arguments["forecast_risk_policy"]
+    policy["owner_decision_hash"] = policy_owner["content_hash"]
+    policy["content_hash"] = content_hash({
+        key: value for key, value in policy.items() if key != "content_hash"
+    })
+    with pytest.raises(GenericLyraV2ProducerError, match="evidence-policy chain"):
         build_generic_lyra_v2_decision_batch(**arguments)
 
     arguments = _sources()

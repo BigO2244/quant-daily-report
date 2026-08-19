@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -324,7 +325,12 @@ def test_generic_config_template_satisfies_literal_install_grammar(tmp_path: Pat
     root = tmp_path / "protected"
     root.mkdir(mode=0o700)
     candidate = root / "candidate.env"
-    candidate.write_bytes((ROOT / "config/templates/generic_live_v1.env.example").read_bytes())
+    template = (ROOT / "config/templates/generic_live_v1.env.example").read_text()
+    template = template.replace(
+        "REPLACE_WITH_APPROVED_EFFECTIVE_SESSION", "2026-08-25"
+    )
+    template = re.sub(r"REPLACE_WITH_[A-Z0-9_]+", "a" * 64, template)
+    candidate.write_text(template)
     candidate.chmod(0o600)
     active = root / "active.env"
     result = install_config_with_backup(
@@ -334,6 +340,23 @@ def test_generic_config_template_satisfies_literal_install_grammar(tmp_path: Pat
     )
     assert result["candidate_sha256"] == hashlib.sha256(active.read_bytes()).hexdigest()
     assert active.read_bytes() == candidate.read_bytes()
+
+
+def test_generic_config_rejects_unresolved_template_token(tmp_path: Path) -> None:
+    root = tmp_path / "protected"
+    root.mkdir(mode=0o700)
+    candidate = root / "candidate.env"
+    _protected_file(
+        candidate,
+        "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED=0\n"
+        "CAERUS_GENERIC_LIVE_EFFECTIVE_SESSION=REPLACE_WITH_APPROVED_EFFECTIVE_SESSION\n",
+    )
+    with pytest.raises(GenericLiveV1OpsError, match="unresolved template token"):
+        install_config_with_backup(
+            candidate_path=candidate, active_path=root / "active.env",
+            backup_path=root / "backup.env", allowed_roots=[root],
+            expected_candidate_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
+        )
 
 
 def test_cron_entry_is_date_bound_duplicate_free_and_conflict_closed(tmp_path: Path) -> None:

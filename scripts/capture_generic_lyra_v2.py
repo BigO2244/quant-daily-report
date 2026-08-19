@@ -144,6 +144,7 @@ def capture_from_explicit_paths(
     forecast_risk_policy_path: Path | str,
     forecast_risk_policy_proposal_path: Path | str,
     forecast_risk_policy_owner_decision_path: Path | str,
+    live_owner_decision_path: Path | str,
     price_panel_path: Path | str,
     output_root: Path | str,
     write_advisory_artifacts: bool = False,
@@ -164,6 +165,7 @@ def capture_from_explicit_paths(
     risk_policy_owner_decision = read_strict_json(
         forecast_risk_policy_owner_decision_path
     )
+    live_owner_decision = read_strict_json(live_owner_decision_path)
     if source_session.get("trade_date") != execution_session:
         raise GenericLyraV2CaptureCliError("source session differs from execution_session")
     if lyra_source.get("effective_trade_date") != signal_as_of:
@@ -209,6 +211,7 @@ def capture_from_explicit_paths(
         forecast_risk_policy=risk_policy, session_as_of=session_as_of,
         forecast_risk_policy_proposal=risk_policy_proposal,
         forecast_risk_policy_owner_decision=risk_policy_owner_decision,
+        live_owner_decision=live_owner_decision,
         generated_at=captured_at,
     )
     persisted_paths: list[str] = []
@@ -260,6 +263,7 @@ def recompute_capture_from_explicit_paths(
     forecast_risk_policy_path: Path | str,
     forecast_risk_policy_proposal_path: Path | str,
     forecast_risk_policy_owner_decision_path: Path | str,
+    live_owner_decision_path: Path | str,
     price_panel_path: Path | str,
     price_row_loader: Callable[..., list[dict[str, Any]]] = load_price_panel_rows,
 ) -> dict[str, Any]:
@@ -280,6 +284,7 @@ def recompute_capture_from_explicit_paths(
         forecast_risk_policy_owner_decision_path=(
             forecast_risk_policy_owner_decision_path
         ),
+        live_owner_decision_path=live_owner_decision_path,
         price_panel_path=price_panel_path, output_root=Path("."),
         write_advisory_artifacts=False, price_row_loader=price_row_loader,
     )
@@ -301,6 +306,7 @@ def recompute_capture_from_explicit_paths(
         "forecast_risk_policy_owner_decision": (
             forecast_risk_policy_owner_decision_path
         ),
+        "live_owner_decision": live_owner_decision_path,
         "price_panel": price_panel_path,
     }
     body = {
@@ -345,6 +351,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--forecast-risk-policy", required=True)
     parser.add_argument("--forecast-risk-policy-proposal", required=True)
     parser.add_argument("--forecast-risk-policy-owner-decision", required=True)
+    parser.add_argument("--live-owner-decision", required=True)
     parser.add_argument("--price-panel", required=True)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--write-advisory-artifacts", action="store_true")
@@ -370,6 +377,7 @@ def main() -> int:
             forecast_risk_policy_owner_decision_path=(
                 args.forecast_risk_policy_owner_decision
             ),
+            live_owner_decision_path=args.live_owner_decision,
             price_panel_path=args.price_panel,
             output_root=args.output_root,
             write_advisory_artifacts=args.write_advisory_artifacts,

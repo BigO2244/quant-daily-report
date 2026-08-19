@@ -258,7 +258,8 @@ def validate_lyra_forecast_risk_policy(payload: Mapping[str, Any]) -> dict[str, 
         "minimum_capacity_multiple", "capital_reference_usd",
         "turnover_formula_id", "calendar_policy_id", "approved_by",
         "approved_at", "effective_from",
-        "owner_decision_hash", "execution_authority", "content_hash",
+        "owner_decision_hash", "live_owner_decision_hash",
+        "execution_authority", "content_hash",
     }
     if not isinstance(payload, Mapping) or set(payload) != fields:
         raise LyraGovernedEvidenceError("forecast risk policy fields differ")
@@ -291,6 +292,10 @@ def validate_lyra_forecast_risk_policy(payload: Mapping[str, Any]) -> dict[str, 
     _timestamp(payload.get("approved_at"), label="risk policy approved_at")
     _date(payload.get("effective_from"), label="risk policy effective_from")
     _sha(payload.get("owner_decision_hash"), label="owner_decision_hash")
+    _sha(
+        payload.get("live_owner_decision_hash"),
+        label="live_owner_decision_hash",
+    )
     if payload.get("content_hash") != _hash(payload):
         raise LyraGovernedEvidenceError("forecast risk policy content_hash mismatch")
     return copy.deepcopy(dict(payload))

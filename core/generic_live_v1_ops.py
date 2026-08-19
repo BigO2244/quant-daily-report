@@ -240,6 +240,10 @@ def install_config_with_backup(
             raise GenericLiveV1OpsError(
                 f"candidate config line {line_number} is not a command-free literal assignment"
             )
+        if "REPLACE_WITH_" in value:
+            raise GenericLiveV1OpsError(
+                f"candidate config line {line_number} contains an unresolved template token"
+            )
         if key in config:
             raise GenericLiveV1OpsError(f"candidate config contains duplicate key: {key}")
         config[key] = value

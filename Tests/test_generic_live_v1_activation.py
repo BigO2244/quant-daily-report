@@ -178,6 +178,17 @@ def _capture() -> dict:
     risk_policy_owner_decision["content_hash"] = artifact_content_hash(
         risk_policy_owner_decision
     )
+    live_owner_decision = copy.deepcopy(OWNER)
+    live_owner_decision["approved_policy_patch"].update({
+        "lyra_evidence_policy_proposal_hash": risk_policy_proposal["content_hash"],
+        "lyra_evidence_policy_owner_decision_hash": (
+            risk_policy_owner_decision["content_hash"]
+        ),
+        "lyra_evidence_policy_terms": risk_policy_proposal["policy_terms"],
+    })
+    live_owner_decision["content_hash"] = artifact_content_hash(
+        live_owner_decision
+    )
     risk_policy = {
         "schema_version": LYRA_RISK_POLICY_SCHEMA,
         "policy_id": "lyra-risk-policy:test-owner-approved-v1",
@@ -199,6 +210,7 @@ def _capture() -> dict:
         "approved_at": "2026-08-19T00:00:00+00:00",
         "effective_from": "2026-08-18",
         "owner_decision_hash": risk_policy_owner_decision["content_hash"],
+        "live_owner_decision_hash": live_owner_decision["content_hash"],
         "execution_authority": False,
     }
     risk_policy["content_hash"] = artifact_content_hash(risk_policy)
@@ -250,6 +262,7 @@ def _capture() -> dict:
         {"artifact_type": "prior_lyra_shadow_source", "schema_version": "legacy_shadow_snapshot_json", "content_hash": "e" * 64, "sleeve_id": "caerus_lyra"},
         {"artifact_type": "governed_universe_freeze", "schema_version": freeze["schema_version"], "content_hash": freeze["content_hash"], "sleeve_id": "caerus_lyra"},
         {"artifact_type": "governed_universe_bytes", "schema_version": "csv", "content_hash": "1" * 64, "sleeve_id": "caerus_lyra"},
+        {"artifact_type": "live_owner_policy_anchor", "schema_version": "caerus.owner_decision.v1", "content_hash": live_owner_decision["content_hash"], "sleeve_id": "caerus_lyra"},
     ])
     body = {
         "schema_version": "caerus.sleeve_decision.v2",
@@ -295,6 +308,7 @@ def _capture() -> dict:
             market["content_hash"], selection["content_hash"], risk_policy["content_hash"],
             risk_policy_proposal["content_hash"],
             risk_policy_owner_decision["content_hash"],
+            live_owner_decision["content_hash"],
         ],
     )
     result = {
@@ -306,6 +320,7 @@ def _capture() -> dict:
         "forecast_risk_policy": risk_policy,
         "forecast_risk_policy_proposal": risk_policy_proposal,
         "forecast_risk_policy_owner_decision": risk_policy_owner_decision,
+        "live_owner_decision": live_owner_decision,
         "universe_freeze": freeze,
         "universe_members": symbols, "prior_target_rows": target_rows,
         "session_snapshot": session, "forecast_risk": risk,
@@ -317,6 +332,11 @@ def _capture() -> dict:
     }
     result["content_hash"] = artifact_content_hash(result)
     return validate_generic_lyra_v2_capture_result(result)
+
+
+# The prospective fixture's exact session owner decision is the independently
+# pinned trust anchor used by activation and all execution-adjacent tests.
+OWNER = _capture()["live_owner_decision"]
 
 
 def _decision() -> dict:

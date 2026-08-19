@@ -691,6 +691,15 @@ def _execute_generic_live_v1_session(
             )
         if lyra_capture_result.get("content_hash") != preflight.get("lyra_capture_hash"):
             raise GenericLiveV1SubmissionError("submission Lyra capture pin differs")
+        embedded_owner = lyra_capture_result.get("live_owner_decision")
+        if (
+            not isinstance(embedded_owner, Mapping)
+            or embedded_owner.get("content_hash")
+            != preflight.get("owner_decision_hash")
+        ):
+            raise GenericLiveV1SubmissionError(
+                "submission Live-owner policy anchor differs"
+            )
         if not isinstance(lyra_raw_source_recompute, Mapping):
             raise GenericLiveV1SubmissionError(
                 "submission requires the exact raw-source reproduction proof"

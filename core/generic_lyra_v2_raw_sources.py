@@ -32,6 +32,7 @@ GENERIC_LYRA_RAW_SOURCE_NAMES = frozenset(
         "forecast_risk_policy",
         "forecast_risk_policy_proposal",
         "forecast_risk_policy_owner_decision",
+        "live_owner_decision",
         "price_panel",
     }
 )

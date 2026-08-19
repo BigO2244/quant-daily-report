@@ -39,6 +39,7 @@ from core.lyra_governed_evidence import (
 )
 from core.lyra_target_selection import validate_lyra_target_selection_evidence
 from core.portfolio_operating_model import content_hash as legacy_content_hash
+from core.owner_decision import OwnerDecisionError, parse_owner_decision
 from core.sleeve_decision import canonical_json, seal_sleeve_decision, validate_sleeve_decision
 
 
@@ -75,6 +76,42 @@ def _timestamp(value: Any, *, label: str) -> tuple[str, dt.datetime]:
     if parsed.tzinfo is None:
         raise GenericLyraV2ProducerError(f"{label} must include a timezone")
     return raw, parsed
+
+
+def _validate_live_owner_policy_binding(
+    *, live_owner_decision: Mapping[str, Any],
+    policy_proposal: Mapping[str, Any],
+    policy_owner_decision: Mapping[str, Any], policy: Mapping[str, Any],
+    execution_session: str,
+) -> dict[str, Any]:
+    """Use the independently protected session owner decision as trust anchor."""
+
+    try:
+        owner = parse_owner_decision(live_owner_decision)
+    except (OwnerDecisionError, TypeError, ValueError) as exc:
+        raise GenericLyraV2ProducerError(
+            "Live owner policy trust anchor is invalid"
+        ) from exc
+    patch = owner.approved_policy_patch
+    expected = {
+        "lyra_evidence_policy_proposal_hash": policy_proposal["content_hash"],
+        "lyra_evidence_policy_owner_decision_hash": (
+            policy_owner_decision["content_hash"]
+        ),
+        "lyra_evidence_policy_terms": policy_proposal["policy_terms"],
+    }
+    if (
+        not owner.approved
+        or owner.owner != "Brett Olson"
+        or owner.effective_session != execution_session
+        or any(patch.get(key) != value for key, value in expected.items())
+        or policy["owner_decision_hash"] != policy_owner_decision["content_hash"]
+        or policy["live_owner_decision_hash"] != owner.content_hash
+    ):
+        raise GenericLyraV2ProducerError(
+            "Live owner decision does not bind the exact evidence-policy chain"
+        )
+    return owner.to_dict()
 
 
 def _validate_source_session(payload: Mapping[str, Any], *, trade_date: str) -> dict[str, Any]:
@@ -298,6 +335,7 @@ def build_generic_lyra_v2_decision_batch(
     forecast_risk_policy: Mapping[str, Any],
     forecast_risk_policy_proposal: Mapping[str, Any],
     forecast_risk_policy_owner_decision: Mapping[str, Any],
+    live_owner_decision: Mapping[str, Any],
     session_as_of: str,
     generated_at: str,
 ) -> dict[str, Any]:
@@ -347,6 +385,13 @@ def build_generic_lyra_v2_decision_batch(
         forecast_risk_policy_owner_decision,
         proposal=policy_proposal,
         as_of=generated_at,
+    )
+    live_owner = _validate_live_owner_policy_binding(
+        live_owner_decision=live_owner_decision,
+        policy_proposal=policy_proposal,
+        policy_owner_decision=policy_owner_decision,
+        policy=policy,
+        execution_session=trade_date,
     )
     if (
         selection["frozen_universe_symbols"] != sorted(members)
@@ -416,6 +461,7 @@ def build_generic_lyra_v2_decision_batch(
         {"artifact_type": "prior_lyra_shadow_source", "schema_version": "legacy_shadow_snapshot_json", "content_hash": prior_lyra_source_hash, "sleeve_id": LYRA_SLEEVE_ID},
         {"artifact_type": "governed_universe_freeze", "schema_version": freeze["schema_version"], "content_hash": freeze["content_hash"], "sleeve_id": LYRA_SLEEVE_ID},
         {"artifact_type": "governed_universe_bytes", "schema_version": "csv", "content_hash": freeze["source_sha256"], "sleeve_id": LYRA_SLEEVE_ID},
+        {"artifact_type": "live_owner_policy_anchor", "schema_version": "caerus.owner_decision.v1", "content_hash": live_owner["content_hash"], "sleeve_id": LYRA_SLEEVE_ID},
     ])
     sources = sorted(sources, key=canonical_json)
     decision_body = {
@@ -450,6 +496,7 @@ def build_generic_lyra_v2_decision_batch(
             risk["content_hash"], liquidity["content_hash"], capacity["content_hash"],
             market["content_hash"], selection["content_hash"], policy["content_hash"],
             policy_proposal["content_hash"], policy_owner_decision["content_hash"],
+            live_owner["content_hash"],
         ],
     )
     result = {
@@ -462,6 +509,7 @@ def build_generic_lyra_v2_decision_batch(
         "forecast_risk_policy": policy,
         "forecast_risk_policy_proposal": policy_proposal,
         "forecast_risk_policy_owner_decision": policy_owner_decision,
+        "live_owner_decision": live_owner,
         "universe_freeze": freeze, "universe_members": universe_members,
         "prior_target_rows": prior_targets,
         "session_snapshot": governed_session, "forecast_risk": risk,
@@ -531,6 +579,7 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
         "effective_target_date", "captured_at", "status", "market_data_snapshot",
         "target_selection_evidence", "forecast_risk_policy",
         "forecast_risk_policy_proposal", "forecast_risk_policy_owner_decision",
+        "live_owner_decision",
         "universe_freeze",
         "universe_members", "prior_target_rows", "session_snapshot",
         "forecast_risk", "liquidity", "capacity", "decision", "readiness",
@@ -569,6 +618,13 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
         payload.get("forecast_risk_policy_owner_decision"),
         proposal=policy_proposal,
         as_of=payload.get("captured_at"),
+    )
+    live_owner = _validate_live_owner_policy_binding(
+        live_owner_decision=payload.get("live_owner_decision"),
+        policy_proposal=policy_proposal,
+        policy_owner_decision=policy_owner_decision,
+        policy=policy,
+        execution_session=str(payload.get("execution_session") or ""),
     )
     session = validate_lyra_governed_session_snapshot(payload.get("session_snapshot"))
     # Revalidate the freeze against the protected prospective session.  This
@@ -654,6 +710,7 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
         {"artifact_type": "prior_lyra_shadow_source", "schema_version": "legacy_shadow_snapshot_json", "content_hash": session["prior_lyra_source_hash"], "sleeve_id": LYRA_SLEEVE_ID},
         {"artifact_type": "governed_universe_freeze", "schema_version": freeze["schema_version"], "content_hash": freeze["content_hash"], "sleeve_id": LYRA_SLEEVE_ID},
         {"artifact_type": "governed_universe_bytes", "schema_version": "csv", "content_hash": freeze["source_sha256"], "sleeve_id": LYRA_SLEEVE_ID},
+        {"artifact_type": "live_owner_policy_anchor", "schema_version": "caerus.owner_decision.v1", "content_hash": live_owner["content_hash"], "sleeve_id": LYRA_SLEEVE_ID},
     ])
     decision_body = {
         "schema_version": "caerus.sleeve_decision.v2",
@@ -691,6 +748,7 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
             risk["content_hash"], liquidity["content_hash"], capacity["content_hash"],
             market["content_hash"], selection["content_hash"], policy["content_hash"],
             policy_proposal["content_hash"], policy_owner_decision["content_hash"],
+            live_owner["content_hash"],
         ],
     )
     if expected_readiness != payload.get("readiness"):
