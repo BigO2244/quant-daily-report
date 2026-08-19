@@ -253,6 +253,21 @@ still pins the earlier disabled SHA, so the mismatch is an additional
 fail-closed barrier; submission, schedule, and posttrade flags remain zero and
 both generic and legacy gates remain armed.
 
+The separately reviewed, one-date advisory capture boundary is now deployed as
+disabled source at exact SHA
+`44987faf32f591b80fbf803d8e09f715dcef1970`. It fixes the signal at Monday
+2026-08-24, the execution/capture session at Tuesday 2026-08-25, and the
+earliest capture time at 08:15 America/New_York. Its disabled path reads no
+capture inputs and writes nothing; its enabled path can write only immutable
+advisory evidence and has no broker, submission, activation, or execution
+authority. Deployment evidence is sealed at
+[`governed_lyra_capture_boundary_source_deployment_2026-08-19.json`](evidence/governed_lyra_capture_boundary_source_deployment_2026-08-19.json),
+content hash
+`0888d46975915a861e5205a348f8be8abcab0e23273b3b831bc1d6d6bbb8deee`.
+The capture config and capture cron remain absent; installing or enabling them
+is not owner approval and must wait for the exact policy and session owner
+artifacts named above.
+
 A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),
 with its owner brief at

@@ -1426,6 +1426,17 @@ content hash
 Actual activation remains blocked on future facts and explicit owner actions,
 not on additional source implementation.
 
+The reviewed one-date capture boundary is also deployed as disabled source at
+exact SHA `44987faf32f591b80fbf803d8e09f715dcef1970`. It can only produce
+immutable advisory evidence for the Monday 2026-08-24 signal and Tuesday
+2026-08-25 execution session at or after 08:15 America/New_York. The disabled
+path performs no input reads or writes, and the code has no broker, activation,
+submission, or execution reachability. The capture config and capture cron were
+not installed. The deployment is sealed in
+[`governed_lyra_capture_boundary_source_deployment_2026-08-19.json`](../evidence/governed_lyra_capture_boundary_source_deployment_2026-08-19.json),
+content hash
+`0888d46975915a861e5205a348f8be8abcab0e23273b3b831bc1d6d6bbb8deee`.
+
 The adaptive policy choice is now concrete rather than implicit. Candidate
 hash `0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`
 selects only registry/deployment-approved Shadow sleeves that pass 60-session,
