@@ -32,6 +32,7 @@ class Broker:
         self.status = status
         self.terminal_status = terminal_status
         self.by_id = {}
+        self.cancel_contexts = []
 
     def get_account(self):
         return {
@@ -84,6 +85,7 @@ class Broker:
         return order
 
     def cancel_generic_live_v4_order(self, **kwargs):
+        self.cancel_contexts.append(kwargs["mutation_context"])
         order = self.by_id[kwargs["broker_order_id"]]
         order["status"] = "canceled"
 
@@ -268,6 +270,12 @@ def test_partial_or_still_open_order_is_canceled_and_never_treated_as_green(
     assert result["filled_quantity"] == expected_filled
     assert result["cancel_performed"] is expected_cancel
     assert result["broker_order"]["broker_status"] == "canceled"
+    context = broker.cancel_contexts[0]
+    assert context["action"] == "CANCEL"
+    assert context["broker_order_id"] == result["broker_order"]["broker_order_id"]
+    assert _GENERIC_LIVE_V4_CAPABILITY.verify(
+        context["content_hash"], context["capability_signature"]
+    )
     assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
 
 
@@ -332,6 +340,7 @@ def test_exact_plan_client_id_and_signed_mutation_context_reach_boundary(tmp_pat
     )
     context = captured["mutation_context"]
     assert captured["client_order_id"] == order["client_order_id"]
+    assert context["action"] == "SUBMIT"
     assert context["client_order_id"] == order["client_order_id"]
     assert context["limit_price"] == order["enforcement_price"]
     assert context["content_hash"] == result["mutation_context_hash"]

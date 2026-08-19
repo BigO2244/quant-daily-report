@@ -1009,7 +1009,7 @@ class AlpacaBroker:
         if str(tif).strip().lower() != "day":
             raise RuntimeError("generic Live v4 requires DAY time in force")
         context_fields = {
-            "schema_version", "effective_session", "owner_decision_hash",
+            "schema_version", "action", "effective_session", "owner_decision_hash",
             "preflight_hash", "plan_hash", "execution_policy_hash",
             "account_id_hash", "deployed_sha", "order_id", "client_order_id",
             "symbol", "side", "quantity", "order_type", "time_in_force",
@@ -1033,6 +1033,8 @@ class AlpacaBroker:
             raise RuntimeError("generic Live v4 mutation context signature mismatch")
         if mutation_context.get("schema_version") != "caerus.generic_live_v1_mutation_context.v1":
             raise RuntimeError("generic Live v4 mutation context schema differs")
+        if mutation_context.get("action") != "SUBMIT":
+            raise RuntimeError("generic Live v4 mutation context action differs")
         for field in ("owner_decision_hash", "preflight_hash", "plan_hash", "execution_policy_hash", "account_id_hash"):
             value = mutation_context.get(field)
             if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
@@ -1076,7 +1078,22 @@ class AlpacaBroker:
         _require_generic_live_v4_capability(_generic_live_v4_capability)
         if bool(self.paper) or str(self.base_url or "").strip().lower().rstrip("/") != "https://api.alpaca.markets":
             raise RuntimeError("generic Live v4 cancellation requires canonical Live broker")
-        if not isinstance(mutation_context, Mapping) or mutation_context.get("schema_version") != "caerus.generic_live_v1_mutation_context.v1":
+        cancellation_fields = {
+            "schema_version", "action", "effective_session", "owner_decision_hash",
+            "preflight_hash", "plan_hash", "execution_policy_hash",
+            "account_id_hash", "deployed_sha", "order_id", "client_order_id",
+            "symbol", "side", "quantity", "order_type", "time_in_force",
+            "extended_hours", "allow_fractional_shares", "quantity_precision",
+            "limit_price", "max_fee_usd", "maximum_gross_usd",
+            "content_hash", "capability_signature", "broker_order_id",
+        }
+        if (
+            not isinstance(mutation_context, Mapping)
+            or set(mutation_context) != cancellation_fields
+            or mutation_context.get("schema_version") != "caerus.generic_live_v1_cancellation_context.v1"
+            or mutation_context.get("action") != "CANCEL"
+            or mutation_context.get("broker_order_id") != str(broker_order_id)
+        ):
             raise RuntimeError("generic Live v4 cancellation context is invalid")
         body = dict(mutation_context)
         signature = body.pop("capability_signature", None)

@@ -95,6 +95,7 @@ def _mutation_context(
 ) -> dict[str, Any]:
     body = {
         "schema_version": "caerus.generic_live_v1_mutation_context.v1",
+        "action": "SUBMIT",
         "effective_session": preflight["effective_session"],
         "owner_decision_hash": preflight["owner_decision_hash"],
         "preflight_hash": preflight["content_hash"],
@@ -116,6 +117,22 @@ def _mutation_context(
         "max_fee_usd": 0.01,
         "maximum_gross_usd": 437.0,
     }
+    body["content_hash"] = _hash(body)
+    body["capability_signature"] = _GENERIC_LIVE_V4_CAPABILITY.sign(body["content_hash"])
+    return body
+
+
+def _cancellation_context(
+    *, submission_context: Mapping[str, Any], broker_order_id: str
+) -> dict[str, Any]:
+    body = {
+        key: copy.deepcopy(value)
+        for key, value in submission_context.items()
+        if key not in {"content_hash", "capability_signature"}
+    }
+    body["schema_version"] = "caerus.generic_live_v1_cancellation_context.v1"
+    body["action"] = "CANCEL"
+    body["broker_order_id"] = str(broker_order_id)
     body["content_hash"] = _hash(body)
     body["capability_signature"] = _GENERIC_LIVE_V4_CAPABILITY.sign(body["content_hash"])
     return body
@@ -637,8 +654,11 @@ def _execute_generic_live_v1_session(
                 )
             cancel_performed = False
             if broker_status in open_statuses or broker_status == "partially_filled":
+                cancel_context = _cancellation_context(
+                    submission_context=context, broker_order_id=broker_order_id
+                )
                 broker.cancel_generic_live_v4_order(
-                    broker_order_id=broker_order_id, mutation_context=context,
+                    broker_order_id=broker_order_id, mutation_context=cancel_context,
                     _generic_live_v4_capability=_GENERIC_LIVE_V4_CAPABILITY,
                 )
                 cancel_performed = True
