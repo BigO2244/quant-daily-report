@@ -242,6 +242,17 @@ turnover. It is pending Brett's approval and cannot be used to mark a Lyra
 decision READY until a separate immutable owner decision binds this exact
 proposal.
 
+The prospective Lyra v2 producer and all raw-source/owner-policy activation
+bindings are now implemented, independently reviewed, and deployed as disabled
+source at exact SHA `20743ad2b25217d0a236d10a0f64f0430288c744`. The sealed
+deployment evidence is
+[`generic_lyra_v2_source_deployment_2026-08-19.json`](evidence/generic_lyra_v2_source_deployment_2026-08-19.json),
+content hash `507d7787d8e751343c8421c86f482b891e999b3bb3f1fd1cf71f228d8b66d377`.
+This closes the implementation side of P0-1 only. The active generic config
+still pins the earlier disabled SHA, so the mismatch is an additional
+fail-closed barrier; submission, schedule, and posttrade flags remain zero and
+both generic and legacy gates remain armed.
+
 A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),
 with its owner brief at
