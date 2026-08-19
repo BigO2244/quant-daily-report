@@ -101,6 +101,52 @@ def test_dry_run_persists_intent_without_broker_write(tmp_path):
     assert (tmp_path / "2026-08-25" / "intent.json").exists()
 
 
+def test_full_fake_fill_path_reconciles_scaled_target(tmp_path):
+    plan = subject.build_portfolio_plan(**_args())
+
+    class Broker:
+        def __init__(self):
+            self.positions = {}
+            self.cash = 460.90
+
+        def find_order_by_client_id(self, client_id):
+            return None
+
+        def submit_lyra_live_portfolio_market_order(self, **values):
+            notional = float(values["notional"])
+            quantity = notional / 100.0
+            self.positions[values["symbol"]] = quantity
+            self.cash -= notional
+            return {
+                "id": f"broker-{values['symbol']}",
+                "client_order_id": values["client_order_id"],
+                "symbol": values["symbol"], "side": "BUY", "status": "filled",
+                "qty": str(quantity), "filled_qty": str(quantity),
+                "filled_avg_price": "100.0",
+            }
+
+        def get_order(self, order_id):
+            raise AssertionError("filled market receipt should not need polling")
+
+        def get_account(self):
+            return {"equity": "460.90", "cash": str(self.cash)}
+
+        def get_positions(self):
+            return [{"symbol": symbol, "qty": str(quantity)} for symbol, quantity in self.positions.items()]
+
+        def get_latest_trades(self, symbols):
+            return {symbol: {"price": 100.0} for symbol in symbols}
+
+    result = execute_portfolio_plan(
+        owner_decision=OWNER, plan=plan, broker=Broker(), state_root=tmp_path,
+        executed_at="2026-08-25T09:36:00-04:00", submit_enabled=True,
+    )
+    assert result["status"] == "COMPLETE"
+    assert result["broker_write_performed"] is True
+    assert len(result["submitted_orders"]) == 5
+    assert result["posttrade_reconciliation"]["status"] == "ALIGNED"
+
+
 def test_initialization_is_hash_and_symbol_pinned(monkeypatch):
     raw = json.dumps({
         "strategy_slug": "caerus_lyra", "source_variant": subject.LYRA_VARIANT,
