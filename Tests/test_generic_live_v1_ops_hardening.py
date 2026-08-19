@@ -246,7 +246,7 @@ def test_generic_config_rejects_secret_and_raw_account_sentinels(tmp_path: Path)
 def test_cron_entry_is_date_bound_duplicate_free_and_conflict_closed(tmp_path: Path) -> None:
     root = tmp_path / "runtime"
     root.mkdir(mode=0o700)
-    wrapper = root / "cron_generic_live_v1.sh"
+    wrapper = root / "generic_live_v1_bootstrap_guard.sh"
     _protected_file(wrapper, "#!/usr/bin/env bash\n")
     wrapper.chmod(0o700)
     line = render_cron_line(
@@ -259,7 +259,9 @@ def test_cron_entry_is_date_bound_duplicate_free_and_conflict_closed(tmp_path: P
     assert installed.count(line) == 1
     assert "19 8 *" in line
     assert "--effective-session 2026-08-19" in line
-    assert update_crontab(installed, exact_line=line, install=False) == "MAILTO=x\n"
+    assert update_crontab(installed, exact_line=line, install=False) == (
+        "MAILTO=x\nCRON_TZ=America/New_York\n"
+    )
     conflicting = line.replace("2026-08-19", "2026-08-20")
     with pytest.raises(GenericLiveV1OpsError, match="different generic Live"):
         update_crontab(conflicting + "\n", exact_line=line, install=True)
@@ -279,6 +281,9 @@ def test_runtime_pin_mismatch_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
         "CAERUS_GENERIC_LIVE_OWNER_DECISION_HASH": preflight["owner_decision_hash"],
         "CAERUS_GENERIC_LIVE_PREFLIGHT_HASH": preflight["content_hash"],
         "CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED": "0",
+        "CAERUS_GENERIC_LIVE_INPUT_ROOT": "/home/brettolson/.caerus/generic_live_v1_inputs",
+        "CAERUS_GENERIC_LIVE_STATE_ROOT": "/home/brettolson/.caerus/generic_live_v1_state",
+        "CAERUS_GENERIC_LIVE_SESSION_GATE_PATH": "/home/brettolson/.caerus/generic_live_v1_state/session_gate.json",
         "CAERUS_GENERIC_LIVE_OWNER_APPROVED": "1",
         "CAERUS_GENERIC_LIVE_SUBMIT_APPROVED": "1",
         "CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED": "1",
@@ -304,6 +309,12 @@ def test_secret_and_raw_account_sentinels_are_rejected(payload: dict) -> None:
         reject_sensitive_payload(payload)
 
 
+def test_forced_secret_value_is_rejected_in_any_payload_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CAERUS_SECRET_SENTINEL", "SENTINEL_SECRET_VALUE")
+    with pytest.raises(GenericLiveV1OpsError, match="sensitive value"):
+        reject_sensitive_payload({"status": "broker said SENTINEL_SECRET_VALUE"})
+
+
 def test_templates_remain_disabled_and_runtime_pinned() -> None:
     env_template = (ROOT / "config/templates/generic_live_v1.env.example").read_text()
     cron_wrapper = ROOT / "scripts/cron_generic_live_v1.sh"
@@ -313,4 +324,5 @@ def test_templates_remain_disabled_and_runtime_pinned() -> None:
     assert "CAERUS_GENERIC_LIVE_REPO_ROOT=/home/brettolson/quant-daily-report" in env_template
     assert "--effective-session" in cron_text
     assert "CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED:-0" in cron_text
+    assert "CAERUS_GENERIC_LIVE_BOOTSTRAP_GUARD:-0" in cron_text
     assert os.access(cron_wrapper, os.X_OK)

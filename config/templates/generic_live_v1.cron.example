@@ -1,5 +1,6 @@
 # Render and install one exact, date-bound line with
 # scripts/manage_generic_live_v1_cron.py. Never install a weekday-recurring
 # generic Live entry. The posttrade observation schedule remains disabled.
-36 9 DD MM * /home/brettolson/quant-daily-report/scripts/cron_generic_live_v1.sh --effective-session YYYY-MM-DD >> /home/brettolson/quant-daily-report/logs/cron_generic_live_v1.log 2>&1 # CAERUS_GENERIC_LIVE_V1_SESSION=YYYY-MM-DD
+CRON_TZ=America/New_York
+36 9 DD MM * /home/brettolson/quant-daily-report/scripts/generic_live_v1_bootstrap_guard.sh --effective-session YYYY-MM-DD >> /home/brettolson/quant-daily-report/logs/cron_generic_live_v1.log 2>&1 # CAERUS_GENERIC_LIVE_V1_SESSION=YYYY-MM-DD
 # POSTTRADE_DISABLED_BY_DEFAULT CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED=0

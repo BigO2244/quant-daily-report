@@ -7,6 +7,7 @@ shell around Live v1 cannot be redirected through symlinks or broad paths.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -28,6 +29,13 @@ _FORBIDDEN_KEY_FRAGMENTS = (
     "password",
     "credential",
 )
+GENERIC_LIVE_V1_BREAK_TRIGGERS = frozenset(
+    {
+        "PREFLIGHT_BREAK", "SUBMISSION_BREAK", "ORDER_BREAK",
+        "RECONCILIATION_BREAK", "ACCOUNTING_BREAK", "REPORTING_BREAK",
+    }
+)
+CRON_TZ_LINE = "CRON_TZ=America/New_York"
 
 
 def reject_sensitive_payload(payload: Any) -> None:
@@ -42,6 +50,18 @@ def reject_sensitive_payload(payload: Any) -> None:
     elif isinstance(payload, (list, tuple)):
         for value in payload:
             reject_sensitive_payload(value)
+    elif isinstance(payload, str):
+        sensitive_values = {
+            os.environ.get(key, "")
+            for key in (
+                "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "ALPACA_API_KEY",
+                "ALPACA_API_SECRET", "CAERUS_GENERIC_LIVE_RAW_ACCOUNT_ID",
+                "CAERUS_SECRET_SENTINEL",
+            )
+        }
+        sensitive_values.discard("")
+        if any(value in payload for value in sensitive_values):
+            raise GenericLiveV1OpsError("sensitive value is forbidden in persisted or emitted payload")
 
 
 def _absolute_no_symlink(path: Path) -> Path:
@@ -209,14 +229,127 @@ def restore_config_backup(
     return {"active_path": str(active), "restored_from": str(backup)}
 
 
+def _file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def uninstall_exact_generic_cron(current: str, *, exact_line: str) -> str:
+    """Remove only one exact generic line; reject lookalike generic entries."""
+
+    if not isinstance(current, str) or not isinstance(exact_line, str) or not exact_line:
+        raise GenericLiveV1OpsError("cron rollback inputs are invalid")
+    marker = "# CAERUS_GENERIC_LIVE_V1_SESSION="
+    lines = current.splitlines()
+    conflicts = [line for line in lines if marker in line and line != exact_line]
+    if conflicts:
+        raise GenericLiveV1OpsError("generic cron contains a non-exact conflicting entry")
+    retained = [line for line in lines if line != exact_line]
+    return "\n".join(retained).rstrip() + ("\n" if retained else "")
+
+
+def perform_generic_live_v1_rollback(
+    *,
+    trigger: str,
+    rearm_action: Any,
+    current_crontab: str,
+    exact_cron_line: str,
+    apply_crontab: Any,
+    active_config_path: Path | str,
+    backup_config_path: Path | str,
+    paper_paths: Sequence[Path | str],
+    evidence_path: Path | str,
+    allowed_roots: Sequence[Path | str],
+    rolled_back_at: str,
+) -> dict[str, Any]:
+    """Idempotently rearm and roll back one generic Live v1 break.
+
+    The caller supplies the rearm and crontab mutation boundaries so tests can
+    prove semantics without touching the host scheduler. PAPER files are only
+    read and their byte hashes must remain identical across the rollback.
+    """
+
+    if trigger not in GENERIC_LIVE_V1_BREAK_TRIGGERS:
+        raise GenericLiveV1OpsError("rollback trigger is not a named Live v1 break")
+    if not callable(rearm_action) or not callable(apply_crontab):
+        raise GenericLiveV1OpsError("rollback actions must be callable")
+    active = secure_path(active_config_path, allowed_roots=allowed_roots, must_exist=False, kind="file")
+    backup = secure_path(backup_config_path, allowed_roots=allowed_roots, must_exist=False, kind="file")
+    papers = [secure_path(path, allowed_roots=allowed_roots, must_exist=True, kind="file") for path in paper_paths]
+    if not papers:
+        raise GenericLiveV1OpsError("rollback requires explicit PAPER byte paths")
+    paper_before = {str(path): _file_hash(path) for path in papers}
+
+    rearm = rearm_action(trigger)
+    rearm_hash = rearm.get("content_hash") if isinstance(rearm, Mapping) else None
+    if (
+        not isinstance(rearm, Mapping)
+        or rearm.get("status") != "ARMED"
+        or not isinstance(rearm_hash, str)
+        or len(rearm_hash) != 64
+        or any(character not in "0123456789abcdef" for character in rearm_hash)
+    ):
+        raise GenericLiveV1OpsError("rollback did not produce an ARMED state")
+    updated_crontab = uninstall_exact_generic_cron(current_crontab, exact_line=exact_cron_line)
+    apply_crontab(updated_crontab)
+
+    if backup.exists():
+        restore_config_backup(active_path=active, backup_path=backup, allowed_roots=allowed_roots)
+        config_action = "RESTORED_BACKUP"
+    elif active.exists():
+        require_protected_mode(active, directory=False)
+        active.unlink()
+        directory_fd = os.open(active.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        config_action = "REMOVED_NO_PRIOR_CONFIG"
+    else:
+        config_action = "ALREADY_ABSENT"
+
+    paper_after = {str(path): _file_hash(path) for path in papers}
+    paper_unchanged = paper_before == paper_after
+    body: dict[str, Any] = {
+        "schema_version": "caerus.generic_live_v1_rollback_evidence.v1",
+        "trigger": trigger,
+        "rolled_back_at": rolled_back_at,
+        "status": "ROLLED_BACK_ARMED" if paper_unchanged else "PAPER_BYTES_CHANGED",
+        "rearm_hash": rearm_hash,
+        "cron_exact_line_removed": exact_cron_line not in updated_crontab.splitlines(),
+        "config_action": config_action,
+        "paper_hashes_before": paper_before,
+        "paper_hashes_after": paper_after,
+        "paper_bytes_unchanged": paper_unchanged,
+    }
+    reject_sensitive_payload(body)
+    body["content_hash"] = hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
+    encoded = (json.dumps(body, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode()
+    atomic_write_protected(
+        evidence_path, encoded, allowed_roots=allowed_roots, replace=False
+    )
+    if not paper_unchanged:
+        raise GenericLiveV1OpsError("PAPER bytes changed during generic Live rollback")
+    return body
+
+
 __all__ = [
     "GenericLiveV1OpsError",
+    "CRON_TZ_LINE",
+    "GENERIC_LIVE_V1_BREAK_TRIGGERS",
     "atomic_write_protected",
     "ensure_protected_directory",
     "install_config_with_backup",
+    "perform_generic_live_v1_rollback",
     "reject_sensitive_payload",
     "require_protected_mode",
     "restore_config_backup",
     "secure_path",
     "secure_read_json",
+    "uninstall_exact_generic_cron",
 ]

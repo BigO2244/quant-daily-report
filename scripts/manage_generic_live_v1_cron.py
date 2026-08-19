@@ -10,7 +10,12 @@ import stat
 import subprocess
 from pathlib import Path
 
-from core.generic_live_v1_ops import GenericLiveV1OpsError, secure_path
+from core.generic_live_v1_ops import (
+    CRON_TZ_LINE,
+    GenericLiveV1OpsError,
+    atomic_write_protected,
+    secure_path,
+)
 
 
 MARKER_PREFIX = "# CAERUS_GENERIC_LIVE_V1_SESSION="
@@ -28,6 +33,8 @@ def render_cron_line(
         raise GenericLiveV1OpsError("effective session must use canonical YYYY-MM-DD")
     wrapper = secure_path(wrapper_path, allowed_roots=allowed_roots, must_exist=True, kind="file")
     log = secure_path(log_path, allowed_roots=allowed_roots, must_exist=False, kind="file")
+    if wrapper.name != "generic_live_v1_bootstrap_guard.sh":
+        raise GenericLiveV1OpsError("generic cron must enter through the bootstrap rollback guard")
     if not os.access(wrapper, os.X_OK) or stat.S_IMODE(wrapper.stat().st_mode) & 0o022:
         raise GenericLiveV1OpsError("cron wrapper must be executable and not group/world writable")
     if any(character.isspace() for character in f"{wrapper}{log}"):
@@ -41,10 +48,25 @@ def render_cron_line(
 
 def update_crontab(existing: str, *, exact_line: str, install: bool) -> str:
     lines = existing.splitlines()
+    timezone_lines = [line for line in lines if line.strip().startswith("CRON_TZ=")]
+    if any(line.strip() != CRON_TZ_LINE for line in timezone_lines):
+        raise GenericLiveV1OpsError("crontab timezone differs from America/New_York")
     conflicts = [line for line in lines if MARKER_PREFIX in line and line != exact_line]
     if conflicts:
         raise GenericLiveV1OpsError("a different generic Live v1 session cron entry already exists")
-    retained = [line for line in lines if line != exact_line]
+    retained: list[str] = []
+    timezone_retained = False
+    for line in lines:
+        if line == exact_line:
+            continue
+        if line.strip() == CRON_TZ_LINE:
+            if not timezone_retained:
+                retained.append(CRON_TZ_LINE)
+                timezone_retained = True
+            continue
+        retained.append(line)
+    if install and not timezone_retained:
+        retained.append(CRON_TZ_LINE)
     if install:
         retained.append(exact_line)
     return "\n".join(retained).rstrip() + ("\n" if retained else "")
@@ -64,6 +86,7 @@ def main() -> int:
     parser.add_argument("--wrapper-path", type=Path, required=True)
     parser.add_argument("--log-path", type=Path, required=True)
     parser.add_argument("--allowed-root", action="append", type=Path, required=True)
+    parser.add_argument("--backup-path", type=Path)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     line = render_cron_line(
@@ -75,10 +98,18 @@ def main() -> int:
     if args.mode == "render":
         print(line)
         return 0
-    updated = update_crontab(
-        _current_crontab(), exact_line=line, install=args.mode == "install"
-    )
+    current = _current_crontab()
+    updated = update_crontab(current, exact_line=line, install=args.mode == "install")
     if args.apply:
+        if args.mode == "install":
+            if args.backup_path is None:
+                parser.error("--backup-path is required for applied install")
+            atomic_write_protected(
+                args.backup_path,
+                current.encode(),
+                allowed_roots=args.allowed_root,
+                replace=False,
+            )
         subprocess.run(["crontab", "-"], input=updated, text=True, check=True)
     else:
         print(updated, end="")

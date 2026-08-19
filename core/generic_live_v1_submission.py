@@ -19,7 +19,7 @@ import fcntl
 import stat
 import time
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from authority.lane_exact_plan import canonical_json, validate_lane_exact_execution_plan
 from brokers.alpaca_broker import _GENERIC_LIVE_V4_CAPABILITY
@@ -77,6 +77,21 @@ def _validate_submission_result(payload: Mapping[str, Any]) -> dict[str, Any]:
     )
     if payload.get("result_id") != expected_id:
         raise GenericLiveV1SubmissionError("generic Live v1 submission result identity differs")
+    observation_hashes = payload.get("broker_observation_hashes")
+    if not isinstance(observation_hashes, list) or len(observation_hashes) != len(set(observation_hashes)) or any(
+        not isinstance(value, str) or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+        for value in observation_hashes
+    ):
+        raise GenericLiveV1SubmissionError("submission broker observation hashes are invalid")
+    cancellation_hash = payload.get("cancellation_evidence_hash")
+    if cancellation_hash is not None and (
+        not isinstance(cancellation_hash, str) or len(cancellation_hash) != 64
+        or any(character not in "0123456789abcdef" for character in cancellation_hash)
+    ):
+        raise GenericLiveV1SubmissionError("submission cancellation evidence hash is invalid")
+    if bool(payload.get("cancel_performed", False)) is not bool(cancellation_hash):
+        raise GenericLiveV1SubmissionError("submission cancellation evidence binding differs")
     return copy.deepcopy(dict(payload))
 
 
@@ -361,6 +376,67 @@ def _safe_broker_order(order: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _safe_broker_observation(kind: str, value: Any) -> Any:
+    """Normalize broker reads without credentials or raw account identifiers."""
+
+    if kind == "account" and isinstance(value, Mapping):
+        return {
+            "account_id_hash": str(value.get("id_hash") or ""),
+            "status": str(value.get("status") or ""),
+            "trading_blocked": value.get("trading_blocked"),
+            "account_blocked": value.get("account_blocked"),
+            "equity": str(value.get("equity") or ""),
+            "cash": str(value.get("cash") or ""),
+            "buying_power": str(value.get("buying_power") or ""),
+        }
+    if kind in {"positions", "open_orders"} and isinstance(value, list):
+        if kind == "positions":
+            return [
+                {"symbol": str(row.get("symbol") or "").upper(), "quantity": str(row.get("qty") or row.get("quantity") or "")}
+                for row in value if isinstance(row, Mapping)
+            ]
+        return [_safe_broker_order(row) for row in value if isinstance(row, Mapping)]
+    if kind == "asset" and isinstance(value, Mapping):
+        return {
+            "symbol": str(value.get("symbol") or "").upper(),
+            "status": str(value.get("status") or ""),
+            "tradable": value.get("tradable"),
+        }
+    if kind == "calendar" and isinstance(value, Mapping):
+        return {
+            "trade_date": str(value.get("trade_date") or ""),
+            "session_open_et": str(value.get("session_open_et") or ""),
+            "session_close_et": str(value.get("session_close_et") or ""),
+        }
+    if kind in {"client_order_lookup", "submission_response", "order_poll", "cancellation_poll"}:
+        return None if value is None else _safe_broker_order(value)
+    if kind == "cancellation_request" and isinstance(value, Mapping):
+        return {
+            "broker_order_id": str(value.get("broker_order_id") or ""),
+            "cancellation_context_hash": str(value.get("content_hash") or ""),
+        }
+    raise GenericLiveV1SubmissionError(f"unsupported broker observation kind: {kind}")
+
+
+def _persist_broker_observation(
+    *, wal_root: Path, effective_session: str, sequence: int,
+    kind: str, value: Any, recorded_at: str,
+) -> dict[str, Any]:
+    body = {
+        "schema_version": "caerus.generic_live_v1_broker_observation.v1",
+        "effective_session": effective_session,
+        "sequence": sequence,
+        "kind": kind,
+        "recorded_at": recorded_at,
+        "observation": _safe_broker_observation(kind, value),
+    }
+    body["content_hash"] = _hash(body)
+    _write_exclusive(
+        wal_root / f"observation-{sequence:03d}-{kind}-{body['content_hash'][:16]}.json", body
+    )
+    return body
+
+
 def _acquire_session_lock(path: Path) -> int:
     if not path.is_absolute() or path.is_symlink() or path.parent.is_symlink():
         raise GenericLiveV1SubmissionError("session lock path must be absolute and non-symlink")
@@ -382,9 +458,10 @@ def _acquire_session_lock(path: Path) -> int:
 
 def _fresh_broker_preflight(
     *, broker: GenericLiveV1Broker, plan: Mapping[str, Any], preflight: Mapping[str, Any],
-    executed: dt.datetime,
+    executed: dt.datetime, observe: Callable[[str, Any], Mapping[str, Any]],
 ) -> None:
     account = broker.get_account()
+    observe("account", account)
     if account.get("id_hash") != preflight["account_id_hash"]:
         raise GenericLiveV1SubmissionError("fresh broker account pin mismatch")
     if str(account.get("status") or "").upper() != "ACTIVE" or account.get("trading_blocked") is True or account.get("account_blocked") is True:
@@ -399,21 +476,26 @@ def _fresh_broker_preflight(
         raise GenericLiveV1SubmissionError("fresh broker equity/cash/buying power is non-finite or negative")
     if abs(cash - float(plan["starting_cash"])) > 0.01 or abs(equity - float(plan["starting_equity"])) > 0.01:
         raise GenericLiveV1SubmissionError("fresh broker cash/equity differs from exact plan snapshot")
+    position_rows = broker.get_positions()
+    observe("positions", position_rows)
     positions = {
         str(row.get("symbol") or "").upper(): float(row.get("qty") or row.get("quantity") or 0.0)
-        for row in broker.get_positions()
+        for row in position_rows
     }
     expected_positions = {
         str(row["symbol"]): float(row["quantity"]) for row in plan["starting_positions"]
     }
     if positions != expected_positions:
         raise GenericLiveV1SubmissionError("fresh broker positions differ from exact plan snapshot")
-    if broker.list_orders(status="open", limit=100):
+    open_orders = broker.list_orders(status="open", limit=100)
+    observe("open_orders", open_orders)
+    if open_orders:
         raise GenericLiveV1SubmissionError("fresh broker open orders are present")
     orders = [*plan["sell_orders"], *plan["buy_orders"]]
     if orders:
         order = orders[0]
         asset = broker.get_asset(str(order["symbol"]))
+        observe("asset", asset)
         if not isinstance(asset, Mapping) or asset.get("tradable") is not True or str(asset.get("status") or "").lower().split(".")[-1] != "active":
             raise GenericLiveV1SubmissionError("fresh broker asset is not active/tradable")
         required_buying_power = (
@@ -422,6 +504,7 @@ def _fresh_broker_preflight(
         if order["side"] == "BUY" and buying_power + 1e-9 < required_buying_power:
             raise GenericLiveV1SubmissionError("fresh broker buying power is below exact order notional")
     calendar = broker.get_market_session_calendar(plan["trade_date"])
+    observe("calendar", calendar)
     try:
         opened = dt.datetime.fromisoformat(str(calendar["session_open_et"]).replace("Z", "+00:00"))
         closed = dt.datetime.fromisoformat(str(calendar["session_close_et"]).replace("Z", "+00:00"))
@@ -552,6 +635,8 @@ def _execute_generic_live_v1_session(
             "broker_order": None,
             "broker_lookup_performed": False,
             "broker_submission_performed": False,
+            "broker_observation_hashes": [],
+            "cancellation_evidence_hash": None,
             "wal_written": False,
             "rearm_written": False,
             "result_written": False,
@@ -571,6 +656,23 @@ def _execute_generic_live_v1_session(
     session_lock = _acquire_session_lock(
         wal_root / f"session-{preflight['effective_session']}.lock"
     )
+    broker_observation_hashes: list[str] = []
+    observation_sequence = 0
+
+    def observe(kind: str, value: Any) -> Mapping[str, Any]:
+        nonlocal observation_sequence
+        observation_sequence += 1
+        artifact = _persist_broker_observation(
+            wal_root=wal_root,
+            effective_session=preflight["effective_session"],
+            sequence=observation_sequence,
+            kind=kind,
+            value=value,
+            recorded_at=executed_raw,
+        )
+        broker_observation_hashes.append(artifact["content_hash"])
+        return artifact
+
     rearm_payload = _rearm(
         preflight_hash=preflight["content_hash"], plan_hash=exact_plan["content_hash"],
         executed_at=executed_raw, trigger="SESSION_COMPLETE",
@@ -582,7 +684,8 @@ def _execute_generic_live_v1_session(
             plan_hash=exact_plan["content_hash"], effective_session=preflight["effective_session"],
         )
         _fresh_broker_preflight(
-            broker=broker, plan=exact_plan, preflight=preflight, executed=executed
+            broker=broker, plan=exact_plan, preflight=preflight, executed=executed,
+            observe=observe,
         )
         if not orders:
             _atomic_rearm(rearm_path, rearm_payload)
@@ -590,6 +693,7 @@ def _execute_generic_live_v1_session(
             intent_hash = None
             mutation_context_hash = None
             receipt_hash = None
+            cancellation_evidence_hash = None
             client_id = None
             lookup = False
             submitted = False
@@ -613,6 +717,7 @@ def _execute_generic_live_v1_session(
             _write_exclusive(intent_path, intent)
             failure_trigger = "SUBMISSION_BREAK"
             existing = broker.find_order_by_client_id(client_id)
+            observe("client_order_lookup", existing)
             lookup = True
             if existing is None:
                 context = _mutation_context(preflight=preflight, plan=exact_plan, order=order)
@@ -622,6 +727,7 @@ def _execute_generic_live_v1_session(
                     max_fee_usd=0.01, mutation_context=context, tif="day",
                     _generic_live_v4_capability=_GENERIC_LIVE_V4_CAPABILITY,
                 )
+                observe("submission_response", existing)
                 submitted = True
             else:
                 submitted = False
@@ -644,6 +750,7 @@ def _execute_generic_live_v1_session(
                 if attempt + 1 < poll_attempts and poll_interval_seconds:
                     time.sleep(float(poll_interval_seconds))
                 refreshed = broker.get_order(broker_order_id)
+                observe("order_poll", refreshed)
                 if refreshed is None:
                     failure_trigger = "ORDER_BREAK"
                     raise GenericLiveV1SubmissionError("broker order disappeared during lifecycle poll")
@@ -653,24 +760,61 @@ def _execute_generic_live_v1_session(
                     side=order["side"], quantity=quantity,
                 )
             cancel_performed = False
+            cancellation_evidence_hash = None
             if broker_status in open_statuses or broker_status == "partially_filled":
                 cancel_context = _cancellation_context(
                     submission_context=context, broker_order_id=broker_order_id
                 )
-                broker.cancel_generic_live_v4_order(
-                    broker_order_id=broker_order_id, mutation_context=cancel_context,
-                    _generic_live_v4_capability=_GENERIC_LIVE_V4_CAPABILITY,
+                observe("cancellation_request", {
+                    "broker_order_id": broker_order_id,
+                    "content_hash": cancel_context["content_hash"],
+                })
+                cancellation_terminal = False
+                cancellation_operation_failed = False
+                try:
+                    broker.cancel_generic_live_v4_order(
+                        broker_order_id=broker_order_id, mutation_context=cancel_context,
+                        _generic_live_v4_capability=_GENERIC_LIVE_V4_CAPABILITY,
+                    )
+                    cancel_performed = True
+                    for cancel_attempt in range(poll_attempts):
+                        refreshed = broker.get_order(broker_order_id)
+                        observe("cancellation_poll", refreshed)
+                        if refreshed is not None:
+                            existing = refreshed
+                            broker_status = _validate_recovered_order(
+                                existing, client_id=client_id, symbol=order["symbol"],
+                                side=order["side"], quantity=quantity,
+                            )
+                            if broker_status in terminal_break_statuses | {"filled"}:
+                                cancellation_terminal = True
+                                break
+                        if cancel_attempt + 1 < poll_attempts and poll_interval_seconds:
+                            time.sleep(float(poll_interval_seconds))
+                except BaseException:
+                    cancellation_operation_failed = True
+                cancellation = {
+                    "schema_version": "caerus.generic_live_v1_cancellation_evidence.v1",
+                    "effective_session": preflight["effective_session"],
+                    "broker_order_id": broker_order_id,
+                    "cancellation_context_hash": cancel_context["content_hash"],
+                    "status": "TERMINAL" if cancellation_terminal else "UNRESOLVED",
+                    "operation_failed": cancellation_operation_failed,
+                    "terminal_broker_status": broker_status if cancellation_terminal else None,
+                    "broker_observation_hashes": list(broker_observation_hashes),
+                    "recorded_at": executed_raw,
+                }
+                cancellation["content_hash"] = _hash(cancellation)
+                _write_exclusive(
+                    wal_root / f"cancellation-{client_id}-{cancellation['content_hash'][:16]}.json",
+                    cancellation,
                 )
-                cancel_performed = True
-                refreshed = broker.get_order(broker_order_id)
-                if refreshed is None:
+                cancellation_evidence_hash = cancellation["content_hash"]
+                if not cancellation_terminal:
                     failure_trigger = "ORDER_BREAK"
-                    raise GenericLiveV1SubmissionError("broker order missing after cancellation")
-                existing = refreshed
-                broker_status = _validate_recovered_order(
-                    existing, client_id=client_id, symbol=order["symbol"],
-                    side=order["side"], quantity=quantity,
-                )
+                    raise GenericLiveV1SubmissionError(
+                        "broker cancellation remained unresolved after bounded polling"
+                    ) from None
             filled_quantity = float(existing.get("filled_qty") or (quantity if broker_status == "filled" else 0.0))
             if broker_status == "filled" and abs(filled_quantity - quantity) <= 1e-9:
                 status = "FILLED_REARMED" if submitted else "RECOVERED_FILLED_REARMED"
@@ -688,6 +832,8 @@ def _execute_generic_live_v1_session(
                 "recorded_at": executed_raw,
                 "intent_hash": intent_hash,
                 "mutation_context_hash": mutation_context_hash,
+                "broker_observation_hashes": list(broker_observation_hashes),
+                "cancellation_evidence_hash": cancellation_evidence_hash,
                 "broker_order": broker_order,
                 "submission_performed": submitted,
             }
@@ -736,6 +882,8 @@ def _execute_generic_live_v1_session(
         "broker_order": broker_order,
         "broker_lookup_performed": lookup,
         "broker_submission_performed": submitted,
+        "broker_observation_hashes": broker_observation_hashes,
+        "cancellation_evidence_hash": cancellation_evidence_hash,
         "order_lifecycle_status": broker_status if orders else "no_trade",
         "filled_quantity": filled_quantity if orders else 0.0,
         "cancel_performed": cancel_performed if orders else False,
@@ -990,6 +1138,7 @@ def finalize_generic_live_v1_posttrade(
     journal_entries: list[Mapping[str, Any]], performance: Mapping[str, Any],
     dashboard_projection: Mapping[str, Any], finalized_at: str,
     rearm_state_path: Path | str, result_path: Path | str,
+    rollback_handler: Callable[[str], Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Validate factual typed artifacts; arbitrary booleans/hashes are rejected."""
 
@@ -1002,15 +1151,30 @@ def finalize_generic_live_v1_posttrade(
     if exact_plan.get("content_hash") != submission_result.get("plan_hash") or validate_lane_exact_execution_plan(exact_plan):
         raise GenericLiveV1SubmissionError("posttrade exact plan lineage is invalid")
     finalized_raw, _ = _timestamp(finalized_at)
+
+    def rollback_break(trigger: str) -> Mapping[str, Any]:
+        evidence = rollback_handler(trigger)
+        if (
+            not isinstance(evidence, Mapping)
+            or evidence.get("status") != "ROLLED_BACK_ARMED"
+            or evidence.get("trigger") != trigger
+            or evidence.get("paper_bytes_unchanged") is not True
+            or evidence.get("cron_exact_line_removed") is not True
+            or not evidence.get("rearm_hash")
+            or evidence.get("config_action") not in {
+                "RESTORED_BACKUP", "REMOVED_NO_PRIOR_CONFIG", "ALREADY_ABSENT"
+            }
+        ):
+            raise GenericLiveV1SubmissionError(
+                f"{trigger} rollback evidence is incomplete"
+            )
+        return evidence
+
     try:
         order = _validate_order_lifecycle(order_lifecycle, submission_result=submission_result)
     except Exception:
         try:
-            rearm_generic_live_v1_session(
-                state_path=rearm_state_path, preflight_hash=submission_result["preflight_hash"],
-                plan_hash=submission_result["plan_hash"], rearmed_at=finalized_raw,
-                trigger="ORDER_BREAK",
-            )
+            rollback_break("ORDER_BREAK")
         finally:
             raise
     order_green = order["status"] in {"FILLED", "NO_TRADE"}
@@ -1061,11 +1225,7 @@ def finalize_generic_live_v1_posttrade(
             ):
                 raise GenericLiveV1SubmissionError("reconciliation order/fill causality differs")
     except Exception:
-        rearm_generic_live_v1_session(
-            state_path=rearm_state_path, preflight_hash=submission_result["preflight_hash"],
-            plan_hash=submission_result["plan_hash"], rearmed_at=finalized_raw,
-            trigger="RECONCILIATION_BREAK",
-        )
+        rollback_break("RECONCILIATION_BREAK")
         raise
     try:
         journal = validate_accounting_journal(journal_entries)
@@ -1081,11 +1241,7 @@ def finalize_generic_live_v1_posttrade(
         ):
             raise GenericLiveV1SubmissionError("accounting journal lineage differs")
     except Exception:
-        rearm_generic_live_v1_session(
-            state_path=rearm_state_path, preflight_hash=submission_result["preflight_hash"],
-            plan_hash=submission_result["plan_hash"], rearmed_at=finalized_raw,
-            trigger="ACCOUNTING_BREAK",
-        )
+        rollback_break("ACCOUNTING_BREAK")
         raise
     try:
         perf = validate_lane_performance(performance)
@@ -1098,18 +1254,18 @@ def finalize_generic_live_v1_posttrade(
         ):
             raise GenericLiveV1SubmissionError("performance/dashboard scope differs")
     except Exception:
-        rearm_generic_live_v1_session(
-            state_path=rearm_state_path, preflight_hash=submission_result["preflight_hash"],
-            plan_hash=submission_result["plan_hash"], rearmed_at=finalized_raw,
-            trigger="REPORTING_BREAK",
-        )
+        rollback_break("REPORTING_BREAK")
         raise
     final_trigger = "SESSION_COMPLETE" if order_green else "ORDER_BREAK"
-    rearm = rearm_generic_live_v1_session(
-        state_path=rearm_state_path, preflight_hash=submission_result["preflight_hash"],
-        plan_hash=submission_result["plan_hash"], rearmed_at=finalized_raw,
-        trigger=final_trigger,
-    )
+    if order_green:
+        rearm = rearm_generic_live_v1_session(
+            state_path=rearm_state_path, preflight_hash=submission_result["preflight_hash"],
+            plan_hash=submission_result["plan_hash"], rearmed_at=finalized_raw,
+            trigger=final_trigger,
+        )
+    else:
+        rollback = rollback_break("ORDER_BREAK")
+        rearm = {"content_hash": rollback["rearm_hash"]}
     evidence_hashes = sorted([
         order["content_hash"], reconciled["content_hash"],
         *[row["record_hash"] for row in journal], perf["content_hash"], dashboard["content_hash"],

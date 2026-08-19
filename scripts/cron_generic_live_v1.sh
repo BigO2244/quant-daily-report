@@ -9,6 +9,14 @@ readonly REPO_ROOT="/home/brettolson/quant-daily-report"
 readonly GENERIC_ENV="/home/brettolson/.caerus/generic_live_v1.env"
 readonly CREDENTIAL_ENV="/home/brettolson/.caerus/live_pilot.env"
 readonly PYTHON_BIN="/home/brettolson/.venvs/quant-daily-report/bin/python"
+readonly INPUT_ROOT="/home/brettolson/.caerus/generic_live_v1_inputs"
+readonly STATE_ROOT="/home/brettolson/.caerus/generic_live_v1_state"
+readonly FIXED_SESSION_GATE="${STATE_ROOT}/session_gate.json"
+readonly BOOTSTRAP_GUARD="${REPO_ROOT}/scripts/generic_live_v1_bootstrap_guard.sh"
+
+if [[ "${CAERUS_GENERIC_LIVE_BOOTSTRAP_GUARD:-0}" != "1" ]]; then
+    exec "${BOOTSTRAP_GUARD}" "$@"
+fi
 
 if [[ "${1:-}" != "--effective-session" || ! "${2:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ || -n "${3:-}" ]]; then
     echo "usage: $0 --effective-session YYYY-MM-DD" >&2
@@ -27,8 +35,8 @@ done
 
 # These files are owner-only and paths are fixed above; sourcing does not
 # accept caller-selected locations.
-source "${CREDENTIAL_ENV}"
-source "${GENERIC_ENV}"
+source "${CREDENTIAL_ENV}" >/dev/null 2>&1 || exit 78
+source "${GENERIC_ENV}" >/dev/null 2>&1 || exit 78
 
 if [[ "${CAERUS_GENERIC_LIVE_SCHEDULE_ENABLED:-0}" != "1" ]]; then
     exit 0
@@ -37,11 +45,14 @@ fi
 [[ "$(TZ=America/New_York date +%F)" == "${REQUESTED_SESSION}" ]] || exit 0
 [[ "${CAERUS_GENERIC_LIVE_REPO_ROOT:-}" == "${REPO_ROOT}" ]] || exit 78
 [[ "${CAERUS_GENERIC_LIVE_PYTHON_BIN:-}" == "${PYTHON_BIN}" ]] || exit 78
+[[ "${CAERUS_GENERIC_LIVE_INPUT_ROOT:-}" == "${INPUT_ROOT}" ]] || exit 78
+[[ "${CAERUS_GENERIC_LIVE_STATE_ROOT:-}" == "${STATE_ROOT}" ]] || exit 78
 [[ "${CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED:-0}" == "0" ]] || exit 78
 
 readonly PREFLIGHT_PATH="${CAERUS_GENERIC_LIVE_PREFLIGHT_PATH:?missing preflight path}"
 readonly PLAN_PATH="${CAERUS_GENERIC_LIVE_PLAN_PATH:?missing exact plan path}"
 readonly SESSION_GATE_PATH="${CAERUS_GENERIC_LIVE_SESSION_GATE_PATH:?missing session gate path}"
+[[ "${SESSION_GATE_PATH}" == "${FIXED_SESSION_GATE}" ]] || exit 78
 readonly WAL_DIRECTORY="${CAERUS_GENERIC_LIVE_WAL_DIRECTORY:?missing WAL directory}"
 readonly RESULT_PATH="${CAERUS_GENERIC_LIVE_RESULT_PATH:?missing result path}"
 readonly EXECUTED_AT="$(${PYTHON_BIN} -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).isoformat())')"

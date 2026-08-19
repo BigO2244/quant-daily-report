@@ -18,6 +18,10 @@ def main() -> int:
     parser.add_argument("--candidate-path", type=Path)
     parser.add_argument("--allowed-root", action="append", type=Path, required=True)
     args = parser.parse_args()
+    expected_active = Path("/home/brettolson/.caerus/generic_live_v1.env")
+    expected_backup = Path("/home/brettolson/.caerus/generic_live_v1.env.rollback")
+    if args.active_path != expected_active or args.backup_path != expected_backup:
+        parser.error("generic Live v1 active/rollback config paths are fixed")
     if args.mode == "install":
         if args.candidate_path is None:
             parser.error("--candidate-path is required for install")
