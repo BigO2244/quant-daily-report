@@ -1302,10 +1302,11 @@ The current Live disable is intentionally left intact in every location:
    publication, truth-only dashboard consumption, and external owner
    notification delivery. Their disabled implementations are complete; no
    schedule, dashboard, history, or sender is active.
-4. Return the green parity baseline together with adaptive-Shadow, preflight,
-   rollback, and capital evidence to
-   the owner. A later immutable owner decision must choose the effective generic
-   PAPER and Live cutover sessions and any candidate sleeves/capital.
+4. Preserve the owner's immutable Lyra-only Live v1 decision exactly: $460
+   capital ceiling, $100 minimum trade, one order per session, 95% gross,
+   whole-share long-only/no leverage/no shorts, and generic lane v4 only. That
+   decision authorizes no PAPER cutover and does not waive any technical gate;
+   a new owner decision is required only to expand or change those terms.
 5. Only at the verified generic Live cutover may the generic kill switch be
    disengaged. The legacy Live executor remains disabled through retirement.
 
@@ -1326,7 +1327,9 @@ staged only the no-submit dependency closure at commit
 `13f07fdd34e819d3b1c211c421c683445049dcfa` in an isolated checkout. The sealed
 deployment record is
 [`generic_live_no_submit_staging_deployment_2026-08-18.json`](../evidence/generic_live_no_submit_staging_deployment_2026-08-18.json).
-The active VM remains unchanged and there is still no generic cron entry.
+That statement is historical for the staging step. The active source checkout
+was later updated under separate authority, while the generic cron remained
+absent.
 
 The follow-on disabled-consumption deployment is sealed at
 [`generic_live_disabled_consumption_staging_deployment_2026-08-18.json`](../evidence/generic_live_disabled_consumption_staging_deployment_2026-08-18.json),
@@ -1346,10 +1349,33 @@ It records parity `PASS` and remains `BLOCKED` on exactly eight gates: active
 account pin, capital ceiling, max orders, generic checkout, generic schedule,
 and owner, submission, and schedule approvals.
 
-No additional sleeve-selection or capital decision is required to continue
-read-only evidence recovery, Shadow observation, or no-write rehearsals. A new
-major owner decision becomes necessary only when evidence supports an active
-generic PAPER or Live cutover proposal.
+No additional sleeve-selection or capital decision is required for the exact
+owner-approved Lyra Live v1 scope or to continue read-only evidence recovery,
+Shadow observation, and no-write rehearsals. Generic PAPER remains unapproved.
+Any change to the Lyra-only $460 Live terms, or any PAPER proposal, requires a
+new owner decision.
+
+The active-VM source-only deployment is sealed at
+[`generic_live_v1_active_source_deployment_2026-08-19.json`](../evidence/generic_live_v1_active_source_deployment_2026-08-19.json),
+content hash
+`4f704b374bbc1d020952131a3893b90b385836808851f53e05af6e1fc9fcccef`.
+Active `main` and its upstream are clean at
+`7d6caf99ad263a7d86efc67940cf511459d21f0b`; deploy validation passed 138 plus
+35 tests and operational validation passed 6 of 6. The deployment changed only
+the active source checkout. Generic config is absent, generic cron count is
+zero, the crontab and legacy environment hashes are unchanged, the kill switch
+is armed, PAPER is unchanged, and no broker call or write occurred.
+
+This is `DISABLED_SOURCE_DEPLOYMENT_CONDITIONAL_GO`, but activation/submission
+is `NO_GO`. Seven P0s remain: `NO_EXECUTION_READY_FACTUAL_LYRA_CHAIN`,
+`READY_PREFLIGHT_NOT_RECOMPUTED_FROM_BOUND_SOURCE_ARTIFACTS`,
+`WORST_CASE_FILL_GROSS_AND_CASH_LIMITS_NOT_PROVEN`,
+`PRODUCTION_POSTTRADE_CAUSAL_PIPELINE_NOT_CLOSED`,
+`NAMED_BREAKS_DO_NOT_AUTOMATICALLY_ROLL_BACK_CRON_AND_CONFIG`,
+`PRE_BOOTSTRAP_FAILURES_CAN_BYPASS_REARM`, and
+`UNRESOLVED_OR_ASYNCHRONOUS_ORDER_STATES_LACK_DURABLE_TERMINAL_EVIDENCE`.
+No schedule, config, disarm, credential copy, or order submission is permitted
+until all seven are closed with exact current-session evidence.
 
 The adaptive policy choice is now concrete rather than implicit. Candidate
 hash `0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`

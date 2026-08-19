@@ -1,0 +1,91 @@
+{
+  "activation_authority": false,
+  "activation_status": "NO_GO",
+  "active_checkout": {
+    "branch": "main",
+    "commit": "7d6caf99ad263a7d86efc67940cf511459d21f0b",
+    "dirty_entry_count": 0,
+    "reference": "$HOME/quant-daily-report",
+    "upstream_commit": "7d6caf99ad263a7d86efc67940cf511459d21f0b"
+  },
+  "active_checkout_mutated": true,
+  "active_runtime": {
+    "generic_config_status": "ABSENT",
+    "generic_schedule_count": 0,
+    "installed_crontab_hash": "e053c2ea0de7738798705f11556db9c69c6beabab59b1cd3c631f53b37ce6033",
+    "legacy_executor_file_hash": "dc414c1967d30d67fc320b1a350b11c7b4bd00469c54ab812b583693fd168053",
+    "legacy_kill_switch_state": "ARMED",
+    "legacy_live_env_hash": "3896bec8adc485a136f1d636fad2b37e6a45c0fcbc86f8095c827ff6d62a3597",
+    "paper_runtime_mutated": false
+  },
+  "active_schedule_mutated": false,
+  "approval_authority": false,
+  "broker_call_performed_during_deployment": false,
+  "broker_submission_allowed": false,
+  "broker_write_performed": false,
+  "configuration_mutated": false,
+  "content_hash": "4f704b374bbc1d020952131a3893b90b385836808851f53e05af6e1fc9fcccef",
+  "credential_copy_performed": false,
+  "deploy_state_hash": "f87a759c5c5e6f6183b231fe784b0349366e25d63127d1fe6ae2413591f7a27c",
+  "deployment_classification": "ACTIVE_SOURCE_ONLY_DISABLED_NO_BROKER_AUTHORITY",
+  "execution_authority": false,
+  "generic_kill_switch_disengaged": false,
+  "legacy_executor_enabled": false,
+  "observed_at": "2026-08-19T03:38:09Z",
+  "owner_approved_policy_terms_present_in_source": true,
+  "paper_cutover_performed": false,
+  "raw_account_id_persisted": false,
+  "remaining_p0_blockers": [
+    {
+      "code": "NAMED_BREAKS_DO_NOT_AUTOMATICALLY_ROLL_BACK_CRON_AND_CONFIG",
+      "detail": "Breaks rearm the session gate, but do not automatically uninstall the exact cron entry and restore or remove the generic config while preserving PAPER."
+    },
+    {
+      "code": "NO_EXECUTION_READY_FACTUAL_LYRA_CHAIN",
+      "detail": "No current immutable governed-data and session snapshot through factual Lyra v2 decision to exact Lyra-only v4 Live plan exists; the checked-in activation remains BLOCKED."
+    },
+    {
+      "code": "PRE_BOOTSTRAP_FAILURES_CAN_BYPASS_REARM",
+      "detail": "Wrapper or bootstrap failures before the rearm trap and before a safe state path is established can leave a previously disarmed gate unchanged."
+    },
+    {
+      "code": "PRODUCTION_POSTTRADE_CAUSAL_PIPELINE_NOT_CLOSED",
+      "detail": "No production runner closes broker order and fill evidence through reconciliation, accounting journal, valuation, performance, daily audit, and dashboard with exact current hashes and as-of binding."
+    },
+    {
+      "code": "READY_PREFLIGHT_NOT_RECOMPUTED_FROM_BOUND_SOURCE_ARTIFACTS",
+      "detail": "Runtime does not parse and recompute the preflight from the exact owner decision, account observation, Lyra decision, and plan, so a re-sealed all-green preflight can substitute those claims."
+    },
+    {
+      "code": "UNRESOLVED_OR_ASYNCHRONOUS_ORDER_STATES_LACK_DURABLE_TERMINAL_EVIDENCE",
+      "detail": "Unknown, stopped, suspended, calculated, and asynchronously canceling states can fail closed without a persisted typed terminal or unresolved observation for deterministic reconciliation."
+    },
+    {
+      "code": "WORST_CASE_FILL_GROSS_AND_CASH_LIMITS_NOT_PROVEN",
+      "detail": "The $437 limit is not yet the dynamic worst-case post-fill 95% of min($460, fresh equity) gross cap including existing holdings, and the 5% cash reserve is not proven at enforcement price plus fees."
+    }
+  ],
+  "rollback_source_commit": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+  "schema_version": "caerus.generic_live_v1_active_source_deployment.v1",
+  "signed_cancellation_audit_note": "At the deployed source SHA, the signed cancellation context hash is not persisted in the receipt or result; this remains nested under the posttrade and unresolved-state blockers and is not an eighth P0.",
+  "source_commit": "7d6caf99ad263a7d86efc67940cf511459d21f0b",
+  "source_deployment_authority": true,
+  "source_only_inert": true,
+  "validation": {
+    "deploy_validation_primary": {
+      "failed": 0,
+      "passed": 138,
+      "status": "PASS"
+    },
+    "deploy_validation_supplemental": {
+      "failed": 0,
+      "passed": 35,
+      "status": "PASS"
+    },
+    "operational_validation": {
+      "failed": 0,
+      "passed": 6,
+      "status": "PASS"
+    }
+  }
+}

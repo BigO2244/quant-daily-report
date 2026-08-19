@@ -159,12 +159,9 @@ use an immutable owner decision and hash-bound policy artifact.
 
 Read-only VM evidence is sealed at
 [`generic_live_vm_preflight_2026-08-18.json`](evidence/generic_live_vm_preflight_2026-08-18.json).
-The deployed checkout is clean and aligned to its deploy record, legacy Live is
-still structurally disabled, and the generic staging roots exist. This is
-`READY_TO_STAGE`, not ready to trade: the generic path is not deployed and the
-account pin, capital ceiling, maximum orders, approvals, parity, and cutover
-policy are absent. The evidence contains no credentials or account IDs and
-records no remote mutation.
+That historical capture found a clean checkout, structurally disabled legacy
+Live, and generic staging roots. It was `READY_TO_STAGE`, not ready to trade,
+and records no remote mutation.
 
 The no-submit observation closure is now staged in an isolated VM checkout,
 not the active runtime. The sealed record is
@@ -189,6 +186,23 @@ no leverage, and no shorting. Its preflight remains `BLOCKED` by exactly eight
 active-cutover gates: active account pin, capital ceiling, and max-orders
 configuration; active generic checkout and schedule; and owner, submission,
 and schedule approvals. The kill switch remains armed.
+
+The owner subsequently approved the exact Lyra-only Live v1 policy, and its
+generic source is now deployed inertly in the active checkout. The authoritative
+deployment record is
+[`generic_live_v1_active_source_deployment_2026-08-19.json`](evidence/generic_live_v1_active_source_deployment_2026-08-19.json),
+content hash `4f704b374bbc1d020952131a3893b90b385836808851f53e05af6e1fc9fcccef`.
+Active `main` and its upstream are clean at `7d6caf99...`; 173 deploy tests and
+six operational checks passed. This is source deployment only: generic config
+is absent, generic cron count is zero, the legacy kill switch remains armed,
+legacy environment and executor hashes are unchanged, PAPER is unchanged, and
+no broker call or write occurred. Activation and submission remain `NO_GO` on
+seven named P0s: no factual current-session Lyra v2-to-v4 chain; no runtime
+preflight recomputation from exact source artifacts; incomplete dynamic
+worst-case gross/cash enforcement; no production causal posttrade closure;
+breaks do not yet automatically roll back cron/config; pre-bootstrap failures
+can bypass rearm; and unresolved/asynchronous order states lack durable typed
+terminal evidence. Source presence must never be read as trading authority.
 
 A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),

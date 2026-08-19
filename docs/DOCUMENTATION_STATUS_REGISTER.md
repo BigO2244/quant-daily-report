@@ -1,7 +1,7 @@
 ---
 status: ACTIVE
 owner: Caerus program owner
-last_audit: 2026-08-18
+last_audit: 2026-08-19
 scope: all files beneath docs/
 ---
 
@@ -49,6 +49,7 @@ machine policy and date-specific operational evidence.
 | `docs/baselines/ORION_PARITY_AND_ADAPTIVE_SHADOW_RECOVERY.md` | `CURRENT_REFERENCE` | Exact read-only recovery requirements and stdout-only collectors; prohibits reconstructing missing factual inputs from returns, fills, or dashboards |
 | `docs/runbooks/GENERIC_LIVE_CUTOVER.md` | `CURRENT_REFERENCE` | Generic-only, no-submit rehearsal and future cutover sequence; legacy Live remains disabled and active config unchanged |
 | `docs/evidence/generic_live_vm_preflight_2026-08-18.json` | `CANONICAL_FOR_ITS_CAPTURE_STATUS` | Redacted, hash-bound read-only VM evidence: clean deployed SHA and legacy Live disabled; generic staging is possible, but cutover is blocked and no remote state changed |
+| `docs/evidence/generic_live_v1_active_source_deployment_2026-08-19.json` | `CANONICAL_FOR_ITS_DEPLOYMENT` | Attested active-VM source-only deployment at `7d6caf99...`: checkout clean and aligned, 179 deploy/operational checks pass, generic config and cron remain absent, kill switch remains armed, and activation/submission remains `NO_GO` on seven named P0 blockers |
 | `docs/evidence/generic_live_no_submit_staging_deployment_2026-08-18.json` | `CANONICAL_FOR_ITS_DEPLOYMENT` | Hash-bound isolated VM staging record for commit `13f07fdd...`; 41 tests pass and scheduler defaults disabled; active checkout/config/cron/kill switch/broker remain unchanged |
 | `docs/evidence/generic_live_account_observation_2026-08-18.json` | `CANONICAL_FOR_ITS_CAPTURE_STATUS` | Redacted GET-only Live account observation: $460.90 equity/cash, account hash matches the legacy pin, no credentials or raw account ID persisted, and no broker write occurred |
 | `docs/evidence/generic_live_disabled_candidate_config_2026-08-18.json` | `RESEARCH_OR_PROPOSAL` | Disabled account-pinned Live candidate capped at $460 with the stricter $100 minimum trade, one-order maximum, 95% gross cap, whole shares, long-only, no leverage, and no shorting; no execution, submission, schedule, or activation authority |
