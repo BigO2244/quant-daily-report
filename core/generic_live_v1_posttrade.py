@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from authority.lane_exact_plan import canonical_json
 from core.accounting_journal import validate_accounting_journal
@@ -47,6 +47,7 @@ def finalize_generic_live_v1_production_posttrade(
     dashboard_projection: Mapping[str, Any], finalized_at: str,
     rearm_state_path: Path | str, base_result_path: Path | str,
     closure_result_path: Path | str,
+    rollback_handler: Callable[[str], Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Validate and durably bind reconciliation through published truth surfaces."""
 
@@ -131,6 +132,7 @@ def finalize_generic_live_v1_production_posttrade(
         journal_entries=journal, performance=perf,
         dashboard_projection=dashboard, finalized_at=finalized_at,
         rearm_state_path=rearm_state_path, result_path=base_result_path,
+        rollback_handler=rollback_handler,
     )
     evidence_hashes = sorted({
         base["content_hash"], reconciled["content_hash"],

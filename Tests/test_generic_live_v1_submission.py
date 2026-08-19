@@ -239,19 +239,19 @@ def test_unresolved_async_cancellation_is_bounded_and_persisted(tmp_path) -> Non
 
     preflight, plan = _ready()
     _disarm(tmp_path / "rearm.json", preflight, plan)
-    with pytest.raises(GenericLiveV1SubmissionError, match="remained unresolved"):
-        execute_generic_live_v1_session(
-            activation_preflight=preflight,
-            exact_plan=plan,
-            executed_at="2026-08-19T13:31:00+00:00",
-            submit_enabled=True,
-            broker=NeverCancelBroker(terminal_status="accepted"),
-            wal_directory=tmp_path / "wal",
-            rearm_state_path=tmp_path / "rearm.json",
-            result_path=tmp_path / "result.json",
-            poll_attempts=2,
-            poll_interval_seconds=0,
-        )
+    result = execute_generic_live_v1_session(
+        activation_preflight=preflight,
+        exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00",
+        submit_enabled=True,
+        broker=NeverCancelBroker(terminal_status="accepted"),
+        wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "rearm.json",
+        result_path=tmp_path / "result.json",
+        poll_attempts=2,
+        poll_interval_seconds=0,
+    )
+    assert result["status"] == "UNRESOLVED_ORDER_REARMED"
     cancellation_files = list((tmp_path / "wal").glob("cancellation-*.json"))
     assert len(cancellation_files) == 1
     cancellation = json.loads(cancellation_files[0].read_text())
@@ -274,20 +274,20 @@ def test_cancellation_provider_secret_is_never_persisted_or_raised(
     monkeypatch.setenv("CAERUS_SECRET_SENTINEL", "SENTINEL_SECRET_VALUE")
     preflight, plan = _ready()
     _disarm(tmp_path / "rearm.json", preflight, plan)
-    with pytest.raises(GenericLiveV1SubmissionError, match="remained unresolved") as error:
-        execute_generic_live_v1_session(
-            activation_preflight=preflight,
-            exact_plan=plan,
-            executed_at="2026-08-19T13:31:00+00:00",
-            submit_enabled=True,
-            broker=SecretCancelBroker(terminal_status="accepted"),
-            wal_directory=tmp_path / "wal",
-            rearm_state_path=tmp_path / "rearm.json",
-            result_path=tmp_path / "result.json",
-            poll_attempts=1,
-            poll_interval_seconds=0,
-        )
-    assert "SENTINEL_SECRET_VALUE" not in str(error.value)
+    result = execute_generic_live_v1_session(
+        activation_preflight=preflight,
+        exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00",
+        submit_enabled=True,
+        broker=SecretCancelBroker(terminal_status="accepted"),
+        wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "rearm.json",
+        result_path=tmp_path / "result.json",
+        poll_attempts=1,
+        poll_interval_seconds=0,
+    )
+    assert result["status"] == "UNRESOLVED_ORDER_REARMED"
+    assert "SENTINEL_SECRET_VALUE" not in json.dumps(result)
     cancellation = json.loads(next((tmp_path / "wal").glob("cancellation-*.json")).read_text())
     assert cancellation["status"] == "UNRESOLVED"
     assert cancellation["operation_failed"] is True

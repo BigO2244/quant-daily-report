@@ -78,6 +78,9 @@ def _inputs(tmp_path) -> dict:
         "rearm_state_path": tmp_path / "gate.json",
         "base_result_path": tmp_path / "base" / "result.json",
         "closure_result_path": tmp_path / "closure" / "result.json",
+        "rollback_handler": lambda trigger: {
+            "status": "ROLLED_BACK_ARMED", "trigger": trigger,
+        },
     }
 
 
