@@ -8,34 +8,15 @@ import datetime as dt
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from brokers.alpaca_broker import AlpacaBroker
 from core.generic_live_v1_submission import (
+    ensure_generic_live_v1_rearmed_after_failure,
     execute_generic_live_v1_session,
-    rearm_generic_live_v1_session,
 )
-
-
-def _read(path: Path) -> dict:
-    def no_duplicates(pairs):
-        value = {}
-        for key, item in pairs:
-            if key in value:
-                raise ValueError(f"duplicate JSON key: {key}")
-            value[key] = item
-        return value
-
-    def no_constant(value):
-        raise ValueError(f"non-finite JSON constant: {value}")
-
-    payload = json.loads(
-        path.read_text(encoding="utf-8"), object_pairs_hook=no_duplicates,
-        parse_constant=no_constant,
-    )
-    if not isinstance(payload, dict):
-        raise ValueError(f"{path} must contain an object")
-    return payload
+from core.generic_live_v1_ops import require_protected_mode, secure_path, secure_read_json
 
 
 def _require_exact_env(preflight: dict, *, submit: bool) -> None:
@@ -50,6 +31,7 @@ def _require_exact_env(preflight: dict, *, submit: bool) -> None:
         "CAERUS_GENERIC_LIVE_ELIGIBLE_SLEEVE": "caerus_lyra",
         "CAERUS_GENERIC_LIVE_OWNER_DECISION_HASH": preflight["owner_decision_hash"],
         "CAERUS_GENERIC_LIVE_PREFLIGHT_HASH": preflight["content_hash"],
+        "CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED": "0",
     }
     mismatches = [key for key, value in expected.items() if os.environ.get(key) != value]
     if mismatches:
@@ -68,6 +50,16 @@ def _require_exact_env(preflight: dict, *, submit: bool) -> None:
                 raise RuntimeError(f"generic Live submission gate is not approved: {key}")
         if os.environ.get("ALPACA_PAPER") != "0" or os.environ.get("ALPACA_BASE_URL", "").rstrip("/") != "https://api.alpaca.markets":
             raise RuntimeError("generic Live submission requires canonical Alpaca Live environment")
+        expected_repo = Path(os.environ.get("CAERUS_GENERIC_LIVE_REPO_ROOT", ""))
+        expected_python = Path(os.environ.get("CAERUS_GENERIC_LIVE_PYTHON_BIN", ""))
+        if (
+            not expected_repo.is_absolute()
+            or not expected_python.is_absolute()
+            or expected_repo.resolve() != Path(__file__).resolve().parents[1]
+            or expected_python.resolve() != Path(sys.executable).resolve()
+            or Path.cwd().resolve() != expected_repo.resolve()
+        ):
+            raise RuntimeError("generic Live exact runtime path pins mismatch")
         expected_deployed = os.environ.get("CAERUS_GENERIC_LIVE_DEPLOYED_SHA", "")
         observed_deployed = subprocess.run(
             ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
@@ -86,9 +78,29 @@ def main() -> int:
     parser.add_argument("--result-path", type=Path)
     parser.add_argument("--submit-exact-session", action="store_true")
     args = parser.parse_args()
-    preflight = _read(args.preflight)
-    plan = _read(args.exact_plan)
+    preflight: dict = {}
+    plan: dict = {}
+    safe_rearm_path: Path | None = None
     try:
+        input_root = Path(os.environ.get("CAERUS_GENERIC_LIVE_INPUT_ROOT", ""))
+        state_root = Path(os.environ.get("CAERUS_GENERIC_LIVE_STATE_ROOT", ""))
+        if args.submit_exact_session and (not input_root.is_absolute() or not state_root.is_absolute()):
+            raise RuntimeError("generic Live input/state roots must be absolute runtime pins")
+        if args.submit_exact_session:
+            secure_path(input_root, allowed_roots=[input_root], must_exist=True, kind="directory")
+            secure_path(state_root, allowed_roots=[state_root], must_exist=True, kind="directory")
+            require_protected_mode(input_root, directory=True)
+            require_protected_mode(state_root, directory=True)
+            if args.wal_directory is None or args.session_gate_path is None or args.result_path is None:
+                raise RuntimeError("generic Live submission paths are required")
+            secure_path(args.wal_directory, allowed_roots=[state_root], must_exist=False, kind="directory")
+            safe_rearm_path = secure_path(
+                args.session_gate_path, allowed_roots=[state_root], must_exist=False, kind="file"
+            )
+            secure_path(args.result_path, allowed_roots=[state_root], must_exist=False, kind="file")
+        read_roots = [input_root] if args.submit_exact_session else [args.preflight.parent, args.exact_plan.parent]
+        preflight = secure_read_json(args.preflight, allowed_roots=read_roots)
+        plan = secure_read_json(args.exact_plan, allowed_roots=read_roots)
         if os.environ.get("CAERUS_GENERIC_LIVE_PLAN_HASH") != plan.get("content_hash"):
             raise RuntimeError("generic Live exact plan environment pin mismatch")
         _require_exact_env(preflight, submit=args.submit_exact_session)
@@ -101,20 +113,13 @@ def main() -> int:
             result_path=args.result_path,
         )
     except Exception:
-        if args.submit_exact_session and args.session_gate_path is not None:
-            armed = False
-            try:
-                armed = json.loads(args.session_gate_path.read_text()).get("status") == "ARMED"
-            except Exception:
-                pass
-            if not armed:
-                rearm_generic_live_v1_session(
-                    state_path=args.session_gate_path,
-                    preflight_hash=str(preflight.get("content_hash") or ""),
-                    plan_hash=str(plan.get("content_hash") or ""),
-                    rearmed_at=dt.datetime.now(dt.timezone.utc).isoformat(),
-                    trigger="PREFLIGHT_BREAK",
-                )
+        if args.submit_exact_session and safe_rearm_path is not None:
+            ensure_generic_live_v1_rearmed_after_failure(
+                state_path=safe_rearm_path,
+                preflight_hash=preflight.get("content_hash"),
+                plan_hash=plan.get("content_hash"),
+                rearmed_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+            )
         raise
     print(json.dumps(result, sort_keys=True))
     return 0

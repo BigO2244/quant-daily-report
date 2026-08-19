@@ -98,6 +98,7 @@ def _disarm(path, preflight, plan):
     }
     body["content_hash"] = hashlib.sha256(canonical_json(body).encode()).hexdigest()
     path.write_text(json.dumps(body))
+    path.chmod(0o600)
 
 
 def test_default_is_deterministic_no_write_and_no_broker_call(tmp_path) -> None:

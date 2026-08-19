@@ -63,6 +63,58 @@ _FIELDS = frozenset(
         "approval_authority", "source_hashes", "content_hash",
     }
 )
+_GATE_BLOCKERS = {
+    "owner_decision_current": "OWNER_DECISION_EXPIRED",
+    "effective_session_current": "OWNER_EFFECTIVE_SESSION_NOT_CURRENT",
+    "deployed_sha_match": "DEPLOYED_SHA_MISMATCH",
+    "legacy_executor_disabled": "LEGACY_EXECUTOR_NOT_DISABLED",
+    "legacy_kill_switch_armed": "LEGACY_KILL_SWITCH_NOT_ARMED",
+    "generic_kill_switch_armed": "GENERIC_KILL_SWITCH_NOT_ARMED",
+    "generic_schedule_installed": "GENERIC_SCHEDULE_NOT_INSTALLED",
+    "generic_submission_adapter_deployed": "GENERIC_SUBMISSION_ADAPTER_NOT_DEPLOYED",
+    "broker_account_active": "BROKER_ACCOUNT_NOT_ACTIVE",
+    "broker_read_preflight_green": "BROKER_READ_PREFLIGHT_NOT_GREEN",
+    "open_orders_clear": "BROKER_OPEN_ORDERS_PRESENT",
+    "rollback_rearm_proven": "ROLLBACK_REARM_NOT_PROVEN",
+    "order_lifecycle_pipeline_green": "ORDER_LIFECYCLE_PIPELINE_NOT_GREEN",
+    "reconciliation_pipeline_green": "RECONCILIATION_PIPELINE_NOT_GREEN",
+    "accounting_pipeline_green": "ACCOUNTING_PIPELINE_NOT_GREEN",
+    "reporting_pipeline_green": "REPORTING_PIPELINE_NOT_GREEN",
+}
+_DECISION_BLOCKERS = frozenset(
+    {
+        "LYRA_V2_DECISION_MISSING",
+        "LYRA_V2_DECISION_INVALID",
+        "LYRA_V2_DECISION_WRONG_SLEEVE",
+        "LYRA_V2_DECISION_WRONG_SESSION",
+        "LYRA_V2_DECISION_NOT_READY_RECOMMENDATION",
+        "LYRA_V2_DECISION_LIQUIDITY_NOT_APPROVED",
+        "LYRA_V2_DECISION_HISTORICAL_EVIDENCE_BLOCKER_UNRESOLVED",
+    }
+)
+_PLAN_BLOCKERS = frozenset(
+    {
+        "EXACT_V4_PLAN_MISSING",
+        "EXACT_V4_PLAN_INVALID",
+        "EXACT_V4_PLAN_WRONG_LANE",
+        "EXACT_V4_PLAN_WRONG_SESSION",
+        "EXACT_V4_PLAN_ACCOUNT_PIN_MISMATCH",
+        "EXACT_V4_PLAN_CAPITAL_CEILING_EXCEEDED",
+        "EXACT_V4_PLAN_ORDER_COUNT_EXCEEDED",
+        "EXACT_V4_PLAN_NOT_WHOLE_SHARE",
+        "EXACT_V4_PLAN_BELOW_MINIMUM_TRADE",
+        "EXACT_V4_PLAN_SLEEVE_LINEAGE_MISSING",
+        "EXACT_V4_PLAN_NON_LYRA_CONTRIBUTION",
+        "EXACT_V4_PLAN_LYRA_DECISION_LINEAGE_MISMATCH",
+        "EXACT_V4_PLAN_TARGET_LINEAGE_MISSING",
+        "EXACT_V4_PLAN_NON_LYRA_TARGET",
+        "EXACT_V4_PLAN_LYRA_TARGET_LINEAGE_MISMATCH",
+        "EXACT_V4_PLAN_NEGATIVE_CASH",
+        "EXACT_V4_PLAN_SHORT_POSITION",
+        "EXACT_V4_PLAN_GROSS_MARK_MISSING",
+        "EXACT_V4_PLAN_GROSS_LIMIT_EXCEEDED",
+    }
+)
 
 
 class GenericLiveV1ActivationError(ValueError):
@@ -305,25 +357,7 @@ def build_generic_live_v1_activation_preflight(
         "accounting_pipeline_green": _bool(operational_proofs["accounting_pipeline_green"], label="accounting_pipeline_green"),
         "reporting_pipeline_green": _bool(operational_proofs["reporting_pipeline_green"], label="reporting_pipeline_green"),
     }
-    blocker_by_gate = {
-        "owner_decision_current": "OWNER_DECISION_EXPIRED",
-        "effective_session_current": "OWNER_EFFECTIVE_SESSION_NOT_CURRENT",
-        "deployed_sha_match": "DEPLOYED_SHA_MISMATCH",
-        "legacy_executor_disabled": "LEGACY_EXECUTOR_NOT_DISABLED",
-        "legacy_kill_switch_armed": "LEGACY_KILL_SWITCH_NOT_ARMED",
-        "generic_kill_switch_armed": "GENERIC_KILL_SWITCH_NOT_ARMED",
-        "generic_schedule_installed": "GENERIC_SCHEDULE_NOT_INSTALLED",
-        "generic_submission_adapter_deployed": "GENERIC_SUBMISSION_ADAPTER_NOT_DEPLOYED",
-        "broker_account_active": "BROKER_ACCOUNT_NOT_ACTIVE",
-        "broker_read_preflight_green": "BROKER_READ_PREFLIGHT_NOT_GREEN",
-        "open_orders_clear": "BROKER_OPEN_ORDERS_PRESENT",
-        "rollback_rearm_proven": "ROLLBACK_REARM_NOT_PROVEN",
-        "order_lifecycle_pipeline_green": "ORDER_LIFECYCLE_PIPELINE_NOT_GREEN",
-        "reconciliation_pipeline_green": "RECONCILIATION_PIPELINE_NOT_GREEN",
-        "accounting_pipeline_green": "ACCOUNTING_PIPELINE_NOT_GREEN",
-        "reporting_pipeline_green": "REPORTING_PIPELINE_NOT_GREEN",
-    }
-    blockers = [code for gate, code in blocker_by_gate.items() if not gate_results[gate]]
+    blockers = [code for gate, code in _GATE_BLOCKERS.items() if not gate_results[gate]]
     blockers.extend(decision_blockers)
     blockers.extend(plan_blockers)
     blockers = sorted(set(blockers))
@@ -382,8 +416,38 @@ def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) ->
     if not isinstance(reasons, list) or not reasons or reasons != sorted(set(reasons)):
         raise GenericLiveV1ActivationError("reason_codes must be sorted and unique")
     gates = payload.get("gate_results")
-    if not isinstance(gates, Mapping) or not gates or any(type(value) is not bool for value in gates.values()):
-        raise GenericLiveV1ActivationError("gate_results must be a non-empty boolean mapping")
+    expected_gate_keys = frozenset({*_GATE_BLOCKERS, "lyra_v2_decision_green", "exact_v4_plan_green"})
+    if (
+        not isinstance(gates, Mapping)
+        or frozenset(gates) != expected_gate_keys
+        or any(type(value) is not bool for value in gates.values())
+    ):
+        raise GenericLiveV1ActivationError("gate_results keys/values differ from the canonical activation contract")
+    recomputed_status = "READY_TO_DISARM_FOR_SESSION" if all(gates.values()) else "BLOCKED"
+    if payload["status"] != recomputed_status:
+        raise GenericLiveV1ActivationError(
+            "activation preflight status does not match recomputed gates; ready requires every gate green"
+        )
+    expected_reasons = {
+        code for gate, code in _GATE_BLOCKERS.items() if gates[gate] is False
+    }
+    decision_reasons = set(reasons) & _DECISION_BLOCKERS
+    plan_reasons = set(reasons) & _PLAN_BLOCKERS
+    if gates["lyra_v2_decision_green"]:
+        if decision_reasons:
+            raise GenericLiveV1ActivationError("green Lyra decision gate cannot carry decision blockers")
+    elif not decision_reasons:
+        raise GenericLiveV1ActivationError("failed Lyra decision gate requires a canonical blocker")
+    if gates["exact_v4_plan_green"]:
+        if plan_reasons:
+            raise GenericLiveV1ActivationError("green exact-plan gate cannot carry plan blockers")
+    elif not plan_reasons:
+        raise GenericLiveV1ActivationError("failed exact-plan gate requires a canonical blocker")
+    recomputed_reasons = expected_reasons | decision_reasons | plan_reasons
+    if all(gates.values()):
+        recomputed_reasons = {"ALL_OWNER_APPROVED_LIVE_V1_GATES_GREEN"}
+    if set(reasons) != recomputed_reasons:
+        raise GenericLiveV1ActivationError("activation reason_codes do not match recomputed gate failures")
     if payload["status"] == "READY_TO_DISARM_FOR_SESSION":
         if not all(gates.values()) or reasons != ["ALL_OWNER_APPROVED_LIVE_V1_GATES_GREEN"]:
             raise GenericLiveV1ActivationError("ready status requires every gate green")
