@@ -1,0 +1,86 @@
+{
+  "account_id_hash": "cfdc5d0aa0e3fdc38adadc78f1ebc30cbc83df187a4223c22597e787cd8a7c85",
+  "activation_status": "NO_GO_P0_1_FACTUAL_LYRA_CHAIN_MISSING",
+  "broker_call_performed": false,
+  "broker_write_performed": false,
+  "captured_at": "2026-08-19T05:10:43Z",
+  "content_hash": "bd056ac57670f31016adea140d9ed8951f832bb6ebb030d6028f47c91714aaca",
+  "configuration": {
+    "account_pin_present": true,
+    "backup_created": false,
+    "capital_ceiling_usd": 460,
+    "candidate_sha256": "86fc1cd75b3dcd2d002aa7ce7bd2d433f6fdd5f4628e6178c86bc420fdd2779e",
+    "effective_session": "2026-08-19",
+    "installed_mode": "0600",
+    "maximum_orders_per_session": 1,
+    "minimum_trade_usd": 100,
+    "owner_approved": true,
+    "posttrade_observation_enabled": false,
+    "schedule_enabled": false,
+    "submit_approved": false
+  },
+  "crontab": {
+    "after_sha256": "6500fad56880668df23736eebc8cf980149d72b9f1e771c301ec946b5f1ed7e5",
+    "before_backup_sha256": "e053c2ea0de7738798705f11556db9c69c6beabab59b1cd3c631f53b37ce6033",
+    "date_bound_effective_session": "2026-08-19",
+    "generic_entry_count": 1,
+    "schedule_is_inert": true,
+    "timezone": "America/New_York"
+  },
+  "deployment": {
+    "branch": "main",
+    "deploy_state_sha256": "6c14140a53d195882e66f836a50ea781015b625e6c9123f15452b268ee7d7248",
+    "deployed_sha": "2d12a3c86e27c175319b226e9ff745f197da71a8",
+    "operational_checks_passed": 6,
+    "origin_main_sha": "2d12a3c86e27c175319b226e9ff745f197da71a8",
+    "targeted_tests_passed": 35,
+    "validation_tests_passed": 138,
+    "working_tree_clean": true
+  },
+  "generic_gate": {
+    "content_hash": "02e635c298ae6c09df81a3f612e20321fd260ba418a1479aea70976222687ebe",
+    "file_sha256": "7986d332b19ad2d386838a32ec676baff12d059a0b5daa80874365c8e7a62cda",
+    "generic_submission_enabled": false,
+    "legacy_executor_enabled": false,
+    "paper_cutover_enabled": false,
+    "status": "ARMED"
+  },
+  "independent_review": {
+    "p0_1": "OPEN_FACTUAL_EVIDENCE_GATE",
+    "p0_2_through_p0_7": "CLOSED",
+    "reviewed_sha": "2d12a3c86e27c175319b226e9ff745f197da71a8",
+    "verdict": "DISABLED_INSTALL_ONLY_APPROVED"
+  },
+  "legacy_live": {
+    "environment_sha256": "3896bec8adc485a136f1d636fad2b37e6a45c0fcbc86f8095c827ff6d62a3597",
+    "executor_sha256": "dc414be8d6387db933d35f3f7c8a3abca041fea5cd53597d06564d27c7bd8053",
+    "kill_switch_armed": true,
+    "structural_cron_guard_sha256": "5dc4d92edfe4d410fb8a4734c1f2f511f33bdc9ba6ecb83570318fd0c418991f"
+  },
+  "manual_inert_launch_proof": {
+    "broker_boundary_reached": false,
+    "configuration_unchanged": true,
+    "crontab_unchanged": true,
+    "exit_code": 0,
+    "paper_unchanged": true
+  },
+  "no_credentials_copied_to_generic_config": true,
+  "order_submitted": false,
+  "owner_decision_hash": "ef5d9ae5ab9833208c0c3979a4ce743fbd0c36fa5676c3910af799444bc94ba7",
+  "paper": {
+    "cron_execute_sha256": "669a04d9f529aec74f7ce2a20a4f04c181626351214fd3ebb73453dff5d7c22c",
+    "cron_precompute_sha256": "d80481d74b820c9afde870ba1b78d44c514af6f2cb080887d20ffec5b39d5d5f",
+    "crontab_file_sha256": "e053c2ea0de7738798705f11556db9c69c6beabab59b1cd3c631f53b37ce6033",
+    "generic_cutover": false,
+    "unchanged": true
+  },
+  "raw_account_id_persisted": false,
+  "rollback": {
+    "config_action_if_triggered": "REMOVE_NEW_CONFIG_NO_PRIOR_BACKUP",
+    "crontab_backup_present": true,
+    "exact_generic_entry_removable": true,
+    "paper_hashes_captured": true
+  },
+  "schema_version": "caerus.generic_live_v1_disabled_installation.v1",
+  "status": "INSTALLED_DISABLED_INERT"
+}
