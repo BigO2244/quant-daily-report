@@ -1,0 +1,58 @@
+{
+  "activation_authority": false,
+  "approval_authority": false,
+  "content_hash": "c523bc96aae5e45688449750dd7fb995564958545972411f0510ed15cf434eeb",
+  "decision": null,
+  "effective_session": "2026-08-25",
+  "execution_authority": false,
+  "expires_at_if_approved": "2026-08-26T20:00:00+00:00",
+  "owner_action_required": "APPROVE_OR_REJECT",
+  "prior_owner_decision_hash": "ef5d9ae5ab9833208c0c3979a4ce743fbd0c36fa5676c3910af799444bc94ba7",
+  "proposal_id": "owner-decision-proposal:generic-live-v1-lyra:20260825",
+  "proposed_at": "2026-08-19T05:45:00Z",
+  "proposed_owner": "Brett Olson",
+  "proposed_policy": {
+    "adapter_contract": "CAERUS_GENERIC_LANE_V4",
+    "automatic_rearm_and_rollback_triggers": [
+      "ACCOUNTING_BREAK",
+      "ORDER_BREAK",
+      "PREFLIGHT_BREAK",
+      "RECONCILIATION_BREAK",
+      "REPORTING_BREAK",
+      "SUBMISSION_BREAK"
+    ],
+    "capital_ceiling_usd": 460,
+    "decision_schema": "caerus.sleeve_decision.v2",
+    "eligible_sleeve_ids": [
+      "caerus_lyra"
+    ],
+    "generic_paper_cutover_allowed": false,
+    "lane_id": "generic-live-v1",
+    "lane_kind": "LIVE",
+    "legacy_live_executor_allowed": false,
+    "leverage_allowed": false,
+    "long_only": true,
+    "maximum_gross_fraction": 0.95,
+    "maximum_orders_per_session": 1,
+    "minimum_trade_usd": 100,
+    "opportunistic_test_orders_allowed": false,
+    "selection_rule": "LYRA_ONLY_VALID_2026_08_25_V2_DECISION_FROM_2026_08_24_COMPLETED_SIGNAL_AND_APPROVED_V4_PLAN",
+    "shorting_allowed": false,
+    "whole_share_only": true
+  },
+  "required_preflight": [
+    "SIGNAL_AS_OF_AND_EFFECTIVE_TARGET_DATE_EQUAL_2026_08_24",
+    "PROSPECTIVE_GOVERNED_UNIVERSE_EFFECTIVE_BEFORE_SIGNAL_ORIGIN",
+    "CURRENT_SESSION_MANIFEST_BINDS_UNIVERSE_PRICE_EVALUATION_AND_POLICY_BYTES",
+    "FACTUAL_LYRA_V2_RISK_CAPACITY_LIQUIDITY_EVIDENCE",
+    "EXACT_LYRA_ONLY_V4_PLAN",
+    "FRESH_ACCOUNT_POSITION_OPEN_ORDER_AND_MARK_EVIDENCE",
+    "P0_2_THROUGH_P0_7_REMAIN_GREEN",
+    "OWNER_APPROVAL_CURRENT_AT_EXECUTION"
+  ],
+  "rollback_deployment_version": "generic-live-v1-disabled-2d12a3c",
+  "schema_version": "caerus.owner_decision_proposal.v1",
+  "source_chronology_hash": "f1d8e172b5660c2d83120bb1bd30a0801e3a55e966ab214728fe0f6ef37b1ba1",
+  "supersedes_proposal_hash": "8a07df4852a30358761e2be62054cf202b406bb4ca096c70be55e3b1e60cd641",
+  "status": "PENDING_OWNER_APPROVAL"
+}

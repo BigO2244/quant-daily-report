@@ -1394,11 +1394,18 @@ sealed chronology evidence is
 [`generic_live_v1_p0_1_chronology_no_go_2026-08-19.json`](../evidence/generic_live_v1_p0_1_chronology_no_go_2026-08-19.json),
 content hash
 `f1d8e172b5660c2d83120bb1bd30a0801e3a55e966ab214728fe0f6ef37b1ba1`.
-The first prospective eligible rebalance is Monday 2026-08-24, but the current
-approval expires on 2026-08-20. The exact same-terms proposal at
-[`generic_live_v1_owner_decision_2026-08-24.pending.json`](../governance/proposals/generic_live_v1_owner_decision_2026-08-24.pending.json)
+The first prospective eligible rebalance signal is Monday 2026-08-24 after its
+completed close. Monday's 07:00 precompute cannot consume that close and still
+carries the 2026-08-17 target, so the first executable session is Tuesday
+2026-08-25. The initial 2026-08-24 proposal remains immutable historical input
+and is superseded before owner action by
+[`generic_live_v1_owner_decision_2026-08-24.supersession.json`](../governance/proposals/generic_live_v1_owner_decision_2026-08-24.supersession.json),
+content hash
+`2365872d053941a3f6565ced52c10505a787a8930df0d9aa82f21f1e6b25f3d2`.
+The corrected same-terms proposal at
+[`generic_live_v1_owner_decision_2026-08-25.pending.json`](../governance/proposals/generic_live_v1_owner_decision_2026-08-25.pending.json)
 is deliberately `PENDING_OWNER_APPROVAL`; its content hash is
-`8a07df4852a30358761e2be62054cf202b406bb4ca096c70be55e3b1e60cd641`.
+`c523bc96aae5e45688449750dd7fb995564958545972411f0510ed15cf434eeb`.
 
 The adaptive policy choice is now concrete rather than implicit. Candidate
 hash `0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`
