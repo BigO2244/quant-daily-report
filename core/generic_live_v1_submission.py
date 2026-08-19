@@ -399,7 +399,10 @@ def _fresh_broker_preflight(
         asset = broker.get_asset(str(order["symbol"]))
         if not isinstance(asset, Mapping) or asset.get("tradable") is not True or str(asset.get("status") or "").lower().split(".")[-1] != "active":
             raise GenericLiveV1SubmissionError("fresh broker asset is not active/tradable")
-        if order["side"] == "BUY" and buying_power + 0.01 < float(order["notional"]):
+        required_buying_power = (
+            float(order["quantity"]) * float(order["enforcement_price"]) + 0.01
+        )
+        if order["side"] == "BUY" and buying_power + 1e-9 < required_buying_power:
             raise GenericLiveV1SubmissionError("fresh broker buying power is below exact order notional")
     calendar = broker.get_market_session_calendar(plan["trade_date"])
     try:
@@ -614,7 +617,7 @@ def _execute_generic_live_v1_session(
             failure_trigger = "ORDER_BREAK"
             broker_order_id = str(existing.get("id") or "")
             open_statuses = {"accepted", "new", "pending_new", "accepted_for_bidding", "held"}
-            terminal_break_statuses = {"canceled", "cancelled", "rejected", "expired", "stopped", "suspended"}
+            terminal_break_statuses = {"canceled", "cancelled", "rejected", "expired"}
             for attempt in range(poll_attempts):
                 if broker_status == "filled" or broker_status in terminal_break_statuses or broker_status == "partially_filled":
                     break
