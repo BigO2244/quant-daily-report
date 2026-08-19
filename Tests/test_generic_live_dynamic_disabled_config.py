@@ -22,6 +22,9 @@ def test_dynamic_disabled_config_has_no_fixed_ceiling_or_execution_enable():
     assert "CAERUS_GENERIC_LIVE_PENDING_TRANSFERS_REQUIRED_ZERO=1" in text
     assert "CAERUS_GENERIC_LIVE_COMPLETE_ORDER_HISTORY_REQUIRED=1" in text
     assert "CAERUS_GENERIC_LIVE_COMPLETE_FILL_HISTORY_REQUIRED=1" in text
+    assert "CAERUS_GENERIC_LIVE_MINIMUM_TRADE_USD=1" in text
+    assert "CAERUS_GENERIC_LIVE_WHOLE_SHARE_ONLY=0" in text
+    assert "CAERUS_GENERIC_LIVE_QUANTITY_PRECISION=6" in text
     assert "CAERUS_GENERIC_LIVE_GOVERNED_FEE_SCHEDULE_HASH=REPLACE_WITH_" in text
 
 

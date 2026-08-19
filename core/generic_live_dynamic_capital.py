@@ -20,7 +20,7 @@ from core.generic_live_dynamic_settled_cash import (
 )
 
 
-SCHEMA = "caerus.generic_live_dynamic_capital_proof.v2"
+SCHEMA = "caerus.generic_live_dynamic_capital_proof.v3"
 FEE_SCHEDULE_SCHEMA = "caerus.generic_live_governed_fee_schedule.v1"
 FEE_PROOF_SCHEMA = "caerus.generic_live_worst_case_fee_proof.v1"
 _SHA = re.compile(r"^[0-9a-f]{64}$")
@@ -226,8 +226,13 @@ def build_generic_live_dynamic_capital_proof(
         order_id, symbol, side = order["order_id"], str(order["symbol"]), str(order["side"])
         quantity = _finite(order["quantity"], label="quantity", positive=True)
         limit_price = _finite(order["enforcement_price"], label="enforcement price", positive=True)
-        if quantity != math.floor(quantity):
-            raise GenericLiveDynamicCapitalError("owner requires whole-share quantity")
+        if bool(owner["trading_constraints"]["whole_share_only"]):
+            if quantity != math.floor(quantity):
+                raise GenericLiveDynamicCapitalError("owner requires whole-share quantity")
+        elif abs(quantity - round(quantity, 6)) > 1e-12:
+            raise GenericLiveDynamicCapitalError(
+                "fractional quantity exceeds the governed six-decimal precision"
+            )
         if quantity * limit_price + 1e-9 < float(owner["trading_constraints"]["minimum_trade_usd"]):
             raise GenericLiveDynamicCapitalError("order is below the owner minimum trade")
         current = positions.get(symbol, 0.0)
@@ -264,7 +269,8 @@ def build_generic_live_dynamic_capital_proof(
         "worst_case_posttrade_gross_usd": gross,
         "worst_case_posttrade_settled_cash_usd": worst_cash,
         "gross_limit_pass": True, "settled_cash_reserve_pass": True,
-        "whole_share_pass": True, "minimum_trade_pass": True, "long_only_pass": True,
+        "fractional_share_policy_pass": True,
+        "broker_minimum_notional_pass": True, "long_only_pass": True,
         "buying_power_used": False, "margin_multiplier_used": False,
         "unsettled_funds_used": False, "execution_authority": False,
     }

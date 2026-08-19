@@ -133,6 +133,19 @@ def test_alpaca_dynamic_account_collection_preserves_explicit_zero_and_false():
     assert account["account_blocked"] is False
 
 
+def test_alpaca_dynamic_account_collection_normalizes_explicit_optional_null_transfers():
+    payload = json.loads(_raw())
+    payload["pending_transfer_in"] = None
+    payload["pending_transfer_out"] = None
+    broker = AlpacaBroker(
+        trading_client=_Client(payload), paper=False,
+        base_url="https://api.alpaca.markets",
+    )
+    account = broker.get_generic_live_dynamic_account()
+    assert account["pending_transfer_in"] == "0"
+    assert account["pending_transfer_out"] == "0"
+
+
 def test_dynamic_strict_read_is_separate_from_shared_paper_account_path():
     payload = json.loads(_raw())
     payload.pop("pending_transfer_in")

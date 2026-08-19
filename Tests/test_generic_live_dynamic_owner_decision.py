@@ -34,6 +34,8 @@ def test_dynamic_owner_decision_has_no_nominal_ceiling_or_execution_authority():
     assert decision["capital_policy"]["gross_capital_basis"].endswith("NET_LIQUIDATION_EQUITY")
     assert decision["capital_policy"]["buy_cash_basis"].endswith("SETTLED_CASH")
     assert decision["capital_policy"]["buying_power_allowed"] is False
+    assert decision["trading_constraints"]["minimum_trade_usd"] == 1.0
+    assert decision["trading_constraints"]["whole_share_only"] is False
     assert decision["execution_authority"] is False
     assert decision["activation_authority"] is False
     assert decision["paper_authority_changed"] is False

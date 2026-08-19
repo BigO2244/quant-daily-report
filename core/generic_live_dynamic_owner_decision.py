@@ -16,7 +16,8 @@ import re
 from typing import Any, Mapping
 
 
-SCHEMA = "caerus.generic_live_dynamic_owner_decision.v1"
+SCHEMA = "caerus.generic_live_dynamic_owner_decision.v2"
+PREVIOUS_SCHEMA = "caerus.generic_live_dynamic_owner_decision.v1"
 CAPITAL_POLICY_VERSION = "broker_net_liquidation_and_settled_cash_v1"
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$")
@@ -124,7 +125,7 @@ def validate_generic_live_dynamic_owner_decision(
 ) -> dict[str, Any]:
     if not isinstance(payload, Mapping) or set(payload) != _FIELDS:
         raise GenericLiveDynamicOwnerDecisionError("owner decision fields are invalid")
-    if payload.get("schema_version") != SCHEMA:
+    if payload.get("schema_version") not in {SCHEMA, PREVIOUS_SCHEMA}:
         raise GenericLiveDynamicOwnerDecisionError("owner decision schema is invalid")
     if not isinstance(payload.get("owner_decision_id"), str) or not _ID.fullmatch(payload["owner_decision_id"]):
         raise GenericLiveDynamicOwnerDecisionError("owner_decision_id is invalid")
@@ -176,10 +177,11 @@ def validate_generic_live_dynamic_owner_decision(
     trading = payload.get("trading_constraints")
     if not isinstance(trading, Mapping) or set(trading) != _TRADING_FIELDS:
         raise GenericLiveDynamicOwnerDecisionError("trading constraint fields are invalid")
+    fractional_policy = payload.get("schema_version") == SCHEMA
     expected_trading = {
-        "minimum_trade_usd": 100.0,
+        "minimum_trade_usd": 1.0 if fractional_policy else 100.0,
         "maximum_orders_per_session": 1,
-        "whole_share_only": True,
+        "whole_share_only": not fractional_policy,
         "long_only": True,
         "leverage_allowed": False,
         "shorting_allowed": False,
@@ -246,9 +248,9 @@ def build_generic_live_dynamic_owner_decision(
             "freshness_seconds": 120,
         },
         "trading_constraints": {
-            "minimum_trade_usd": 100.0,
+            "minimum_trade_usd": 1.0,
             "maximum_orders_per_session": 1,
-            "whole_share_only": True,
+            "whole_share_only": False,
             "long_only": True,
             "leverage_allowed": False,
             "shorting_allowed": False,
@@ -272,7 +274,8 @@ def build_generic_live_dynamic_owner_decision(
 
 
 __all__ = [
-    "CAPITAL_POLICY_VERSION", "EXPECTED_FIXED_CAPITAL_ARTIFACT_HASHES", "SCHEMA",
+    "CAPITAL_POLICY_VERSION", "EXPECTED_FIXED_CAPITAL_ARTIFACT_HASHES",
+    "PREVIOUS_SCHEMA", "SCHEMA",
     "GenericLiveDynamicOwnerDecisionError",
     "build_generic_live_dynamic_owner_decision", "content_hash",
     "validate_generic_live_dynamic_owner_decision",

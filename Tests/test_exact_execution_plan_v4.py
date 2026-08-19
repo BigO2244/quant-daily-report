@@ -271,6 +271,44 @@ def test_plan_derives_exact_orders_from_risk_target_and_broker_truth() -> None:
     } == {"AAPL": 3.0, "MSFT": 5.0, "NVDA": 5.0}
 
 
+def test_full_account_nav_scales_targets_to_fractional_quantities() -> None:
+    policy = _lane_policy(lane_kind="LIVE", lane_id="generic-live-v1")
+    policy["execution_policy"].update({
+        "allow_fractional_shares": True,
+        "quantity_precision": 6,
+        "minimum_order_notional_usd": 1.0,
+        "maximum_order_notional_usd": 437.855,
+        "maximum_total_buy_notional_usd": 437.855,
+    })
+    target = _target(policy)
+    snapshot = _snapshot(target, policy, with_position=False)
+    snapshot["equity"] = 460.90
+    snapshot["cash"] = 460.90
+    snapshot["content_hash"] = artifact_content_hash(snapshot)
+    risk = build_lane_risk_package(
+        lane_target_package=target,
+        account_state_hash=snapshot["content_hash"],
+        decision="APPROVE",
+        evaluated_at="2026-08-18T11:07:00+00:00",
+    )
+
+    plan = build_lane_exact_execution_plan(
+        lane_risk_package=risk,
+        broker_snapshot=snapshot,
+        governed_lane_policy=policy,
+        planned_at="2026-08-18T11:08:00+00:00",
+    )
+
+    assert plan["capital_basis"] == "FULL_ACCOUNT_EQUITY"
+    assert plan["deployable_capital"] == 460.90
+    assert plan["constraints"]["allow_fractional_shares"] is True
+    assert any(
+        float(order["quantity"]) != int(float(order["quantity"]))
+        for order in plan["buy_orders"]
+    )
+    assert sum(float(order["notional"]) for order in plan["buy_orders"]) <= 437.855
+
+
 def test_every_order_preserves_causal_sleeve_and_decision_lineage() -> None:
     plan, risk, snapshot, _ = _plan()
     aapl_order = next(row for row in plan["buy_orders"] if row["symbol"] == "AAPL")

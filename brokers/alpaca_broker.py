@@ -164,6 +164,26 @@ def _required_account_bool(payload: Mapping[str, Any], account: Any, name: str) 
     raise RuntimeError(f"Alpaca account response field is not boolean: {name}")
 
 
+def _required_pending_transfer_amount(
+    payload: Mapping[str, Any], account: Any, name: str
+) -> Any:
+    """Return Alpaca's optional pending-transfer amount without inventing it.
+
+    The live API returns these documented optional fields as explicit nulls
+    when no transfer is pending. Missing fields still fail closed; only an
+    explicitly present null is normalized to zero for the numeric evidence
+    schema.
+    """
+
+    if name in payload:
+        value = payload[name]
+    elif hasattr(account, name):
+        value = getattr(account, name)
+    else:
+        raise RuntimeError(f"Alpaca account response missing required field: {name}")
+    return "0" if value is None else _required_account_field(payload, account, name)
+
+
 def json_safe_primitive(value: Any) -> Any:
     """Normalize Alpaca SDK payloads into deterministic JSON-safe primitives."""
     import decimal
@@ -569,10 +589,12 @@ class AlpacaBroker:
         required = {
             name: _required_account_field(d, account, name)
             for name in (
-                "id", "status", "cash", "equity", "pending_transfer_in",
-                "pending_transfer_out", "long_market_value", "short_market_value",
+                "id", "status", "cash", "equity", "long_market_value",
+                "short_market_value",
             )
         }
+        for name in ("pending_transfer_in", "pending_transfer_out"):
+            required[name] = _required_pending_transfer_amount(d, account, name)
         required["trading_blocked"] = _required_account_bool(
             d, account, "trading_blocked"
         )
