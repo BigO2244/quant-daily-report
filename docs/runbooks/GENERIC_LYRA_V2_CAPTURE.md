@@ -89,11 +89,11 @@ call a broker, build an executable schedule, or submit an order.
 
 ## Activation binding
 
-The Live v1 activation preflight v3 binds the decision hash, full capture hash,
+The Live v1 activation preflight v4 binds the decision hash, full capture hash,
 and a sealed raw-source reproduction proof. Immediately before preflight and
 submission, runtime reads all twelve explicit source files, rehashes their exact
 bytes and resolved paths, rebuilds the capture byte-for-byte, and passes that
-proof through both boundaries. Historical v1/v2 BLOCKED preflights remain valid
+proof through both boundaries. Historical v1/v2/v3 BLOCKED preflights remain valid
 evidence, but neither can authorize activation because they lack the complete
 raw-source binding.
 
