@@ -1431,11 +1431,19 @@ exact SHA `44987faf32f591b80fbf803d8e09f715dcef1970`. It can only produce
 immutable advisory evidence for the Monday 2026-08-24 signal and Tuesday
 2026-08-25 execution session at or after 08:15 America/New_York. The disabled
 path performs no input reads or writes, and the code has no broker, activation,
-submission, or execution reachability. The capture config and capture cron were
-not installed. The deployment is sealed in
+submission, or execution reachability. The source deployment is sealed in
 [`governed_lyra_capture_boundary_source_deployment_2026-08-19.json`](../evidence/governed_lyra_capture_boundary_source_deployment_2026-08-19.json),
 content hash
 `0888d46975915a861e5205a348f8be8abcab0e23273b3b831bc1d6d6bbb8deee`.
+The exact disabled config and inert one-date cron were subsequently installed
+with capture flag `0`. The wrapper exits before input reads or writes, and
+removing the capture-owned lines restores the prior crontab byte-for-byte.
+Installation evidence is sealed in
+[`governed_lyra_capture_boundary_disabled_install_2026-08-19.json`](../evidence/governed_lyra_capture_boundary_disabled_install_2026-08-19.json),
+content hash
+`07941e134f68251f5be9bc5b12812d863e83080023cf415767657c098fbc30d1`.
+This is observation preparation only; it grants no capture-enable, Live,
+activation, submission, or execution authority.
 
 The adaptive policy choice is now concrete rather than implicit. Candidate
 hash `0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`

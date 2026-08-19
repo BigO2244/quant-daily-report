@@ -264,9 +264,16 @@ authority. Deployment evidence is sealed at
 [`governed_lyra_capture_boundary_source_deployment_2026-08-19.json`](evidence/governed_lyra_capture_boundary_source_deployment_2026-08-19.json),
 content hash
 `0888d46975915a861e5205a348f8be8abcab0e23273b3b831bc1d6d6bbb8deee`.
-The capture config and capture cron remain absent; installing or enabling them
-is not owner approval and must wait for the exact policy and session owner
-artifacts named above.
+The exact disabled configuration and inert one-date capture cron are now
+installed. The capture flag is literal `0`, so the scheduled wrapper exits
+before reading any capture input or writing any artifact. Removal of the
+capture-owned cron lines reproduces the pre-install crontab byte-for-byte;
+PAPER and unrelated entries are unchanged. This installed state is sealed in
+[`governed_lyra_capture_boundary_disabled_install_2026-08-19.json`](evidence/governed_lyra_capture_boundary_disabled_install_2026-08-19.json),
+content hash
+`07941e134f68251f5be9bc5b12812d863e83080023cf415767657c098fbc30d1`.
+Enabling capture is not owner approval and still requires the exact policy and
+session owner artifacts named above. Live remains disabled and armed.
 
 A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),

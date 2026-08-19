@@ -1,0 +1,58 @@
+{
+  "activation_authority": false,
+  "active_runtime": {
+    "active_checkout_clean": true,
+    "active_head": "a7c09e91276dbcf7d4a9f8678fcb5db4fdf976b3",
+    "capture_config_enabled": false,
+    "capture_config_mode": "0600",
+    "capture_config_status": "INSTALLED_DISABLED",
+    "capture_cron_entry_count": 1,
+    "capture_schedule_status": "INSTALLED_INERT_DATE_BOUND",
+    "generic_gate_status": "ARMED",
+    "generic_posttrade_observation_enabled": false,
+    "generic_schedule_enabled": false,
+    "generic_submit_approved": false,
+    "legacy_kill_switch_status": "ARMED"
+  },
+  "broker_call_performed": false,
+  "broker_write_performed": false,
+  "capture_boundary_execution_session": "2026-08-25",
+  "capture_boundary_signal_as_of": "2026-08-24",
+  "capture_enabled": false,
+  "capture_input_read_performed": false,
+  "capture_write_performed": false,
+  "content_hash": "07941e134f68251f5be9bc5b12812d863e83080023cf415767657c098fbc30d1",
+  "deployed_sha": "a7c09e91276dbcf7d4a9f8678fcb5db4fdf976b3",
+  "enabled_capture_authority": false,
+  "execution_authority": false,
+  "factual_activation_status": "NO_GO_PENDING_FUTURE_EVIDENCE_AND_OWNER_APPROVALS",
+  "file_hashes": {
+    "capture_config_sha256": "9fd99c39088776245badcd63db4ce30ecdb7949a88b5273c23c1c9bdddfbd09c",
+    "generic_config_sha256": "86fc1cd75b3dcd2d002aa7ce7bd2d433f6fdd5f4628e6178c86bc420fdd2779e",
+    "generic_gate_state_sha256": "7986d332b19ad2d386838a32ec676baff12d059a0b5daa80874365c8e7a62cda",
+    "legacy_live_env_sha256": "3896bec8adc485a136f1d636fad2b37e6a45c0fcbc86f8095c827ff6d62a3597",
+    "prior_crontab_without_capture_sha256": "6500fad56880668df23736eebc8cf980149d72b9f1e771c301ec946b5f1ed7e5",
+    "user_crontab_with_inert_capture_sha256": "872b74de00d48d3de525e62b2446d292bdc51b0ca5c8de0d77b5a53ab13768c6"
+  },
+  "installed_at": "2026-08-19T07:59:45Z",
+  "installation_authority": "OWNER_AUTHORIZED_DISABLED_CAPTURE_OBSERVATION_ONLY",
+  "installation_result": "INSTALLED_AND_VERIFIED_DISABLED_NO_READ_NO_WRITE",
+  "next_required_inputs": [
+    "BRETT_APPROVAL_OF_EXACT_LYRA_GOVERNED_EVIDENCE_POLICY_PROPOSAL",
+    "SEALED_POLICY_OWNER_DECISION_AND_FINAL_POLICY",
+    "BRETT_APPROVAL_OF_SUPERSEDING_2026_08_25_LIVE_SESSION_OWNER_DECISION",
+    "COMPLETED_2026_08_24_GOVERNED_CLOSE_AND_WEEKLY_LYRA_TARGET",
+    "IMMUTABLE_2026_08_25_PRECOMPUTE_INPUTS"
+  ],
+  "order_submitted": false,
+  "paper_authority_changed": false,
+  "paper_cron_changed": false,
+  "schema_version": "caerus.governed_lyra_capture_boundary_disabled_install.v1",
+  "source_boundary_sha": "44987faf32f591b80fbf803d8e09f715dcef1970",
+  "verification": {
+    "disabled_boundary_result": "DISABLED_NO_WRITE",
+    "independent_review_tests_passed": 29,
+    "unrelated_and_paper_crontab_bytes_preserved": true,
+    "unresolved_policy_and_owner_placeholders_present": true
+  }
+}
