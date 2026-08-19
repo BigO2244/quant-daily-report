@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
 from core.generic_lyra_v2_producer import (  # noqa: E402
     build_generic_lyra_v2_decision_batch,
     generic_lyra_v2_readiness_path,
+    validate_generic_lyra_v2_capture_result,
 )
 from core.governed_universe_freeze import read_governed_universe_symbols  # noqa: E402
 from core.lyra_governed_evidence import (  # noqa: E402
@@ -32,6 +33,10 @@ from core.lyra_governed_evidence import (  # noqa: E402
 )
 from core.sleeve_decision import canonical_json  # noqa: E402
 from core.lyra_target_selection import build_lyra_target_selection_evidence  # noqa: E402
+from core.generic_lyra_v2_raw_sources import (  # noqa: E402
+    GENERIC_LYRA_RAW_RECOMPUTE_SCHEMA,
+    validate_generic_lyra_v2_raw_source_recompute,
+)
 
 
 class GenericLyraV2CaptureCliError(ValueError):
@@ -136,7 +141,10 @@ def capture_from_explicit_paths(
     evaluation_batch_path: Path | str, legacy_decision_batch_path: Path | str,
     lyra_source_path: Path | str, prior_lyra_source_path: Path | str,
     universe_freeze_path: Path | str, universe_path: Path | str,
-    forecast_risk_policy_path: Path | str, price_panel_path: Path | str,
+    forecast_risk_policy_path: Path | str,
+    forecast_risk_policy_proposal_path: Path | str,
+    forecast_risk_policy_owner_decision_path: Path | str,
+    price_panel_path: Path | str,
     output_root: Path | str,
     write_advisory_artifacts: bool = False,
     price_row_loader: Callable[..., list[dict[str, Any]]] = load_price_panel_rows,
@@ -152,6 +160,10 @@ def capture_from_explicit_paths(
     prior_source = read_strict_json(prior_lyra_source_path)
     freeze = read_strict_json(universe_freeze_path)
     risk_policy = read_strict_json(forecast_risk_policy_path)
+    risk_policy_proposal = read_strict_json(forecast_risk_policy_proposal_path)
+    risk_policy_owner_decision = read_strict_json(
+        forecast_risk_policy_owner_decision_path
+    )
     if source_session.get("trade_date") != execution_session:
         raise GenericLyraV2CaptureCliError("source session differs from execution_session")
     if lyra_source.get("effective_trade_date") != signal_as_of:
@@ -195,6 +207,8 @@ def capture_from_explicit_paths(
         universe_freeze=freeze, universe_path=universe_path,
         market_data_snapshot=market, target_selection_evidence=selection,
         forecast_risk_policy=risk_policy, session_as_of=session_as_of,
+        forecast_risk_policy_proposal=risk_policy_proposal,
+        forecast_risk_policy_owner_decision=risk_policy_owner_decision,
         generated_at=captured_at,
     )
     persisted_paths: list[str] = []
@@ -204,6 +218,10 @@ def capture_from_explicit_paths(
             "market-data": result["market_data_snapshot"],
             "target-selection": result["target_selection_evidence"],
             "risk-policy": result["forecast_risk_policy"],
+            "risk-policy-proposal": result["forecast_risk_policy_proposal"],
+            "risk-policy-owner-decision": (
+                result["forecast_risk_policy_owner_decision"]
+            ),
             "session": result["session_snapshot"],
             "risk": result["forecast_risk"],
             "liquidity": result["liquidity"],
@@ -232,6 +250,85 @@ def capture_from_explicit_paths(
     }
 
 
+def recompute_capture_from_explicit_paths(
+    *, expected_capture: Mapping[str, Any],
+    execution_session: str, signal_as_of: str, session_as_of: str,
+    captured_at: str, source_session_manifest_path: Path | str,
+    evaluation_batch_path: Path | str, legacy_decision_batch_path: Path | str,
+    lyra_source_path: Path | str, prior_lyra_source_path: Path | str,
+    universe_freeze_path: Path | str, universe_path: Path | str,
+    forecast_risk_policy_path: Path | str,
+    forecast_risk_policy_proposal_path: Path | str,
+    forecast_risk_policy_owner_decision_path: Path | str,
+    price_panel_path: Path | str,
+    price_row_loader: Callable[..., list[dict[str, Any]]] = load_price_panel_rows,
+) -> dict[str, Any]:
+    """Rehash raw protected inputs and reproduce the capture byte-for-byte."""
+
+    expected = validate_generic_lyra_v2_capture_result(expected_capture)
+    result = capture_from_explicit_paths(
+        execution_session=execution_session, signal_as_of=signal_as_of,
+        session_as_of=session_as_of, captured_at=captured_at,
+        source_session_manifest_path=source_session_manifest_path,
+        evaluation_batch_path=evaluation_batch_path,
+        legacy_decision_batch_path=legacy_decision_batch_path,
+        lyra_source_path=lyra_source_path,
+        prior_lyra_source_path=prior_lyra_source_path,
+        universe_freeze_path=universe_freeze_path, universe_path=universe_path,
+        forecast_risk_policy_path=forecast_risk_policy_path,
+        forecast_risk_policy_proposal_path=forecast_risk_policy_proposal_path,
+        forecast_risk_policy_owner_decision_path=(
+            forecast_risk_policy_owner_decision_path
+        ),
+        price_panel_path=price_panel_path, output_root=Path("."),
+        write_advisory_artifacts=False, price_row_loader=price_row_loader,
+    )
+    recomputed = result["capture_result"]
+    if recomputed != expected:
+        raise GenericLyraV2CaptureCliError(
+            "raw protected sources do not reproduce the sealed Lyra capture"
+        )
+    source_paths = {
+        "source_session_manifest": source_session_manifest_path,
+        "evaluation_batch": evaluation_batch_path,
+        "legacy_decision_batch": legacy_decision_batch_path,
+        "lyra_source": lyra_source_path,
+        "prior_lyra_source": prior_lyra_source_path,
+        "universe_freeze": universe_freeze_path,
+        "universe_bytes": universe_path,
+        "forecast_risk_policy": forecast_risk_policy_path,
+        "forecast_risk_policy_proposal": forecast_risk_policy_proposal_path,
+        "forecast_risk_policy_owner_decision": (
+            forecast_risk_policy_owner_decision_path
+        ),
+        "price_panel": price_panel_path,
+    }
+    body = {
+        "schema_version": GENERIC_LYRA_RAW_RECOMPUTE_SCHEMA,
+        "status": "PASS_NO_WRITE",
+        "execution_session": execution_session,
+        "expected_capture_hash": expected["content_hash"],
+        "recomputed_capture_hash": recomputed["content_hash"],
+        "source_files": [
+            {
+                "name": name,
+                "path": str(Path(path).resolve()),
+                "sha256": file_sha256(path),
+            }
+            for name, path in sorted(source_paths.items())
+        ],
+        "write_enabled": False, "broker_call_performed": False,
+        "broker_write_performed": False, "submission_allowed": False,
+        "execution_authority": False, "activation_authority": False,
+    }
+    body["content_hash"] = hashlib.sha256(
+        canonical_json(body).encode("utf-8")
+    ).hexdigest()
+    return validate_generic_lyra_v2_raw_source_recompute(
+        body, expected_capture=expected
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execution-session", required=True)
@@ -246,6 +343,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--universe-freeze", required=True)
     parser.add_argument("--universe", required=True)
     parser.add_argument("--forecast-risk-policy", required=True)
+    parser.add_argument("--forecast-risk-policy-proposal", required=True)
+    parser.add_argument("--forecast-risk-policy-owner-decision", required=True)
     parser.add_argument("--price-panel", required=True)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--write-advisory-artifacts", action="store_true")
@@ -267,6 +366,10 @@ def main() -> int:
             universe_freeze_path=args.universe_freeze,
             universe_path=args.universe,
             forecast_risk_policy_path=args.forecast_risk_policy,
+            forecast_risk_policy_proposal_path=args.forecast_risk_policy_proposal,
+            forecast_risk_policy_owner_decision_path=(
+                args.forecast_risk_policy_owner_decision
+            ),
             price_panel_path=args.price_panel,
             output_root=args.output_root,
             write_advisory_artifacts=args.write_advisory_artifacts,

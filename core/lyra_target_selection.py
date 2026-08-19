@@ -13,6 +13,11 @@ import math
 from typing import Any, Mapping, Sequence
 
 from core.sleeve_decision import content_hash
+from core.governed_xnys_calendar import (
+    is_xnys_session,
+    next_xnys_session,
+    xnys_session_window,
+)
 
 
 LYRA_TARGET_SELECTION_SCHEMA = "caerus.lyra_target_selection_evidence.v1"
@@ -69,6 +74,24 @@ def _signals(closes: Sequence[float]) -> tuple[float, float, float, float]:
     return tuple(round(value, 12) for value in (r3, r6_1, r12_1, score))
 
 
+def _expected_xnys_dates(signal_as_of: str, *, count: int) -> list[str]:
+    if not is_xnys_session(signal_as_of):
+        raise LyraTargetSelectionError("signal_as_of must be an XNYS session")
+    return xnys_session_window(signal_as_of, count=count)
+
+
+def _validate_weekly_chronology(*, signal_as_of: str, execution_session: str) -> None:
+    signal = dt.date.fromisoformat(signal_as_of)
+    if (
+        signal.weekday() != 0
+        or not is_xnys_session(signal_as_of)
+        or next_xnys_session(signal_as_of) != execution_session
+    ):
+        raise LyraTargetSelectionError(
+            "Lyra signal must be a Monday XNYS close followed by the immediate XNYS session"
+        )
+
+
 def build_lyra_target_selection_evidence(
     *, execution_session: str, signal_as_of: str, captured_at: str,
     source_path: str, source_sha256: str, universe_freeze_hash: str,
@@ -79,6 +102,9 @@ def build_lyra_target_selection_evidence(
     signal_as_of = _date(signal_as_of, label="signal_as_of")
     if signal_as_of >= execution_session:
         raise LyraTargetSelectionError("selection signal must precede execution")
+    _validate_weekly_chronology(
+        signal_as_of=signal_as_of, execution_session=execution_session
+    )
     try:
         captured = dt.datetime.fromisoformat(str(captured_at).replace("Z", "+00:00"))
     except ValueError as exc:
@@ -117,14 +143,24 @@ def build_lyra_target_selection_evidence(
     histories: list[dict[str, Any]] = []
     availability: list[dict[str, Any]] = []
     eligible: list[str] = []
-    common_dates: list[str] | None = None
+    expected_dates = _expected_xnys_dates(
+        signal_as_of, count=REQUIRED_CLOSE_OBSERVATIONS
+    )
     for symbol in symbols:
         rows = sorted(by_symbol[symbol], key=lambda row: row["date"])[-REQUIRED_CLOSE_OBSERVATIONS:]
         dates = [row["date"] for row in rows]
         if len(dates) != len(set(dates)):
             raise LyraTargetSelectionError("selection history dates are duplicated")
-        is_eligible = len(rows) == REQUIRED_CLOSE_OBSERVATIONS and dates[-1:] == [signal_as_of]
-        status = "ELIGIBLE_FULL_253" if is_eligible else "INELIGIBLE_INSUFFICIENT_HISTORY"
+        is_eligible = dates == expected_dates
+        status = (
+            "ELIGIBLE_FULL_253"
+            if is_eligible
+            else (
+                "INELIGIBLE_INSUFFICIENT_HISTORY"
+                if len(rows) < REQUIRED_CLOSE_OBSERVATIONS
+                else "INELIGIBLE_CALENDAR_MISMATCH"
+            )
+        )
         availability.append({
             "symbol": symbol, "observation_count": len(rows),
             "first_observation": dates[0] if dates else None,
@@ -133,12 +169,8 @@ def build_lyra_target_selection_evidence(
         })
         if is_eligible:
             eligible.append(symbol)
-            if common_dates is None:
-                common_dates = dates
-            elif dates != common_dates:
-                raise LyraTargetSelectionError("eligible symbols do not share one PIT window")
         histories.append({"symbol": symbol, "observations": rows})
-    if len(eligible) < TOP_N or common_dates is None:
+    if len(eligible) < TOP_N:
         raise LyraTargetSelectionError("fewer than five universe members are signal ready")
     candidates = []
     for history in histories:
@@ -169,7 +201,7 @@ def build_lyra_target_selection_evidence(
         "required_close_observations": REQUIRED_CLOSE_OBSERVATIONS,
         "top_n": TOP_N, "frozen_universe_symbols": symbols,
         "frozen_member_count": len(symbols), "eligible_symbols": eligible,
-        "eligible_member_count": len(eligible), "observation_dates": common_dates,
+        "eligible_member_count": len(eligible), "observation_dates": expected_dates,
         "member_availability": availability,
         "close_histories": histories,
         "availability_hash": content_hash(availability),
@@ -209,6 +241,9 @@ def validate_lyra_target_selection_evidence(payload: Mapping[str, Any]) -> dict[
     signal = _date(payload.get("signal_as_of"), label="signal_as_of")
     if signal >= execution:
         raise LyraTargetSelectionError("target-selection chronology differs")
+    _validate_weekly_chronology(
+        signal_as_of=signal, execution_session=execution
+    )
     try:
         captured = dt.datetime.fromisoformat(
             str(payload.get("captured_at") or "").replace("Z", "+00:00")
@@ -232,13 +267,16 @@ def validate_lyra_target_selection_evidence(payload: Mapping[str, Any]) -> dict[
     availability = payload.get("member_availability")
     histories = payload.get("close_histories")
     dates = payload.get("observation_dates")
+    expected_dates = _expected_xnys_dates(
+        signal, count=REQUIRED_CLOSE_OBSERVATIONS
+    )
     if (
         not isinstance(symbols, list) or symbols != sorted(set(symbols))
         or len(symbols) < TOP_N or payload.get("frozen_member_count") != len(symbols)
         or not isinstance(eligible, list) or eligible != sorted(set(eligible))
         or len(eligible) < TOP_N or payload.get("eligible_member_count") != len(eligible)
         or not isinstance(dates, list) or len(dates) != REQUIRED_CLOSE_OBSERVATIONS
-        or dates != sorted(set(dates)) or dates[-1] != signal
+        or dates != expected_dates
         or not isinstance(histories, list) or len(histories) != len(symbols)
         or not isinstance(availability, list) or len(availability) != len(symbols)
     ):
@@ -267,12 +305,20 @@ def validate_lyra_target_selection_evidence(payload: Mapping[str, Any]) -> dict[
             raise LyraTargetSelectionError(
                 "target-selection history dates must be unique, ordered, and point-in-time"
             )
-        is_eligible = len(observations) == REQUIRED_CLOSE_OBSERVATIONS and observed_dates == dates
+        is_eligible = observed_dates == expected_dates
         recomputed_availability.append({
             "symbol": expected_symbol, "observation_count": len(observations),
             "first_observation": observed_dates[0] if observed_dates else None,
             "last_observation": observed_dates[-1] if observed_dates else None,
-            "status": "ELIGIBLE_FULL_253" if is_eligible else "INELIGIBLE_INSUFFICIENT_HISTORY",
+            "status": (
+                "ELIGIBLE_FULL_253"
+                if is_eligible
+                else (
+                    "INELIGIBLE_INSUFFICIENT_HISTORY"
+                    if len(observations) < REQUIRED_CLOSE_OBSERVATIONS
+                    else "INELIGIBLE_CALENDAR_MISMATCH"
+                )
+            ),
         })
         if not is_eligible:
             continue

@@ -22,6 +22,7 @@ from Tests.test_generic_live_v1_submission import (
 )
 from Tests.test_generic_live_v1_activation import (
     EXPECTED, OBSERVATION, OWNER, _decision, _plan, _proofs,
+    _raw_source_recompute,
 )
 from core.generic_live_v1_activation import build_generic_live_v1_activation_preflight
 from authority.lane_exact_plan import canonical_json
@@ -44,7 +45,7 @@ def _broker_evidence(plan, broker_order_id, *, status="FILLED", quantity=None):
     order_evidence = seal_broker_order_evidence({
         "schema_version": BROKER_ORDER_EVIDENCE_SCHEMA,
         "observation_id": f"observation:{order['order_id']}",
-        "observed_at": "2026-08-19T13:35:00+00:00", **_scope(plan),
+        "observed_at": "2026-08-25T13:35:00+00:00", **_scope(plan),
         "order_id": order["order_id"], "client_order_id": order["client_order_id"],
         "broker_order_id": broker_order_id, "status": status,
         "submitted_quantity": order["quantity"], "filled_quantity": filled,
@@ -55,7 +56,7 @@ def _broker_evidence(plan, broker_order_id, *, status="FILLED", quantity=None):
         fills.append(seal_broker_fill_evidence({
             "schema_version": BROKER_FILL_EVIDENCE_SCHEMA,
             "fill_id": f"fill:{order['order_id']}:1",
-            "event_time": "2026-08-19T13:34:30+00:00", **_scope(plan),
+            "event_time": "2026-08-25T13:34:30+00:00", **_scope(plan),
             "order_id": order["order_id"], "client_order_id": order["client_order_id"],
             "broker_order_id": broker_order_id, "symbol": order["symbol"],
             "side": order["side"], "quantity": filled,
@@ -77,8 +78,8 @@ def _broker_evidence(plan, broker_order_id, *, status="FILLED", quantity=None):
     ]
     ending = seal_ending_lane_state({
         "schema_version": ENDING_LANE_STATE_SCHEMA,
-        "state_id": "ending-state:generic-live-v1:2026-08-19",
-        "as_of": "2026-08-19T20:00:00+00:00", **_scope(plan),
+        "state_id": "ending-state:generic-live-v1:2026-08-25",
+        "as_of": "2026-08-25T20:00:00+00:00", **_scope(plan),
         "cash": cash, "equity": cash + sum(row["market_value"] for row in position_rows),
         "positions": position_rows, "source_hash": SOURCE,
     })
@@ -162,7 +163,7 @@ def _policy(plan):
         "schema_version": DEPLOYMENT_POLICY_SCHEMA,
         "deployment_version": plan["deployment_version"], "status": "ACTIVE",
         "approved_by": "Brett Olson", "owner_decision_id": "live-v1-owner",
-        "approved_at": "2026-08-18T20:00:00Z", "effective_session": "2026-08-19",
+        "approved_at": "2026-08-18T20:00:00Z", "effective_session": "2026-08-25",
         "prior_deployment_version": "live-v0", "rollback_deployment_version": "live-safe",
         "lanes": [lane],
     })
@@ -198,7 +199,7 @@ def _session_fixture(tmp_path, *, outcome="FILLED"):
     _disarm(gate, preflight, plan)
     submission = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=AlignedBroker(terminal_status=terminal_status),
         wal_directory=tmp_path / "wal",
         rearm_state_path=gate, result_path=tmp_path / "submission.json",
@@ -214,7 +215,7 @@ def _session_fixture(tmp_path, *, outcome="FILLED"):
         status=evidence_status, quantity=evidence_quantity,
     )
     lifecycle = seal_generic_live_v1_order_lifecycle(
-        submission_result=submission, observed_at="2026-08-19T20:00:00+00:00",
+        submission_result=submission, observed_at="2026-08-25T20:00:00+00:00",
         broker_order_evidence_hash=broker_orders[0]["content_hash"],
         broker_fill_evidence_hashes=[row["content_hash"] for row in broker_fills],
     )
@@ -231,8 +232,8 @@ def _session_fixture(tmp_path, *, outcome="FILLED"):
             "rollback": {"deployment_version": "live-safe", "state": "ROLLBACK_READY", "source_hash": "2" * 64},
         },
         "capital": {"capital_ceiling_usd": 460.0, "effective_deployable_capital_usd": 460.0, "source_hash": "5" * 64},
-        "other_lane_audits": [], "reconciled_at": "2026-08-19T20:01:00+00:00",
-        "valuation_date": "2026-08-19", "finalized_at": "2026-08-19T20:02:00+00:00",
+        "other_lane_audits": [], "reconciled_at": "2026-08-25T20:01:00+00:00",
+        "valuation_date": "2026-08-25", "finalized_at": "2026-08-25T20:02:00+00:00",
         "reporting_artifact_directory": tmp_path / "reporting",
         "rearm_state_path": gate, "base_result_path": tmp_path / "base" / "result.json",
         "closure_result_path": tmp_path / "closure" / "result.json",
@@ -260,8 +261,9 @@ def _no_trade_fixture(tmp_path):
             order_lifecycle_pipeline_green=True, reconciliation_pipeline_green=True,
             accounting_pipeline_green=True, reporting_pipeline_green=True,
         ),
-        evaluated_at="2026-08-19T13:30:00+00:00",
-        lyra_decision=decision, lyra_capture_result=capture, exact_plan=plan,
+        evaluated_at="2026-08-25T13:30:00+00:00",
+        lyra_decision=decision, lyra_capture_result=capture,
+        lyra_raw_source_recompute=_raw_source_recompute(capture), exact_plan=plan,
     )
 
     class HoldingBroker(Broker):
@@ -278,15 +280,15 @@ def _no_trade_fixture(tmp_path):
     _disarm(gate, preflight, plan)
     submission = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan, lyra_decision=decision,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=HoldingBroker(), wal_directory=tmp_path / "wal",
         rearm_state_path=gate, result_path=tmp_path / "submission.json",
         poll_interval_seconds=0,
     )
     ending = seal_ending_lane_state({
         "schema_version": ENDING_LANE_STATE_SCHEMA,
-        "state_id": "ending-state:generic-live-v1:2026-08-19:no-trade",
-        "as_of": "2026-08-19T20:00:00+00:00", **_scope(plan),
+        "state_id": "ending-state:generic-live-v1:2026-08-25:no-trade",
+        "as_of": "2026-08-25T20:00:00+00:00", **_scope(plan),
         "cash": 60.9, "equity": 460.9,
         "positions": [{
             "symbol": row["symbol"], "quantity": row["quantity"],
@@ -296,7 +298,7 @@ def _no_trade_fixture(tmp_path):
         "source_hash": SOURCE,
     })
     lifecycle = seal_generic_live_v1_order_lifecycle(
-        submission_result=submission, observed_at="2026-08-19T20:00:00+00:00",
+        submission_result=submission, observed_at="2026-08-25T20:00:00+00:00",
         broker_order_evidence_hash=None, broker_fill_evidence_hashes=[],
     )
     policy = _policy(plan)
@@ -312,8 +314,8 @@ def _no_trade_fixture(tmp_path):
             "rollback": {"deployment_version": "live-safe", "state": "ROLLBACK_READY", "source_hash": "2" * 64},
         },
         "capital": {"capital_ceiling_usd": 460.0, "effective_deployable_capital_usd": 460.0, "source_hash": "5" * 64},
-        "other_lane_audits": [], "reconciled_at": "2026-08-19T20:01:00+00:00",
-        "valuation_date": "2026-08-19", "finalized_at": "2026-08-19T20:02:00+00:00",
+        "other_lane_audits": [], "reconciled_at": "2026-08-25T20:01:00+00:00",
+        "valuation_date": "2026-08-25", "finalized_at": "2026-08-25T20:02:00+00:00",
         "reporting_artifact_directory": tmp_path / "reporting",
         "rearm_state_path": gate, "base_result_path": tmp_path / "base" / "result.json",
         "closure_result_path": tmp_path / "closure" / "result.json",

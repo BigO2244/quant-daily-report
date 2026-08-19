@@ -32,6 +32,8 @@ from core.lyra_governed_evidence import (
     validate_lyra_capacity_evidence,
     validate_lyra_forecast_risk_evidence,
     validate_lyra_forecast_risk_policy,
+    validate_lyra_forecast_risk_policy_owner_decision,
+    validate_lyra_forecast_risk_policy_proposal,
     validate_lyra_governed_session_snapshot,
     validate_lyra_market_data_snapshot,
 )
@@ -218,7 +220,13 @@ def _turnover(current: list[dict[str, Any]], prior: list[dict[str, Any]]) -> flo
     current_map = {row["symbol"]: row["target_weight"] for row in current}
     prior_map = {row["symbol"]: row["target_weight"] for row in prior}
     symbols = set(current_map) | set(prior_map)
-    return round(0.5 * sum(abs(current_map.get(symbol, 0.0) - prior_map.get(symbol, 0.0)) for symbol in symbols), 12)
+    return round(
+        sum(
+            abs(current_map.get(symbol, 0.0) - prior_map.get(symbol, 0.0))
+            for symbol in symbols
+        ),
+        12,
+    )
 
 
 def validate_governed_lyra_v2_decision(decision: Mapping[str, Any]) -> dict[str, Any]:
@@ -257,7 +265,7 @@ def validate_governed_lyra_v2_decision(decision: Mapping[str, Any]) -> dict[str,
         "FORECAST_RISK_20D_FORMULA_BOUND",
         "LIQUIDITY_20D_FORMULA_BOUND",
         "CAPACITY_5PCT_ADV_FORMULA_BOUND",
-        "TURNOVER_HALF_L1_FORMULA_BOUND",
+        "TURNOVER_FULL_L1_FORMULA_BOUND",
     }
     if not required_reasons.issubset(reasons) or reasons & {"EVALUATION_ONLY", "NON_DECISION_GRADE_UNIVERSE"}:
         raise GenericLyraV2ProducerError("governed Lyra transition reasons differ")
@@ -266,6 +274,8 @@ def validate_governed_lyra_v2_decision(decision: Mapping[str, Any]) -> dict[str,
         risk["content_hash"], capacity["content_hash"], liquidity["content_hash"],
         risk["market_data_snapshot_hash"], decision["session_hash"],
         risk["risk_policy"]["content_hash"],
+        risk["risk_policy_proposal"]["content_hash"],
+        risk["risk_policy_owner_decision"]["content_hash"],
         risk["target_selection_evidence"]["content_hash"],
     }
     observed_hashes = {
@@ -285,7 +295,10 @@ def build_generic_lyra_v2_decision_batch(
     universe_freeze: Mapping[str, Any], universe_path: Path | str,
     market_data_snapshot: Mapping[str, Any],
     target_selection_evidence: Mapping[str, Any],
-    forecast_risk_policy: Mapping[str, Any], session_as_of: str,
+    forecast_risk_policy: Mapping[str, Any],
+    forecast_risk_policy_proposal: Mapping[str, Any],
+    forecast_risk_policy_owner_decision: Mapping[str, Any],
+    session_as_of: str,
     generated_at: str,
 ) -> dict[str, Any]:
     """Build one strict capture result containing a factual Lyra v2 decision."""
@@ -311,6 +324,14 @@ def build_generic_lyra_v2_decision_batch(
     freeze = validate_governed_universe_freeze(
         universe_freeze, universe_path=universe_path, session_as_of=session_as_of,
     )
+    freeze_effective = dt.datetime.fromisoformat(
+        freeze["effective_from"].replace("Z", "+00:00")
+    ).date()
+    freeze_cutoff = dt.date.fromisoformat(freeze["no_retroactive_use_before"])
+    if freeze_effective > dt.date.fromisoformat(effective_date) or freeze_cutoff > dt.date.fromisoformat(effective_date):
+        raise GenericLyraV2ProducerError(
+            "Lyra signal predates the governed universe freeze"
+        )
     universe_members = read_governed_universe_symbols(
         freeze=freeze, universe_path=universe_path, session_as_of=session_as_of,
     )
@@ -319,6 +340,14 @@ def build_generic_lyra_v2_decision_batch(
         raise GenericLyraV2ProducerError("Lyra target is outside frozen universe membership")
     selection = validate_lyra_target_selection_evidence(target_selection_evidence)
     policy = validate_lyra_forecast_risk_policy(forecast_risk_policy)
+    policy_proposal = validate_lyra_forecast_risk_policy_proposal(
+        forecast_risk_policy_proposal
+    )
+    policy_owner_decision = validate_lyra_forecast_risk_policy_owner_decision(
+        forecast_risk_policy_owner_decision,
+        proposal=policy_proposal,
+        as_of=generated_at,
+    )
     if (
         selection["frozen_universe_symbols"] != sorted(members)
         or selection["universe_freeze_hash"] != freeze["content_hash"]
@@ -354,15 +383,22 @@ def build_generic_lyra_v2_decision_batch(
         market_data_snapshot_hash=market["content_hash"],
         target_selection_evidence_hash=selection["content_hash"],
         forecast_risk_policy_hash=policy["content_hash"],
+        forecast_risk_policy_proposal_hash=policy_proposal["content_hash"],
+        forecast_risk_policy_owner_decision_hash=policy_owner_decision["content_hash"],
     )
     risk = build_lyra_forecast_risk_evidence(
         session_snapshot=governed_session, market_data_snapshot=market,
         target_rows=current_targets, risk_policy=policy,
+        risk_policy_proposal=policy_proposal,
+        risk_policy_owner_decision=policy_owner_decision,
         target_selection_evidence=selection,
     )
     liquidity = build_lyra_liquidity_evidence(
         session_snapshot=governed_session, market_data_snapshot=market,
         target_rows=current_targets,
+        governed_policy=policy,
+        governed_policy_proposal=policy_proposal,
+        governed_policy_owner_decision=policy_owner_decision,
     )
     capacity = build_lyra_capacity_evidence(liquidity_evidence=liquidity)
     if risk["status"] != "PASS" or liquidity["status"] != "PASS" or capacity["status"] != "PASS":
@@ -398,7 +434,7 @@ def build_generic_lyra_v2_decision_batch(
             "FORECAST_RISK_20D_FORMULA_BOUND",
             "LIQUIDITY_20D_FORMULA_BOUND",
             "CAPACITY_5PCT_ADV_FORMULA_BOUND",
-            "TURNOVER_HALF_L1_FORMULA_BOUND",
+            "TURNOVER_FULL_L1_FORMULA_BOUND",
             f"RISK_FORMULA:{RISK_FORMULA}", f"LIQUIDITY_FORMULA:{LIQUIDITY_FORMULA}",
             f"CAPACITY_FORMULA:{CAPACITY_FORMULA}", f"TURNOVER_FORMULA:{TURNOVER_FORMULA}",
         }),
@@ -413,6 +449,7 @@ def build_generic_lyra_v2_decision_batch(
         evidence_hashes=[
             risk["content_hash"], liquidity["content_hash"], capacity["content_hash"],
             market["content_hash"], selection["content_hash"], policy["content_hash"],
+            policy_proposal["content_hash"], policy_owner_decision["content_hash"],
         ],
     )
     result = {
@@ -423,6 +460,8 @@ def build_generic_lyra_v2_decision_batch(
         "status": "READY_NO_SUBMIT", "market_data_snapshot": market,
         "target_selection_evidence": selection,
         "forecast_risk_policy": policy,
+        "forecast_risk_policy_proposal": policy_proposal,
+        "forecast_risk_policy_owner_decision": policy_owner_decision,
         "universe_freeze": freeze, "universe_members": universe_members,
         "prior_target_rows": prior_targets,
         "session_snapshot": governed_session, "forecast_risk": risk,
@@ -490,7 +529,9 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
     fields = {
         "schema_version", "trade_date", "execution_session", "signal_as_of",
         "effective_target_date", "captured_at", "status", "market_data_snapshot",
-        "target_selection_evidence", "forecast_risk_policy", "universe_freeze",
+        "target_selection_evidence", "forecast_risk_policy",
+        "forecast_risk_policy_proposal", "forecast_risk_policy_owner_decision",
+        "universe_freeze",
         "universe_members", "prior_target_rows", "session_snapshot",
         "forecast_risk", "liquidity", "capacity", "decision", "readiness",
         "write_enabled", "broker_call_performed", "broker_write_performed",
@@ -521,6 +562,14 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
     )
     market = validate_lyra_market_data_snapshot(payload.get("market_data_snapshot"))
     policy = validate_lyra_forecast_risk_policy(payload.get("forecast_risk_policy"))
+    policy_proposal = validate_lyra_forecast_risk_policy_proposal(
+        payload.get("forecast_risk_policy_proposal")
+    )
+    policy_owner_decision = validate_lyra_forecast_risk_policy_owner_decision(
+        payload.get("forecast_risk_policy_owner_decision"),
+        proposal=policy_proposal,
+        as_of=payload.get("captured_at"),
+    )
     session = validate_lyra_governed_session_snapshot(payload.get("session_snapshot"))
     # Revalidate the freeze against the protected prospective session.  This
     # prevents a perfectly self-sealed but retroactively effective freeze from
@@ -528,6 +577,15 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
     freeze = validate_governed_universe_freeze(
         payload.get("universe_freeze"), session_as_of=session["as_of"]
     )
+    signal_date = dt.date.fromisoformat(session["signal_as_of"])
+    freeze_effective = dt.datetime.fromisoformat(
+        freeze["effective_from"].replace("Z", "+00:00")
+    ).date()
+    freeze_cutoff = dt.date.fromisoformat(freeze["no_retroactive_use_before"])
+    if freeze_effective > signal_date or freeze_cutoff > signal_date:
+        raise GenericLyraV2ProducerError(
+            "Lyra signal predates the governed universe freeze"
+        )
     try:
         policy_approved_at = dt.datetime.fromisoformat(
             str(policy["approved_at"]).replace("Z", "+00:00")
@@ -555,6 +613,10 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
         or selection["content_hash"] != session["target_selection_evidence_hash"]
         or market["content_hash"] != session["market_data_snapshot_hash"]
         or policy["content_hash"] != session["forecast_risk_policy_hash"]
+        or policy_proposal["content_hash"]
+        != session["forecast_risk_policy_proposal_hash"]
+        or policy_owner_decision["content_hash"]
+        != session["forecast_risk_policy_owner_decision_hash"]
     ):
         raise GenericLyraV2ProducerError("capture session/source bundle lineage differs")
     targets = selection["target_rows"]
@@ -562,10 +624,15 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
     risk = build_lyra_forecast_risk_evidence(
         session_snapshot=session, market_data_snapshot=market,
         target_rows=targets, risk_policy=policy,
+        risk_policy_proposal=policy_proposal,
+        risk_policy_owner_decision=policy_owner_decision,
         target_selection_evidence=selection,
     )
     liquidity = build_lyra_liquidity_evidence(
         session_snapshot=session, market_data_snapshot=market, target_rows=targets,
+        governed_policy=policy,
+        governed_policy_proposal=policy_proposal,
+        governed_policy_owner_decision=policy_owner_decision,
     )
     capacity = build_lyra_capacity_evidence(liquidity_evidence=liquidity)
     if (
@@ -602,7 +669,7 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
             "LEGACY_EVALUATION_NOT_RELABELED",
             "CONFIDENCE_IS_COMPLETE_GOVERNED_EVIDENCE",
             "FORECAST_RISK_20D_FORMULA_BOUND", "LIQUIDITY_20D_FORMULA_BOUND",
-            "CAPACITY_5PCT_ADV_FORMULA_BOUND", "TURNOVER_HALF_L1_FORMULA_BOUND",
+            "CAPACITY_5PCT_ADV_FORMULA_BOUND", "TURNOVER_FULL_L1_FORMULA_BOUND",
             f"RISK_FORMULA:{RISK_FORMULA}", f"LIQUIDITY_FORMULA:{LIQUIDITY_FORMULA}",
             f"CAPACITY_FORMULA:{CAPACITY_FORMULA}", f"TURNOVER_FORMULA:{TURNOVER_FORMULA}",
         }),
@@ -623,6 +690,7 @@ def validate_generic_lyra_v2_capture_result(payload: Mapping[str, Any]) -> dict[
         evidence_hashes=[
             risk["content_hash"], liquidity["content_hash"], capacity["content_hash"],
             market["content_hash"], selection["content_hash"], policy["content_hash"],
+            policy_proposal["content_hash"], policy_owner_decision["content_hash"],
         ],
     )
     if expected_readiness != payload.get("readiness"):

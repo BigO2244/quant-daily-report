@@ -26,6 +26,10 @@ from core.generic_lyra_v2_producer import (
     validate_generic_lyra_v2_capture_result,
     validate_governed_lyra_v2_decision,
 )
+from core.generic_lyra_v2_raw_sources import (
+    GenericLyraV2RawSourceError,
+    validate_generic_lyra_v2_raw_source_recompute,
+)
 from core.lyra_governed_evidence import (
     LyraGovernedEvidenceError,
     validate_lyra_capacity_evidence,
@@ -36,7 +40,8 @@ from core.owner_decision import OwnerDecision, parse_owner_decision
 from core.sleeve_decision import validate_sleeve_decision
 
 
-GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA = "caerus.generic_live_v1_activation_preflight.v2"
+GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA = "caerus.generic_live_v1_activation_preflight.v3"
+PREVIOUS_GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA = "caerus.generic_live_v1_activation_preflight.v2"
 LEGACY_GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA = "caerus.generic_live_v1_activation_preflight.v1"
 GENERIC_LIVE_V1_ADAPTER = "CAERUS_GENERIC_LANE_V4"
 GENERIC_LIVE_V1_LANE_ID = "generic-live-v1"
@@ -66,7 +71,8 @@ _FIELDS = frozenset(
         "schema_version", "preflight_id", "evaluated_at", "status",
         "reason_codes", "effective_session", "owner_decision_id",
         "owner_decision_hash", "account_observation_hash", "account_id_hash",
-        "lyra_decision_id", "lyra_decision_hash", "lyra_capture_hash", "exact_plan_id",
+        "lyra_decision_id", "lyra_decision_hash", "lyra_capture_hash",
+        "lyra_raw_source_recompute_hash", "exact_plan_id",
         "exact_plan_hash", "deployed_sha", "expected_deployed_sha",
         "gate_results", "capital_ceiling_usd", "observed_equity_usd",
         "effective_capital_ceiling_usd", "minimum_trade_usd",
@@ -112,6 +118,12 @@ _DECISION_BLOCKERS = frozenset(
         "LYRA_V2_CAPTURE_MISSING",
         "LYRA_V2_CAPTURE_INVALID",
         "LYRA_V2_CAPTURE_DECISION_MISMATCH",
+    }
+)
+_RAW_SOURCE_BLOCKERS = frozenset(
+    {
+        "LYRA_V2_RAW_SOURCE_RECOMPUTE_MISSING",
+        "LYRA_V2_RAW_SOURCE_RECOMPUTE_INVALID",
     }
 )
 _PLAN_BLOCKERS = frozenset(
@@ -380,6 +392,7 @@ def build_generic_live_v1_activation_preflight(
     evaluated_at: str,
     lyra_decision: Mapping[str, Any] | None = None,
     lyra_capture_result: Mapping[str, Any] | None = None,
+    lyra_raw_source_recompute: Mapping[str, Any] | None = None,
     exact_plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build immutable session evidence; never mutate a gate or submit an order."""
@@ -406,6 +419,21 @@ def build_generic_live_v1_activation_preflight(
         lyra_decision, capture_result=lyra_capture_result,
         session=str(owner.effective_session)
     )
+    raw_source_green = False
+    raw_source_hash: str | None = None
+    raw_source_blocker = "LYRA_V2_RAW_SOURCE_RECOMPUTE_MISSING"
+    if lyra_capture_result is not None and lyra_raw_source_recompute is not None:
+        try:
+            raw_proof = validate_generic_lyra_v2_raw_source_recompute(
+                lyra_raw_source_recompute,
+                expected_capture=lyra_capture_result,
+            )
+        except (GenericLyraV2RawSourceError, TypeError, ValueError):
+            raw_source_blocker = "LYRA_V2_RAW_SOURCE_RECOMPUTE_INVALID"
+        else:
+            raw_source_green = True
+            raw_source_hash = raw_proof["content_hash"]
+            raw_source_blocker = None
     effective_capital = min(460.0, float(observation["equity"]))
     plan_green, plan_blockers = _valid_plan(
         exact_plan,
@@ -434,10 +462,13 @@ def build_generic_live_v1_activation_preflight(
         "reconciliation_pipeline_green": _bool(operational_proofs["reconciliation_pipeline_green"], label="reconciliation_pipeline_green"),
         "accounting_pipeline_green": _bool(operational_proofs["accounting_pipeline_green"], label="accounting_pipeline_green"),
         "reporting_pipeline_green": _bool(operational_proofs["reporting_pipeline_green"], label="reporting_pipeline_green"),
+        "lyra_raw_sources_green": raw_source_green,
     }
     blockers = [code for gate, code in _GATE_BLOCKERS.items() if not gate_results[gate]]
     blockers.extend(decision_blockers)
     blockers.extend(plan_blockers)
+    if raw_source_blocker is not None:
+        blockers.append(raw_source_blocker)
     blockers = sorted(set(blockers))
     body = {
         "schema_version": GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA,
@@ -453,6 +484,7 @@ def build_generic_live_v1_activation_preflight(
         "lyra_decision_id": lyra_decision.get("decision_id") if decision_green and lyra_decision else None,
         "lyra_decision_hash": lyra_decision.get("content_hash") if decision_green and lyra_decision else None,
         "lyra_capture_hash": lyra_capture_result.get("content_hash") if decision_green and lyra_capture_result else None,
+        "lyra_raw_source_recompute_hash": raw_source_hash if decision_green else None,
         "exact_plan_id": exact_plan.get("plan_id") if plan_green and exact_plan else None,
         "exact_plan_hash": exact_plan.get("content_hash") if plan_green and exact_plan else None,
         "deployed_sha": deployed_sha,
@@ -479,6 +511,7 @@ def build_generic_live_v1_activation_preflight(
         "source_hashes": sorted(set([
             owner.content_hash, observation["content_hash"], *source_hashes,
             *([lyra_capture_result["content_hash"]] if decision_green and lyra_capture_result else []),
+            *([raw_source_hash] if decision_green and raw_source_hash else []),
         ])),
     }
     seed = _hash(body)
@@ -488,22 +521,32 @@ def build_generic_live_v1_activation_preflight(
 
 
 def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) -> dict[str, Any]:
-    legacy_fields = _FIELDS - {"lyra_capture_hash"}
+    legacy_fields = _FIELDS - {"lyra_capture_hash", "lyra_raw_source_recompute_hash"}
+    previous_fields = _FIELDS - {"lyra_raw_source_recompute_hash"}
     is_legacy = (
         isinstance(payload, Mapping)
         and payload.get("schema_version") == LEGACY_GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA
         and set(payload) == legacy_fields
     )
-    if not isinstance(payload, Mapping) or (set(payload) != _FIELDS and not is_legacy):
+    is_previous = (
+        isinstance(payload, Mapping)
+        and payload.get("schema_version")
+        == PREVIOUS_GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA
+        and set(payload) == previous_fields
+    )
+    if not isinstance(payload, Mapping) or (
+        set(payload) != _FIELDS and not is_legacy and not is_previous
+    ):
         raise GenericLiveV1ActivationError("activation preflight fields are invalid")
     if payload.get("schema_version") not in {
         GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA,
+        PREVIOUS_GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA,
         LEGACY_GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA,
     }:
         raise GenericLiveV1ActivationError("unsupported activation preflight schema")
-    if is_legacy and payload.get("status") != "BLOCKED":
+    if (is_legacy or is_previous) and payload.get("status") != "BLOCKED":
         raise GenericLiveV1ActivationError(
-            "legacy preflight cannot authorize activation without a capture binding"
+            "historical preflight cannot authorize activation without raw-source binding"
         )
     if payload.get("status") not in {"BLOCKED", "READY_TO_DISARM_FOR_SESSION"}:
         raise GenericLiveV1ActivationError("activation preflight status is invalid")
@@ -511,7 +554,15 @@ def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) ->
     if not isinstance(reasons, list) or not reasons or reasons != sorted(set(reasons)):
         raise GenericLiveV1ActivationError("reason_codes must be sorted and unique")
     gates = payload.get("gate_results")
-    expected_gate_keys = frozenset({*_GATE_BLOCKERS, "lyra_v2_decision_green", "exact_v4_plan_green"})
+    gate_blockers = dict(_GATE_BLOCKERS)
+    expected_gate_keys = frozenset(
+        {
+            *gate_blockers,
+            *(() if is_legacy or is_previous else ("lyra_raw_sources_green",)),
+            "lyra_v2_decision_green",
+            "exact_v4_plan_green",
+        }
+    )
     if (
         not isinstance(gates, Mapping)
         or frozenset(gates) != expected_gate_keys
@@ -524,10 +575,11 @@ def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) ->
             "activation preflight status does not match recomputed gates; ready requires every gate green"
         )
     expected_reasons = {
-        code for gate, code in _GATE_BLOCKERS.items() if gates[gate] is False
+        code for gate, code in gate_blockers.items() if gates[gate] is False
     }
     decision_reasons = set(reasons) & _DECISION_BLOCKERS
     plan_reasons = set(reasons) & _PLAN_BLOCKERS
+    raw_source_reasons = set(reasons) & _RAW_SOURCE_BLOCKERS
     if gates["lyra_v2_decision_green"]:
         if decision_reasons:
             raise GenericLiveV1ActivationError("green Lyra decision gate cannot carry decision blockers")
@@ -538,7 +590,19 @@ def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) ->
             raise GenericLiveV1ActivationError("green exact-plan gate cannot carry plan blockers")
     elif not plan_reasons:
         raise GenericLiveV1ActivationError("failed exact-plan gate requires a canonical blocker")
-    recomputed_reasons = expected_reasons | decision_reasons | plan_reasons
+    if not (is_legacy or is_previous):
+        if gates["lyra_raw_sources_green"]:
+            if raw_source_reasons:
+                raise GenericLiveV1ActivationError(
+                    "green raw-source gate cannot carry raw-source blockers"
+                )
+        elif len(raw_source_reasons) != 1:
+            raise GenericLiveV1ActivationError(
+                "failed raw-source gate requires one precise canonical blocker"
+            )
+    recomputed_reasons = (
+        expected_reasons | decision_reasons | plan_reasons | raw_source_reasons
+    )
     if all(gates.values()):
         recomputed_reasons = {"ALL_OWNER_APPROVED_LIVE_V1_GATES_GREEN"}
     if set(reasons) != recomputed_reasons:
@@ -548,6 +612,7 @@ def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) ->
             raise GenericLiveV1ActivationError("ready status requires every gate green")
         if (
             not payload["lyra_decision_hash"] or not payload["lyra_capture_hash"]
+            or not payload["lyra_raw_source_recompute_hash"]
             or not payload["exact_plan_hash"]
         ):
             raise GenericLiveV1ActivationError(
@@ -557,7 +622,10 @@ def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) ->
         raise GenericLiveV1ActivationError("blocked status requires at least one failed gate")
     for field in ("owner_decision_hash", "account_observation_hash", "account_id_hash", "content_hash"):
         _sha(payload.get(field), label=field)
-    for field in ("lyra_decision_hash", "lyra_capture_hash", "exact_plan_hash"):
+    for field in (
+        "lyra_decision_hash", "lyra_capture_hash",
+        "lyra_raw_source_recompute_hash", "exact_plan_hash",
+    ):
         if payload.get(field) is not None:
             _sha(payload[field], label=field)
     _git_sha(payload.get("deployed_sha"), label="deployed_sha")
@@ -583,6 +651,13 @@ def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) ->
         _sha(value, label="source_hash")
     if payload["owner_decision_hash"] not in hashes or payload["account_observation_hash"] not in hashes:
         raise GenericLiveV1ActivationError("preflight source hashes omit owner/account evidence")
+    if (
+        payload.get("lyra_raw_source_recompute_hash") is not None
+        and payload["lyra_raw_source_recompute_hash"] not in hashes
+    ):
+        raise GenericLiveV1ActivationError(
+            "preflight source hashes omit raw-source reproduction evidence"
+        )
     if payload["content_hash"] != _hash(payload):
         raise GenericLiveV1ActivationError("activation preflight content_hash mismatch")
     return copy.deepcopy(dict(payload))
@@ -592,6 +667,7 @@ def recompute_generic_live_v1_activation_preflight(
     *, expected_preflight: Mapping[str, Any], owner_decision: Mapping[str, Any],
     live_account_observation: Mapping[str, Any], operational_proofs: Mapping[str, Any],
     lyra_decision: Mapping[str, Any], lyra_capture_result: Mapping[str, Any],
+    lyra_raw_source_recompute: Mapping[str, Any],
     exact_plan: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Rebuild a preflight from exact protected sources and require byte equality."""
@@ -604,6 +680,7 @@ def recompute_generic_live_v1_activation_preflight(
         evaluated_at=expected["evaluated_at"],
         lyra_decision=lyra_decision,
         lyra_capture_result=lyra_capture_result,
+        lyra_raw_source_recompute=lyra_raw_source_recompute,
         exact_plan=exact_plan,
     )
     if rebuilt != expected or canonical_json(rebuilt) != canonical_json(expected):

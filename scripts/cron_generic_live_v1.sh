@@ -54,6 +54,17 @@ readonly OWNER_DECISION_PATH="${CAERUS_GENERIC_LIVE_OWNER_DECISION_PATH:?missing
 readonly ACCOUNT_OBSERVATION_PATH="${CAERUS_GENERIC_LIVE_ACCOUNT_OBSERVATION_PATH:?missing account observation path}"
 readonly LYRA_DECISION_PATH="${CAERUS_GENERIC_LIVE_LYRA_DECISION_PATH:?missing Lyra decision path}"
 readonly LYRA_CAPTURE_PATH="${CAERUS_GENERIC_LIVE_LYRA_CAPTURE_PATH:?missing Lyra capture path}"
+readonly LYRA_SOURCE_SESSION_MANIFEST_PATH="${CAERUS_GENERIC_LIVE_LYRA_SOURCE_SESSION_MANIFEST_PATH:?missing Lyra source session manifest path}"
+readonly LYRA_EVALUATION_BATCH_PATH="${CAERUS_GENERIC_LIVE_LYRA_EVALUATION_BATCH_PATH:?missing Lyra evaluation batch path}"
+readonly LYRA_LEGACY_DECISION_BATCH_PATH="${CAERUS_GENERIC_LIVE_LYRA_LEGACY_DECISION_BATCH_PATH:?missing Lyra legacy decision batch path}"
+readonly LYRA_SOURCE_PATH="${CAERUS_GENERIC_LIVE_LYRA_SOURCE_PATH:?missing Lyra source path}"
+readonly LYRA_PRIOR_SOURCE_PATH="${CAERUS_GENERIC_LIVE_LYRA_PRIOR_SOURCE_PATH:?missing Lyra prior source path}"
+readonly LYRA_UNIVERSE_FREEZE_PATH="${CAERUS_GENERIC_LIVE_LYRA_UNIVERSE_FREEZE_PATH:?missing Lyra universe freeze path}"
+readonly LYRA_UNIVERSE_PATH="${CAERUS_GENERIC_LIVE_LYRA_UNIVERSE_PATH:?missing Lyra universe path}"
+readonly LYRA_PRICE_PANEL_PATH="${CAERUS_GENERIC_LIVE_LYRA_PRICE_PANEL_PATH:?missing Lyra price panel path}"
+readonly LYRA_RISK_POLICY_PATH="${CAERUS_GENERIC_LIVE_LYRA_RISK_POLICY_PATH:?missing Lyra risk policy path}"
+readonly LYRA_RISK_POLICY_PROPOSAL_PATH="${CAERUS_GENERIC_LIVE_LYRA_RISK_POLICY_PROPOSAL_PATH:?missing Lyra risk policy proposal path}"
+readonly LYRA_RISK_POLICY_OWNER_DECISION_PATH="${CAERUS_GENERIC_LIVE_LYRA_RISK_POLICY_OWNER_DECISION_PATH:?missing Lyra risk policy owner decision path}"
 readonly OPERATIONAL_PROOFS_PATH="${CAERUS_GENERIC_LIVE_OPERATIONAL_PROOFS_PATH:?missing operational proofs path}"
 readonly PLAN_PATH="${CAERUS_GENERIC_LIVE_PLAN_PATH:?missing exact plan path}"
 readonly SESSION_GATE_PATH="${CAERUS_GENERIC_LIVE_SESSION_GATE_PATH:?missing session gate path}"
@@ -95,6 +106,17 @@ cd "${REPO_ROOT}"
     --account-observation "${ACCOUNT_OBSERVATION_PATH}" \
     --lyra-decision "${LYRA_DECISION_PATH}" \
     --lyra-capture-result "${LYRA_CAPTURE_PATH}" \
+    --lyra-source-session-manifest "${LYRA_SOURCE_SESSION_MANIFEST_PATH}" \
+    --lyra-evaluation-batch "${LYRA_EVALUATION_BATCH_PATH}" \
+    --lyra-legacy-decision-batch "${LYRA_LEGACY_DECISION_BATCH_PATH}" \
+    --lyra-source "${LYRA_SOURCE_PATH}" \
+    --lyra-prior-source "${LYRA_PRIOR_SOURCE_PATH}" \
+    --lyra-universe-freeze "${LYRA_UNIVERSE_FREEZE_PATH}" \
+    --lyra-universe "${LYRA_UNIVERSE_PATH}" \
+    --lyra-price-panel "${LYRA_PRICE_PANEL_PATH}" \
+    --lyra-risk-policy "${LYRA_RISK_POLICY_PATH}" \
+    --lyra-risk-policy-proposal "${LYRA_RISK_POLICY_PROPOSAL_PATH}" \
+    --lyra-risk-policy-owner-decision "${LYRA_RISK_POLICY_OWNER_DECISION_PATH}" \
     --operational-proofs "${OPERATIONAL_PROOFS_PATH}" \
     --exact-plan "${PLAN_PATH}" \
     --executed-at "${EXECUTED_AT}" \

@@ -32,6 +32,7 @@ from scripts.manage_generic_live_v1_cron import render_cron_line, update_crontab
 from scripts.run_generic_live_v1_session import _require_exact_env, _require_source_pins
 from Tests.test_generic_live_v1_activation import (
     EXPECTED, OBSERVATION, OWNER, _capture, _decision, _proofs,
+    _raw_source_recompute,
 )
 from Tests.test_generic_live_v1_submission import Broker, _disarm, _ready
 
@@ -81,7 +82,7 @@ def test_missing_or_malformed_gate_is_emergency_rearmed(tmp_path: Path, initial:
         state_path=state,
         preflight_hash=None,
         plan_hash=None,
-        rearmed_at="2026-08-19T13:30:00+00:00",
+        rearmed_at="2026-08-25T13:30:00+00:00",
     )
     assert payload["status"] == "ARMED"
     assert payload["preflight_hash"] == "0" * 64
@@ -110,7 +111,7 @@ def test_runner_rearms_even_when_input_preread_is_missing(tmp_path: Path) -> Non
             str(ROOT / "scripts/run_generic_live_v1_session.py"),
             "--preflight", str(inputs / "missing-preflight.json"),
             "--exact-plan", str(inputs / "missing-plan.json"),
-            "--executed-at", "2026-08-19T13:31:00+00:00",
+            "--executed-at", "2026-08-25T13:31:00+00:00",
             "--wal-directory", str(state_root / "wal"),
             "--session-gate-path", str(gate),
             "--result-path", str(state_root / "result.json"),
@@ -147,7 +148,8 @@ def test_result_persistence_failure_leaves_gate_armed(tmp_path: Path, monkeypatc
             exact_plan=plan,
             lyra_decision=_decision(),
             lyra_capture_result=_capture(),
-            executed_at="2026-08-19T13:31:00+00:00",
+            lyra_raw_source_recompute=_raw_source_recompute(),
+            executed_at="2026-08-25T13:31:00+00:00",
             submit_enabled=True,
             broker=Broker(),
             wal_directory=tmp_path / "state" / "wal",
@@ -183,7 +185,8 @@ def test_transient_rearm_persistence_failure_is_retried_before_raise(
             exact_plan=plan,
             lyra_decision=_decision(),
             lyra_capture_result=_capture(),
-            executed_at="2026-08-19T13:31:00+00:00",
+            lyra_raw_source_recompute=_raw_source_recompute(),
+            executed_at="2026-08-25T13:31:00+00:00",
             submit_enabled=True,
             broker=Broker(),
             wal_directory=tmp_path / "state" / "wal",
@@ -340,19 +343,19 @@ def test_cron_entry_is_date_bound_duplicate_free_and_conflict_closed(tmp_path: P
     _protected_file(wrapper, "#!/usr/bin/env bash\n")
     wrapper.chmod(0o700)
     line = render_cron_line(
-        effective_session="2026-08-19",
+        effective_session="2026-08-25",
         wrapper_path=wrapper,
         log_path=root / "generic.log",
         allowed_roots=[root],
     )
     installed = update_crontab(f"MAILTO=x\n{line}\n{line}\n", exact_line=line, install=True)
     assert installed.count(line) == 1
-    assert "19 8 *" in line
-    assert "--effective-session 2026-08-19" in line
+    assert "25 8 *" in line
+    assert "--effective-session 2026-08-25" in line
     assert update_crontab(installed, exact_line=line, install=False) == (
         "MAILTO=x\nCRON_TZ=America/New_York\n"
     )
-    conflicting = line.replace("2026-08-19", "2026-08-20")
+    conflicting = line.replace("2026-08-25", "2026-08-20")
     with pytest.raises(GenericLiveV1OpsError, match="different generic Live"):
         update_crontab(conflicting + "\n", exact_line=line, install=True)
 
@@ -404,12 +407,18 @@ def test_protected_source_hash_pin_mismatch_is_rejected(monkeypatch: pytest.Monk
     monkeypatch.setenv("CAERUS_GENERIC_LIVE_ACCOUNT_OBSERVATION_HASH", OBSERVATION["content_hash"])
     monkeypatch.setenv("CAERUS_GENERIC_LIVE_LYRA_DECISION_HASH", decision["content_hash"])
     monkeypatch.setenv("CAERUS_GENERIC_LIVE_LYRA_CAPTURE_HASH", capture["content_hash"])
+    raw_proof = _raw_source_recompute(capture)
+    monkeypatch.setenv(
+        "CAERUS_GENERIC_LIVE_LYRA_RAW_SOURCE_RECOMPUTE_HASH",
+        raw_proof["content_hash"],
+    )
     monkeypatch.setenv("CAERUS_GENERIC_LIVE_OPERATIONAL_PROOFS_HASH", "f" * 64)
     monkeypatch.setenv("CAERUS_GENERIC_LIVE_PLAN_HASH", plan["content_hash"])
     with pytest.raises(RuntimeError, match="protected source pins mismatch"):
         _require_source_pins(
             owner_decision=OWNER, account_observation=OBSERVATION,
             lyra_decision=decision, lyra_capture_result=capture,
+            lyra_raw_source_recompute=raw_proof,
             operational_proofs=proofs, plan=plan,
         )
 

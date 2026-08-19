@@ -51,7 +51,7 @@ def test_every_named_break_rearms_rolls_back_and_proves_paper_unchanged(
     _write(paper_a, "paper execution bytes\n")
     _write(paper_b, "paper schedule bytes\n")
     before = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in (paper_a, paper_b)}
-    exact = "36 9 19 8 * /fixed/guard --effective-session 2026-08-19 # CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-19"
+    exact = "36 9 25 8 * /fixed/guard --effective-session 2026-08-25 # CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-25"
     current = f"MAILTO=ops\n{CRON_TZ_LINE}\nPAPER_CRON_LINE\n{exact}\n"
     installed: list[str] = []
 
@@ -61,7 +61,7 @@ def test_every_named_break_rearms_rolls_back_and_proves_paper_unchanged(
             state_path=state,
             preflight_hash="a" * 64,
             plan_hash="b" * 64,
-            rearmed_at="2026-08-19T13:31:00+00:00",
+            rearmed_at="2026-08-25T13:31:00+00:00",
             trigger=observed,
         )
 
@@ -76,7 +76,7 @@ def test_every_named_break_rearms_rolls_back_and_proves_paper_unchanged(
         paper_paths=[paper_a, paper_b],
         evidence_path=evidence,
         allowed_roots=[protected],
-        rolled_back_at="2026-08-19T13:31:01+00:00",
+        rolled_back_at="2026-08-25T13:31:01+00:00",
     )
     assert json.loads(state.read_text())["status"] == "ARMED"
     assert exact not in installed[0]
@@ -111,14 +111,14 @@ def test_rollback_removes_new_generic_config_when_no_prior_config(tmp_path: Path
         paper_paths=[paper],
         evidence_path=protected / "evidence.json",
         allowed_roots=[protected],
-        rolled_back_at="2026-08-19T13:31:01+00:00",
+        rolled_back_at="2026-08-25T13:31:01+00:00",
     )
     assert result["config_action"] == "REMOVED_NO_PRIOR_CONFIG"
     assert not active.exists()
 
 
 def test_cron_timezone_is_installed_once_and_conflicts_fail_closed() -> None:
-    exact = "GENERIC # CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-19"
+    exact = "GENERIC # CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-25"
     updated = update_crontab("PAPER\n", exact_line=exact, install=True)
     assert updated.splitlines() == ["PAPER", CRON_TZ_LINE, exact]
     duplicate = update_crontab(updated + CRON_TZ_LINE + "\n", exact_line=exact, install=True)
@@ -175,10 +175,10 @@ def test_external_guard_fully_rolls_back_bootstrap_and_terminal_order_failures(
     fake_bin.mkdir(mode=0o700)
     crontab_store = tmp_path / "crontab.txt"
     exact = (
-        f"36 9 19 8 * {guard} --effective-session 2026-08-19 >> {logs / 'cron_generic_live_v1.log'} 2>&1 "
-        "# CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-19"
+        f"36 9 25 8 * {guard} --effective-session 2026-08-25 >> {logs / 'cron_generic_live_v1.log'} 2>&1 "
+        "# CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-25"
     )
-    lookalike = exact.replace("36 9 19", "37 9 19", 1)
+    lookalike = exact.replace("36 9 25", "37 9 25", 1)
     crontab_store.write_text(f"PAPER_LINE\n{CRON_TZ_LINE}\n{lookalike}\n{exact}\n")
     fake_crontab = fake_bin / "crontab"
     _write(
@@ -201,7 +201,7 @@ def test_external_guard_fully_rolls_back_bootstrap_and_terminal_order_failures(
         }
     )
     result = subprocess.run(
-        [str(guard), "--effective-session", "2026-08-19"],
+        [str(guard), "--effective-session", "2026-08-25"],
         env=env,
         capture_output=True,
         text=True,
@@ -224,7 +224,7 @@ def test_external_guard_fully_rolls_back_bootstrap_and_terminal_order_failures(
     assert len(evidence) == 1
     assert "paper_bytes_unchanged=true" in evidence[0].read_text()
     assert "SENTINEL_SECRET" not in evidence[0].read_text()
-    assert not (state / "posttrade-published-2026-08-19.json").exists()
+    assert not (state / "posttrade-published-2026-08-25.json").exists()
 
 
 def test_runner_masks_forced_secret_from_stdout_and_stderr(
@@ -295,7 +295,7 @@ def test_posttrade_cli_missing_link_performs_full_rollback(
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(mode=0o700)
     cron_store = tmp_path / "crontab.txt"
-    exact = "36 9 19 8 * /fixed/guard --effective-session 2026-08-19 # CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-19"
+    exact = "36 9 25 8 * /fixed/guard --effective-session 2026-08-25 # CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-25"
     cron_store.write_text(f"PAPER_LINE\n{exact}\n", encoding="utf-8")
     _write(
         fake_bin / "crontab",
@@ -335,9 +335,9 @@ def test_posttrade_cli_missing_link_performs_full_rollback(
         "--backup-config-path", str(backup),
         "--paper-root", str(paper),
         "--rollback-evidence-directory", str(rollback),
-        "--finalized-at", "2026-08-19T21:00:00+00:00",
-        "--reconciled-at", "2026-08-19T20:59:00+00:00",
-        "--valuation-date", "2026-08-19",
+        "--finalized-at", "2026-08-25T21:00:00+00:00",
+        "--reconciled-at", "2026-08-25T20:59:00+00:00",
+        "--valuation-date", "2026-08-25",
     ]
     for path in paper_paths:
         argv.extend(["--paper-path", str(path)])
@@ -439,9 +439,9 @@ def test_posttrade_cli_connected_mode_collects_broker_truth_then_calls_raw_build
         "--exact-cron-line", "GENERIC", "--active-config-path", str(active),
         "--backup-config-path", str(backup), "--paper-root", str(paper),
         "--rollback-evidence-directory", str(rollback),
-        "--reconciled-at", "2026-08-19T20:00:00+00:00",
-        "--valuation-date", "2026-08-19",
-        "--finalized-at", "2026-08-19T20:00:01+00:00",
+        "--reconciled-at", "2026-08-25T20:00:00+00:00",
+        "--valuation-date", "2026-08-25",
+        "--finalized-at", "2026-08-25T20:00:01+00:00",
     ]
     for path in paper_paths:
         argv.extend(["--paper-path", str(path)])
@@ -507,8 +507,8 @@ def test_connected_terminal_break_closes_suppressed_truth_then_exactly_rolls_bac
     fake_bin.mkdir(mode=0o700)
     cron_store = tmp_path / "crontab.txt"
     exact = (
-        "36 9 19 8 * /fixed/guard --effective-session 2026-08-19 "
-        "# CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-19"
+        "36 9 25 8 * /fixed/guard --effective-session 2026-08-25 "
+        "# CAERUS_GENERIC_LIVE_V1_SESSION=2026-08-25"
     )
     cron_store.write_text(f"PAPER_LINE\n{exact}\n", encoding="utf-8")
     _write(
@@ -549,9 +549,9 @@ def test_connected_terminal_break_closes_suppressed_truth_then_exactly_rolls_bac
         "--exact-cron-line", exact, "--active-config-path", str(active),
         "--backup-config-path", str(backup), "--paper-root", str(paper),
         "--rollback-evidence-directory", str(rollback),
-        "--reconciled-at", "2026-08-19T20:01:00+00:00",
-        "--valuation-date", "2026-08-19",
-        "--finalized-at", "2026-08-19T20:02:00+00:00",
+        "--reconciled-at", "2026-08-25T20:01:00+00:00",
+        "--valuation-date", "2026-08-25",
+        "--finalized-at", "2026-08-25T20:02:00+00:00",
     ]
     for path in paper_paths:
         argv.extend(["--paper-path", str(path)])

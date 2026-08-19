@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import copy
 
 import pytest
 
@@ -22,6 +23,7 @@ from Tests.test_generic_live_v1_activation import (
     _decision,
     _plan,
     _proofs,
+    _raw_source_recompute,
 )
 
 
@@ -30,6 +32,7 @@ def execute_generic_live_v1_session(**kwargs):
         capture = _capture()
         kwargs.setdefault("lyra_decision", capture["decision"])
         kwargs.setdefault("lyra_capture_result", capture)
+        kwargs.setdefault("lyra_raw_source_recompute", _raw_source_recompute(capture))
     return _execute_generic_live_v1_session(**kwargs)
 
 
@@ -119,8 +122,9 @@ def _ready():
             order_lifecycle_pipeline_green=True, reconciliation_pipeline_green=True,
             accounting_pipeline_green=True, reporting_pipeline_green=True,
         ),
-        evaluated_at="2026-08-19T13:30:00+00:00",
-        lyra_decision=decision, lyra_capture_result=capture, exact_plan=plan,
+        evaluated_at="2026-08-25T13:30:00+00:00",
+        lyra_decision=decision, lyra_capture_result=capture,
+        lyra_raw_source_recompute=_raw_source_recompute(capture), exact_plan=plan,
     )
     return preflight, plan
 
@@ -145,12 +149,12 @@ def test_default_is_deterministic_no_write_and_no_broker_call(tmp_path) -> None:
     broker = Broker()
     first = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", broker=broker,
+        executed_at="2026-08-25T13:31:00+00:00", broker=broker,
         wal_directory=tmp_path / "wal", rearm_state_path=tmp_path / "rearm.json",
     )
     second = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", broker=broker,
+        executed_at="2026-08-25T13:31:00+00:00", broker=broker,
         wal_directory=tmp_path / "wal", rearm_state_path=tmp_path / "rearm.json",
     )
     assert first == second
@@ -166,7 +170,7 @@ def test_explicit_submission_writes_wal_first_and_automatically_rearms(tmp_path)
     _disarm(tmp_path / "rearm.json", preflight, plan)
     result = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=broker, wal_directory=tmp_path / "wal",
         rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result.json",
@@ -182,8 +186,36 @@ def test_explicit_submission_writes_wal_first_and_automatically_rearms(tmp_path)
         "account", "positions", "open_orders", "asset", "calendar",
         "client_order_lookup", "submission_response", "order_poll",
     }
-    assert result["broker_observation_hashes"] == [row["content_hash"] for row in observations]
+    assert result["broker_observation_hashes"] == [
+        row["content_hash"] for row in observations
+    ]
     assert json.loads((tmp_path / "rearm.json").read_text())["status"] == "ARMED"
+
+
+def test_submission_rejects_resealed_raw_source_proof_not_pinned_by_preflight(
+    tmp_path,
+) -> None:
+    preflight, plan = _ready()
+    capture = _capture()
+    forged = copy.deepcopy(_raw_source_recompute(capture))
+    forged["source_files"][0]["path"] = "/protected/lyra/alternate-source"
+    body = dict(forged)
+    body.pop("content_hash")
+    forged["content_hash"] = hashlib.sha256(
+        canonical_json(body).encode("utf-8")
+    ).hexdigest()
+    gate = tmp_path / "rearm.json"
+    _disarm(gate, preflight, plan)
+    with pytest.raises(GenericLiveV1SubmissionError, match="proof pin differs"):
+        execute_generic_live_v1_session(
+            activation_preflight=preflight, exact_plan=plan,
+            lyra_decision=capture["decision"], lyra_capture_result=capture,
+            lyra_raw_source_recompute=forged,
+            executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
+            broker=Broker(), wal_directory=tmp_path / "wal",
+            rearm_state_path=gate, result_path=tmp_path / "result.json",
+        )
+    assert json.loads(gate.read_text())["status"] == "ARMED"
 
 
 def test_rerun_recovers_by_stable_client_id_without_resubmission(tmp_path) -> None:
@@ -191,7 +223,7 @@ def test_rerun_recovers_by_stable_client_id_without_resubmission(tmp_path) -> No
     broker = Broker()
     kwargs = {
         "activation_preflight": preflight, "exact_plan": plan,
-        "executed_at": "2026-08-19T13:31:00+00:00", "submit_enabled": True,
+        "executed_at": "2026-08-25T13:31:00+00:00", "submit_enabled": True,
         "broker": broker, "wal_directory": tmp_path / "wal",
         "rearm_state_path": tmp_path / "rearm.json",
         "result_path": tmp_path / "result-1.json",
@@ -212,7 +244,7 @@ def test_submission_break_rearms_before_raising(tmp_path) -> None:
     with pytest.raises(RuntimeError, match="broker unavailable"):
         execute_generic_live_v1_session(
             activation_preflight=preflight, exact_plan=plan,
-            executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+            executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
             broker=Broker(fail=True), wal_directory=tmp_path / "wal",
             rearm_state_path=tmp_path / "rearm.json",
             result_path=tmp_path / "result.json",
@@ -227,7 +259,7 @@ def test_rejected_broker_response_is_order_break_and_rearms(tmp_path) -> None:
     _disarm(tmp_path / "rearm.json", preflight, plan)
     result = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=Broker(status="rejected"), wal_directory=tmp_path / "wal",
         rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result.json",
@@ -246,7 +278,7 @@ def test_unresolved_async_cancellation_is_bounded_and_persisted(tmp_path) -> Non
     result = execute_generic_live_v1_session(
         activation_preflight=preflight,
         exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00",
+        executed_at="2026-08-25T13:31:00+00:00",
         submit_enabled=True,
         broker=NeverCancelBroker(terminal_status="accepted"),
         wal_directory=tmp_path / "wal",
@@ -281,7 +313,7 @@ def test_cancellation_provider_secret_is_never_persisted_or_raised(
     result = execute_generic_live_v1_session(
         activation_preflight=preflight,
         exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00",
+        executed_at="2026-08-25T13:31:00+00:00",
         submit_enabled=True,
         broker=SecretCancelBroker(terminal_status="accepted"),
         wal_directory=tmp_path / "wal",
@@ -313,7 +345,7 @@ def test_raw_broker_account_id_is_never_persisted(tmp_path) -> None:
     execute_generic_live_v1_session(
         activation_preflight=preflight,
         exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00",
+        executed_at="2026-08-25T13:31:00+00:00",
         submit_enabled=True,
         broker=RawAccountBroker(),
         wal_directory=tmp_path / "wal",
@@ -343,7 +375,7 @@ def test_receipt_failure_after_accept_rearms_and_replay_does_not_resubmit(tmp_pa
     with pytest.raises(OSError, match="receipt disk failure"):
         execute_generic_live_v1_session(
             activation_preflight=preflight, exact_plan=plan,
-            executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+            executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
             broker=broker, wal_directory=tmp_path / "wal",
             rearm_state_path=tmp_path / "rearm.json",
             result_path=tmp_path / "result.json",
@@ -354,7 +386,7 @@ def test_receipt_failure_after_accept_rearms_and_replay_does_not_resubmit(tmp_pa
     _disarm(tmp_path / "rearm.json", preflight, plan)
     recovered = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=broker, wal_directory=tmp_path / "wal",
         rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result-recovered.json",
@@ -375,7 +407,7 @@ def test_partial_or_still_open_order_is_canceled_and_never_treated_as_green(
     broker = Broker(terminal_status=terminal_status)
     result = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=broker, wal_directory=tmp_path / "wal",
         rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result.json", poll_attempts=2,
@@ -404,7 +436,7 @@ def test_unknown_broker_status_seals_unresolved_evidence_and_rearms(tmp_path) ->
     _disarm(tmp_path / "rearm.json", preflight, plan)
     result = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=Broker(status="calculated"), wal_directory=tmp_path / "wal",
         rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result.json", poll_interval_seconds=0,
@@ -419,7 +451,7 @@ def test_unknown_broker_status_seals_unresolved_evidence_and_rearms(tmp_path) ->
     assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
 
     lifecycle = seal_generic_live_v1_order_lifecycle(
-        submission_result=result, observed_at="2026-08-19T13:35:00+00:00",
+        submission_result=result, observed_at="2026-08-25T13:35:00+00:00",
         broker_order_evidence_hash="c" * 64, broker_fill_evidence_hashes=[],
     )
     assert lifecycle["status"] == "UNRESOLVED"
@@ -434,7 +466,7 @@ def test_missing_order_during_poll_is_persisted_as_unresolved(tmp_path) -> None:
     _disarm(tmp_path / "rearm.json", preflight, plan)
     result = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=MissingBroker(), wal_directory=tmp_path / "wal",
         rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result.json", poll_interval_seconds=0,
@@ -457,7 +489,7 @@ def test_asynchronous_cancel_never_claims_terminal_and_persists_observations(tmp
     _disarm(tmp_path / "rearm.json", preflight, plan)
     result = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=AsyncCancelBroker(), wal_directory=tmp_path / "wal",
         rearm_state_path=tmp_path / "rearm.json", result_path=tmp_path / "result.json",
         poll_attempts=2, poll_interval_seconds=0,
@@ -482,7 +514,7 @@ def test_recovered_partial_order_is_canceled_without_resubmission(tmp_path) -> N
     _disarm(tmp_path / "rearm.json", preflight, plan)
     result = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=broker, wal_directory=tmp_path / "wal",
         rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result.json", poll_interval_seconds=0,
@@ -508,7 +540,7 @@ def test_exact_plan_client_id_and_signed_mutation_context_reach_boundary(tmp_pat
     _disarm(tmp_path / "rearm.json", preflight, plan)
     result = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=broker, wal_directory=tmp_path / "wal",
         rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result.json", poll_interval_seconds=0,
@@ -533,14 +565,14 @@ def test_order_lifecycle_builder_binds_partial_fill_hashes(tmp_path) -> None:
     _disarm(tmp_path / "rearm.json", preflight, plan)
     result = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
         broker=Broker(terminal_status="partially_filled"),
         wal_directory=tmp_path / "wal", rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result.json", poll_interval_seconds=0,
     )
     fill_hash = "a" * 64
     lifecycle = seal_generic_live_v1_order_lifecycle(
-        submission_result=result, observed_at="2026-08-19T13:35:00+00:00",
+        submission_result=result, observed_at="2026-08-25T13:35:00+00:00",
         broker_order_evidence_hash="c" * 64,
         broker_fill_evidence_hashes=[fill_hash],
     )
@@ -559,14 +591,14 @@ def test_every_typed_downstream_break_rearms(tmp_path, monkeypatch, stage) -> No
     _disarm(tmp_path / "session.json", preflight, plan)
     submitted = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
-        executed_at="2026-08-19T13:31:00+00:00",
+        executed_at="2026-08-25T13:31:00+00:00",
         submit_enabled=True, broker=broker, wal_directory=tmp_path / "wal",
         rearm_state_path=tmp_path / "session.json",
         result_path=tmp_path / "submission.json", poll_interval_seconds=0,
     )
     fill_hash = "b" * 64
     order = seal_generic_live_v1_order_lifecycle(
-        submission_result=submitted, observed_at="2026-08-19T20:00:00+00:00",
+        submission_result=submitted, observed_at="2026-08-25T20:00:00+00:00",
         broker_order_evidence_hash="c" * 64,
         broker_fill_evidence_hashes=[fill_hash],
     )
@@ -607,7 +639,7 @@ def test_every_typed_downstream_break_rearms(tmp_path, monkeypatch, stage) -> No
                 state_path=tmp_path / "rearm.json",
                 preflight_hash=submitted["preflight_hash"],
                 plan_hash=submitted["plan_hash"],
-                rearmed_at="2026-08-19T22:00:00+00:00",
+                rearmed_at="2026-08-25T22:00:00+00:00",
                 trigger=observed_trigger,
             )
             return {
@@ -620,7 +652,7 @@ def test_every_typed_downstream_break_rearms(tmp_path, monkeypatch, stage) -> No
         finalize_generic_live_v1_posttrade(
             submission_result=submitted, exact_plan=plan, order_lifecycle=order,
             reconciliation={}, journal_entries=[], performance={}, dashboard_projection={},
-            finalized_at="2026-08-19T22:00:00+00:00",
+            finalized_at="2026-08-25T22:00:00+00:00",
             rearm_state_path=tmp_path / "rearm.json", result_path=tmp_path / "posttrade.json",
             rollback_handler=rollback_handler,
         )
@@ -630,7 +662,7 @@ def test_every_typed_downstream_break_rearms(tmp_path, monkeypatch, stage) -> No
 def test_posttrade_rejects_arbitrary_boolean_hash_interface(tmp_path) -> None:
     with pytest.raises(TypeError):
         finalize_generic_live_v1_posttrade(
-            submission_result={}, finalized_at="2026-08-19T22:00:00+00:00",
+            submission_result={}, finalized_at="2026-08-25T22:00:00+00:00",
             order_lifecycle_green=True, reconciliation_green=True,
             accounting_green=True, reporting_green=True,
             rearm_state_path=tmp_path / "rearm.json", evidence_hashes=["a" * 64],
@@ -644,7 +676,7 @@ def test_blocked_preflight_cannot_submit(tmp_path) -> None:
     with pytest.raises(Exception):
         execute_generic_live_v1_session(
             activation_preflight=blocked, exact_plan=plan,
-            executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+            executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
             broker=Broker(), wal_directory=tmp_path / "wal",
             rearm_state_path=tmp_path / "rearm.json",
             result_path=tmp_path / "result.json",
@@ -656,7 +688,7 @@ def test_submission_requires_exact_protected_lyra_decision(tmp_path) -> None:
     with pytest.raises(GenericLiveV1SubmissionError, match="exact protected Lyra"):
         _execute_generic_live_v1_session(
             activation_preflight=preflight, exact_plan=plan,
-            executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+            executed_at="2026-08-25T13:31:00+00:00", submit_enabled=True,
             broker=Broker(), wal_directory=tmp_path / "wal",
             rearm_state_path=tmp_path / "rearm.json",
             result_path=tmp_path / "result.json",
@@ -670,5 +702,5 @@ def test_submission_requires_exact_preflight_plan_binding(tmp_path) -> None:
     with pytest.raises(GenericLiveV1SubmissionError, match="exact plan is invalid"):
         execute_generic_live_v1_session(
             activation_preflight=preflight, exact_plan=tampered,
-            executed_at="2026-08-19T13:31:00+00:00",
+            executed_at="2026-08-25T13:31:00+00:00",
         )

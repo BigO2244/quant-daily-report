@@ -15,6 +15,12 @@ from typing import Any, Mapping, Sequence
 
 from core.lyra_target_selection import validate_lyra_target_selection_evidence
 from core.sleeve_decision import canonical_json, content_hash
+from core.governed_xnys_calendar import (
+    XNYS_CALENDAR_POLICY_ID,
+    is_xnys_session,
+    next_xnys_session,
+    xnys_session_window,
+)
 
 
 LYRA_MARKET_DATA_SNAPSHOT_SCHEMA = "caerus.lyra_market_data_snapshot.v1"
@@ -23,11 +29,15 @@ LYRA_FORECAST_RISK_SCHEMA = "caerus.lyra_forecast_risk_evidence.v1"
 LYRA_LIQUIDITY_SCHEMA = "caerus.lyra_liquidity_evidence.v1"
 LYRA_CAPACITY_SCHEMA = "caerus.lyra_capacity_evidence.v1"
 LYRA_RISK_POLICY_SCHEMA = "caerus.lyra_forecast_risk_policy.v1"
+LYRA_RISK_POLICY_PROPOSAL_SCHEMA = "caerus.lyra_forecast_risk_policy_proposal.v1"
+LYRA_RISK_POLICY_OWNER_DECISION_SCHEMA = (
+    "caerus.lyra_forecast_risk_policy_owner_decision.v1"
+)
 
 RISK_FORMULA = "STATIC_TARGET_WEIGHTED_20_SESSION_CLOSE_RETURN_VOLATILITY_ANNUALIZED_V1"
 LIQUIDITY_FORMULA = "20_SESSION_MEAN_DOLLAR_VOLUME_AND_1PCT_ORDER_PARTICIPATION_V1"
 CAPACITY_FORMULA = "MIN_SYMBOL_PARTICIPATION_CAPACITY_DIVIDED_BY_TARGET_WEIGHT_V1"
-TURNOVER_FORMULA = "HALF_L1_TARGET_WEIGHT_CHANGE_V1"
+TURNOVER_FORMULA = "FULL_L1_TARGET_WEIGHT_CHANGE_V1"
 REQUIRED_PRICE_OBSERVATIONS = 21
 LIQUIDITY_LOOKBACK = 20
 ANNUALIZATION_FACTOR = 252
@@ -87,6 +97,24 @@ def _finite(value: Any, *, label: str, positive: bool = False) -> float:
     return result
 
 
+def _expected_xnys_dates(data_as_of: str, *, count: int) -> list[str]:
+    if not is_xnys_session(data_as_of):
+        raise LyraGovernedEvidenceError("data_as_of must be an XNYS session")
+    return xnys_session_window(data_as_of, count=count)
+
+
+def _validate_weekly_session(*, signal_as_of: str, execution_session: str) -> None:
+    signal = dt.date.fromisoformat(signal_as_of)
+    if (
+        signal.weekday() != 0
+        or not is_xnys_session(signal_as_of)
+        or next_xnys_session(signal_as_of) != execution_session
+    ):
+        raise LyraGovernedEvidenceError(
+            "Lyra signal must be a Monday XNYS close followed by the immediate XNYS session"
+        )
+
+
 def normalized_target_rows(rows: Any) -> list[dict[str, Any]]:
     if not isinstance(rows, (list, tuple)) or not rows:
         raise LyraGovernedEvidenceError("Lyra target rows are absent")
@@ -114,11 +142,122 @@ def target_hash(rows: Sequence[Mapping[str, Any]]) -> str:
     return content_hash(normalized_target_rows(rows))
 
 
+def _risk_policy_terms(*, effective_from: str) -> dict[str, Any]:
+    return {
+        "sleeve_id": "caerus_lyra",
+        "metric": "annualized_volatility",
+        "formula_id": RISK_FORMULA,
+        "lookback_sessions": 20,
+        "minimum_price_observations": REQUIRED_PRICE_OBSERVATIONS,
+        "annualization_factor": ANNUALIZATION_FACTOR,
+        "liquidity_formula_id": LIQUIDITY_FORMULA,
+        "liquidity_lookback_sessions": LIQUIDITY_LOOKBACK,
+        "minimum_mean_dollar_volume_usd": MINIMUM_MEAN_DOLLAR_VOLUME_USD,
+        "maximum_order_participation_rate": MAX_ORDER_PARTICIPATION_RATE,
+        "maximum_liquidation_participation_rate": MAX_PARTICIPATION_RATE,
+        "capacity_formula_id": CAPACITY_FORMULA,
+        "minimum_capacity_multiple": MINIMUM_CAPACITY_MULTIPLE,
+        "capital_reference_usd": LIVE_V1_CAPITAL_REFERENCE_USD,
+        "turnover_formula_id": TURNOVER_FORMULA,
+        "calendar_policy_id": XNYS_CALENDAR_POLICY_ID,
+        "effective_from": _date(effective_from, label="risk policy effective_from"),
+        "execution_authority": False,
+        "activation_authority": False,
+    }
+
+
+def validate_lyra_forecast_risk_policy_proposal(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    fields = {
+        "schema_version", "proposal_id", "proposed_at", "proposed_by",
+        "policy_terms", "execution_authority", "activation_authority",
+        "content_hash",
+    }
+    if not isinstance(payload, Mapping) or set(payload) != fields:
+        raise LyraGovernedEvidenceError("forecast risk policy proposal fields differ")
+    if (
+        payload.get("schema_version") != LYRA_RISK_POLICY_PROPOSAL_SCHEMA
+        or not isinstance(payload.get("proposal_id"), str)
+        or not payload.get("proposal_id")
+        or payload.get("proposed_by") != "CAERUS_OPERATING_MODEL_MIGRATION"
+        or payload.get("execution_authority") is not False
+        or payload.get("activation_authority") is not False
+    ):
+        raise LyraGovernedEvidenceError("forecast risk policy proposal semantics differ")
+    _timestamp(payload.get("proposed_at"), label="risk policy proposed_at")
+    terms = payload.get("policy_terms")
+    if not isinstance(terms, Mapping) or dict(terms) != _risk_policy_terms(
+        effective_from=str(terms.get("effective_from") if isinstance(terms, Mapping) else "")
+    ):
+        raise LyraGovernedEvidenceError("forecast risk policy proposal terms differ")
+    if payload.get("content_hash") != _hash(payload):
+        raise LyraGovernedEvidenceError("forecast risk policy proposal content_hash mismatch")
+    return copy.deepcopy(dict(payload))
+
+
+def validate_lyra_forecast_risk_policy_owner_decision(
+    payload: Mapping[str, Any], *, proposal: Mapping[str, Any] | None = None,
+    as_of: str | None = None,
+) -> dict[str, Any]:
+    fields = {
+        "schema_version", "owner_decision_id", "proposal_id", "proposal_hash",
+        "decision", "owner", "decided_at", "expires_at",
+        "execution_authority", "activation_authority", "content_hash",
+    }
+    if not isinstance(payload, Mapping) or set(payload) != fields:
+        raise LyraGovernedEvidenceError("forecast risk policy owner decision fields differ")
+    if (
+        payload.get("schema_version") != LYRA_RISK_POLICY_OWNER_DECISION_SCHEMA
+        or not isinstance(payload.get("owner_decision_id"), str)
+        or not payload.get("owner_decision_id")
+        or payload.get("decision") != "APPROVE"
+        or payload.get("owner") != "Brett Olson"
+        or payload.get("execution_authority") is not False
+        or payload.get("activation_authority") is not False
+    ):
+        raise LyraGovernedEvidenceError("forecast risk policy owner decision differs")
+    _, decided = _timestamp(payload.get("decided_at"), label="risk policy decided_at")
+    _, expires = _timestamp(payload.get("expires_at"), label="risk policy expires_at")
+    if expires <= decided:
+        raise LyraGovernedEvidenceError("forecast risk policy owner decision is expired")
+    _sha(payload.get("proposal_hash"), label="risk policy proposal_hash")
+    if proposal is not None:
+        checked = validate_lyra_forecast_risk_policy_proposal(proposal)
+        if (
+            payload.get("proposal_id") != checked["proposal_id"]
+            or payload.get("proposal_hash") != checked["content_hash"]
+            or decided < dt.datetime.fromisoformat(
+                checked["proposed_at"].replace("Z", "+00:00")
+            )
+        ):
+            raise LyraGovernedEvidenceError(
+                "forecast risk policy owner decision/proposal binding differs"
+            )
+    if as_of is not None:
+        _, observed = _timestamp(as_of, label="risk policy owner decision as_of")
+        if observed < decided or observed > expires:
+            raise LyraGovernedEvidenceError(
+                "forecast risk policy owner decision is not current"
+            )
+    if payload.get("content_hash") != _hash(payload):
+        raise LyraGovernedEvidenceError(
+            "forecast risk policy owner decision content_hash mismatch"
+        )
+    return copy.deepcopy(dict(payload))
+
+
 def validate_lyra_forecast_risk_policy(payload: Mapping[str, Any]) -> dict[str, Any]:
     fields = {
         "schema_version", "policy_id", "status", "sleeve_id", "metric",
         "formula_id", "lookback_sessions", "minimum_price_observations",
-        "annualization_factor", "approved_by", "approved_at", "effective_from",
+        "annualization_factor", "liquidity_formula_id",
+        "liquidity_lookback_sessions", "minimum_mean_dollar_volume_usd",
+        "maximum_order_participation_rate",
+        "maximum_liquidation_participation_rate", "capacity_formula_id",
+        "minimum_capacity_multiple", "capital_reference_usd",
+        "turnover_formula_id", "calendar_policy_id", "approved_by",
+        "approved_at", "effective_from",
         "owner_decision_hash", "execution_authority", "content_hash",
     }
     if not isinstance(payload, Mapping) or set(payload) != fields:
@@ -132,6 +271,19 @@ def validate_lyra_forecast_risk_policy(payload: Mapping[str, Any]) -> dict[str, 
         or payload.get("lookback_sessions") != 20
         or payload.get("minimum_price_observations") != REQUIRED_PRICE_OBSERVATIONS
         or payload.get("annualization_factor") != ANNUALIZATION_FACTOR
+        or payload.get("liquidity_formula_id") != LIQUIDITY_FORMULA
+        or payload.get("liquidity_lookback_sessions") != LIQUIDITY_LOOKBACK
+        or payload.get("minimum_mean_dollar_volume_usd")
+        != MINIMUM_MEAN_DOLLAR_VOLUME_USD
+        or payload.get("maximum_order_participation_rate")
+        != MAX_ORDER_PARTICIPATION_RATE
+        or payload.get("maximum_liquidation_participation_rate")
+        != MAX_PARTICIPATION_RATE
+        or payload.get("capacity_formula_id") != CAPACITY_FORMULA
+        or payload.get("minimum_capacity_multiple") != MINIMUM_CAPACITY_MULTIPLE
+        or payload.get("capital_reference_usd") != LIVE_V1_CAPITAL_REFERENCE_USD
+        or payload.get("turnover_formula_id") != TURNOVER_FORMULA
+        or payload.get("calendar_policy_id") != XNYS_CALENDAR_POLICY_ID
         or payload.get("approved_by") != "OWNER"
         or payload.get("execution_authority") is not False
     ):
@@ -156,6 +308,7 @@ def build_lyra_market_data_snapshot(
         raise LyraGovernedEvidenceError(
             "market data must end before, and be captured on, the decision trade date"
         )
+    _validate_weekly_session(signal_as_of=data_as_of, execution_session=trade_date)
     if not source_path or source_path.startswith("/") or ".." in source_path.split("/"):
         raise LyraGovernedEvidenceError("market data source_path must be a safe logical path")
     source_sha256 = _sha(source_sha256, label="source_sha256")
@@ -182,7 +335,9 @@ def build_lyra_market_data_snapshot(
             "close": round(_finite(raw.get("close"), label=f"{symbol}.close", positive=True), 10),
             "volume": round(_finite(raw.get("volume"), label=f"{symbol}.volume", positive=True), 6),
         })
-    common_dates: set[str] | None = None
+    expected_dates = _expected_xnys_dates(
+        data_as_of, count=REQUIRED_PRICE_OBSERVATIONS
+    )
     for symbol in symbols:
         by_symbol[symbol] = sorted(by_symbol[symbol], key=lambda row: row["date"])[
             -REQUIRED_PRICE_OBSERVATIONS:
@@ -191,23 +346,18 @@ def build_lyra_market_data_snapshot(
             raise LyraGovernedEvidenceError(
                 f"{symbol} lacks {REQUIRED_PRICE_OBSERVATIONS} completed price observations"
             )
-        dates = {row["date"] for row in by_symbol[symbol]}
-        common_dates = dates if common_dates is None else common_dates & dates
-    if common_dates is None or len(common_dates) != REQUIRED_PRICE_OBSERVATIONS:
-        raise LyraGovernedEvidenceError("target symbols do not share one complete price window")
-    dates = sorted(common_dates)
-    if dates[-1] != data_as_of:
-        raise LyraGovernedEvidenceError("market data latest common close differs from data_as_of")
-    rows = [
-        row for symbol in symbols for row in by_symbol[symbol]
-        if row["date"] in common_dates
-    ]
+        dates = [row["date"] for row in by_symbol[symbol]]
+        if dates != expected_dates:
+            raise LyraGovernedEvidenceError(
+                f"{symbol} does not cover the governed XNYS price window"
+            )
+    rows = [row for symbol in symbols for row in by_symbol[symbol]]
     body = {
         "schema_version": LYRA_MARKET_DATA_SNAPSHOT_SCHEMA,
         "snapshot_id": "pending", "trade_date": trade_date,
         "data_as_of": data_as_of, "captured_at": captured_at,
         "source_path": source_path, "source_sha256": source_sha256,
-        "required_symbols": symbols, "observation_dates": dates,
+        "required_symbols": symbols, "observation_dates": expected_dates,
         "rows": sorted(rows, key=lambda row: (row["date"], row["symbol"])),
         "execution_authority": False, "broker_write_performed": False,
     }
@@ -235,6 +385,7 @@ def validate_lyra_market_data_snapshot(payload: Mapping[str, Any]) -> dict[str, 
     _, captured = _timestamp(payload.get("captured_at"), label="captured_at")
     if data_as_of >= trade_date or captured.date().isoformat() != trade_date:
         raise LyraGovernedEvidenceError("market data snapshot timing differs")
+    _validate_weekly_session(signal_as_of=data_as_of, execution_session=trade_date)
     _sha(payload.get("source_sha256"), label="source_sha256")
     symbols = payload.get("required_symbols")
     dates = payload.get("observation_dates")
@@ -242,7 +393,9 @@ def validate_lyra_market_data_snapshot(payload: Mapping[str, Any]) -> dict[str, 
     if (
         not isinstance(symbols, list) or symbols != sorted(set(symbols)) or not symbols
         or not isinstance(dates, list) or dates != sorted(set(dates))
-        or len(dates) != REQUIRED_PRICE_OBSERVATIONS or dates[-1] != data_as_of
+        or dates != _expected_xnys_dates(
+            data_as_of, count=REQUIRED_PRICE_OBSERVATIONS
+        )
         or not isinstance(rows, list)
         or len(rows) != len(symbols) * REQUIRED_PRICE_OBSERVATIONS
     ):
@@ -272,6 +425,8 @@ def build_lyra_governed_session_snapshot(
     universe_freeze_hash: str, universe_source_hash: str,
     market_data_snapshot_hash: str, target_selection_evidence_hash: str,
     forecast_risk_policy_hash: str,
+    forecast_risk_policy_proposal_hash: str,
+    forecast_risk_policy_owner_decision_hash: str,
 ) -> dict[str, Any]:
     trade_date = _date(trade_date, label="trade_date")
     execution_session = _date(execution_session, label="execution_session")
@@ -289,6 +444,9 @@ def build_lyra_governed_session_snapshot(
         or captured < observed
     ):
         raise LyraGovernedEvidenceError("governed session timing differs")
+    _validate_weekly_session(
+        signal_as_of=signal_as_of, execution_session=execution_session
+    )
     hashes = {
         name: _sha(value, label=name)
         for name, value in {
@@ -303,6 +461,10 @@ def build_lyra_governed_session_snapshot(
             "market_data_snapshot_hash": market_data_snapshot_hash,
             "target_selection_evidence_hash": target_selection_evidence_hash,
             "forecast_risk_policy_hash": forecast_risk_policy_hash,
+            "forecast_risk_policy_proposal_hash": forecast_risk_policy_proposal_hash,
+            "forecast_risk_policy_owner_decision_hash": (
+                forecast_risk_policy_owner_decision_hash
+            ),
         }.items()
     }
     if not source_session_id:
@@ -334,7 +496,9 @@ def validate_lyra_governed_session_snapshot(payload: Mapping[str, Any]) -> dict[
         "lyra_source_hash", "prior_lyra_source_hash",
         "universe_freeze_hash", "universe_source_hash",
         "market_data_snapshot_hash", "target_selection_evidence_hash",
-        "forecast_risk_policy_hash", "prospective_governed_transition",
+        "forecast_risk_policy_hash", "forecast_risk_policy_proposal_hash",
+        "forecast_risk_policy_owner_decision_hash",
+        "prospective_governed_transition",
         "legacy_evaluation_relabelled", "execution_authority",
         "activation_authority", "content_hash",
     }
@@ -367,6 +531,9 @@ def validate_lyra_governed_session_snapshot(payload: Mapping[str, Any]) -> dict[
         or captured < observed
     ):
         raise LyraGovernedEvidenceError("governed session timing differs")
+    _validate_weekly_session(
+        signal_as_of=signal_as_of, execution_session=execution_session
+    )
     for field in fields:
         if field.endswith("_hash"):
             _sha(payload.get(field), label=field)
@@ -389,16 +556,34 @@ def _matrix(snapshot: Mapping[str, Any]) -> tuple[list[str], dict[str, dict[str,
 def build_lyra_forecast_risk_evidence(
     *, session_snapshot: Mapping[str, Any], market_data_snapshot: Mapping[str, Any],
     target_rows: Sequence[Mapping[str, Any]], risk_policy: Mapping[str, Any],
+    risk_policy_proposal: Mapping[str, Any],
+    risk_policy_owner_decision: Mapping[str, Any],
     target_selection_evidence: Mapping[str, Any],
 ) -> dict[str, Any]:
     session = validate_lyra_governed_session_snapshot(session_snapshot)
     market = validate_lyra_market_data_snapshot(market_data_snapshot)
     policy = validate_lyra_forecast_risk_policy(risk_policy)
+    proposal = validate_lyra_forecast_risk_policy_proposal(risk_policy_proposal)
+    owner_decision = validate_lyra_forecast_risk_policy_owner_decision(
+        risk_policy_owner_decision, proposal=proposal, as_of=session["captured_at"]
+    )
     selection = validate_lyra_target_selection_evidence(target_selection_evidence)
     if session["market_data_snapshot_hash"] != market["content_hash"]:
         raise LyraGovernedEvidenceError("risk market snapshot binding differs")
     if session["forecast_risk_policy_hash"] != policy["content_hash"]:
         raise LyraGovernedEvidenceError("risk policy/session binding differs")
+    if (
+        session["forecast_risk_policy_proposal_hash"] != proposal["content_hash"]
+        or session["forecast_risk_policy_owner_decision_hash"]
+        != owner_decision["content_hash"]
+        or policy["owner_decision_hash"] != owner_decision["content_hash"]
+        or policy["approved_at"] != owner_decision["decided_at"]
+        or _risk_policy_terms(effective_from=policy["effective_from"])
+        != proposal["policy_terms"]
+    ):
+        raise LyraGovernedEvidenceError(
+            "risk policy owner approval binding differs"
+        )
     if session["target_selection_evidence_hash"] != selection["content_hash"]:
         raise LyraGovernedEvidenceError("target selection/session binding differs")
     if policy["effective_from"] > session["signal_as_of"]:
@@ -442,7 +627,8 @@ def build_lyra_forecast_risk_evidence(
         "market_data_snapshot_hash": market["content_hash"],
         "lookback_sessions": 20, "observation_count": 20,
         "annualization_factor": ANNUALIZATION_FACTOR,
-        "risk_policy": policy,
+        "risk_policy": policy, "risk_policy_proposal": proposal,
+        "risk_policy_owner_decision": owner_decision,
         "target_selection_evidence": selection,
         "portfolio_return_observations": observations,
         "annualized_volatility": round(volatility, 12),
@@ -459,13 +645,20 @@ def validate_lyra_forecast_risk_evidence(payload: Mapping[str, Any]) -> dict[str
         "schema_version", "evidence_id", "status", "formula_id", "trade_date",
         "data_as_of", "session_hash", "target_hash", "market_data_snapshot_hash",
         "lookback_sessions", "observation_count", "annualization_factor",
-        "risk_policy", "target_selection_evidence",
+        "risk_policy", "risk_policy_proposal", "risk_policy_owner_decision",
+        "target_selection_evidence",
         "portfolio_return_observations", "annualized_volatility",
         "execution_authority", "content_hash",
     }
     if not isinstance(payload, Mapping) or set(payload) != fields:
         raise LyraGovernedEvidenceError("forecast risk evidence fields are invalid")
     policy = validate_lyra_forecast_risk_policy(payload.get("risk_policy"))
+    proposal = validate_lyra_forecast_risk_policy_proposal(
+        payload.get("risk_policy_proposal")
+    )
+    owner_decision = validate_lyra_forecast_risk_policy_owner_decision(
+        payload.get("risk_policy_owner_decision"), proposal=proposal
+    )
     selection = validate_lyra_target_selection_evidence(
         payload.get("target_selection_evidence")
     )
@@ -475,6 +668,10 @@ def validate_lyra_forecast_risk_evidence(payload: Mapping[str, Any]) -> dict[str
         or payload.get("lookback_sessions") != 20 or payload.get("observation_count") != 20
         or payload.get("annualization_factor") != ANNUALIZATION_FACTOR
         or policy.get("formula_id") != payload.get("formula_id")
+        or policy.get("owner_decision_hash") != owner_decision["content_hash"]
+        or policy.get("approved_at") != owner_decision["decided_at"]
+        or _risk_policy_terms(effective_from=policy["effective_from"])
+        != proposal["policy_terms"]
         or selection.get("execution_session") != payload.get("trade_date")
         or selection.get("signal_as_of") != payload.get("data_as_of")
         or target_hash(selection.get("target_rows")) != payload.get("target_hash")
@@ -510,12 +707,36 @@ def validate_lyra_forecast_risk_evidence(payload: Mapping[str, Any]) -> dict[str
 def build_lyra_liquidity_evidence(
     *, session_snapshot: Mapping[str, Any], market_data_snapshot: Mapping[str, Any],
     target_rows: Sequence[Mapping[str, Any]],
+    governed_policy: Mapping[str, Any],
+    governed_policy_proposal: Mapping[str, Any],
+    governed_policy_owner_decision: Mapping[str, Any],
     capital_reference_usd: float = LIVE_V1_CAPITAL_REFERENCE_USD,
 ) -> dict[str, Any]:
     session = validate_lyra_governed_session_snapshot(session_snapshot)
     market = validate_lyra_market_data_snapshot(market_data_snapshot)
+    policy = validate_lyra_forecast_risk_policy(governed_policy)
+    proposal = validate_lyra_forecast_risk_policy_proposal(
+        governed_policy_proposal
+    )
+    owner_decision = validate_lyra_forecast_risk_policy_owner_decision(
+        governed_policy_owner_decision,
+        proposal=proposal,
+        as_of=session["captured_at"],
+    )
     if session["market_data_snapshot_hash"] != market["content_hash"]:
         raise LyraGovernedEvidenceError("liquidity market snapshot binding differs")
+    if (
+        session["forecast_risk_policy_hash"] != policy["content_hash"]
+        or session["forecast_risk_policy_proposal_hash"] != proposal["content_hash"]
+        or session["forecast_risk_policy_owner_decision_hash"]
+        != owner_decision["content_hash"]
+        or policy["owner_decision_hash"] != owner_decision["content_hash"]
+        or _risk_policy_terms(effective_from=policy["effective_from"])
+        != proposal["policy_terms"]
+    ):
+        raise LyraGovernedEvidenceError(
+            "liquidity governed policy binding differs"
+        )
     capital = _finite(capital_reference_usd, label="capital_reference_usd", positive=True)
     if capital != LIVE_V1_CAPITAL_REFERENCE_USD:
         raise LyraGovernedEvidenceError("Lyra Live v1 liquidity capital reference must be $460")
@@ -570,7 +791,11 @@ def build_lyra_liquidity_evidence(
         "maximum_participation_rate": MAX_PARTICIPATION_RATE,
         "maximum_order_participation_rate": MAX_ORDER_PARTICIPATION_RATE,
         "minimum_mean_dollar_volume_usd": MINIMUM_MEAN_DOLLAR_VOLUME_USD,
-        "capital_reference_usd": capital, "symbol_results": rows,
+        "capital_reference_usd": capital,
+        "governed_policy": policy,
+        "governed_policy_proposal": proposal,
+        "governed_policy_owner_decision": owner_decision,
+        "symbol_results": rows,
         "execution_authority": False,
     }
     seed = _hash(body)
@@ -585,11 +810,20 @@ def validate_lyra_liquidity_evidence(payload: Mapping[str, Any]) -> dict[str, An
         "data_as_of", "session_hash", "target_hash", "market_data_snapshot_hash",
         "lookback_sessions", "maximum_participation_rate",
         "maximum_order_participation_rate", "minimum_mean_dollar_volume_usd",
-        "capital_reference_usd", "symbol_results", "execution_authority",
+        "capital_reference_usd", "governed_policy",
+        "governed_policy_proposal", "governed_policy_owner_decision",
+        "symbol_results", "execution_authority",
         "content_hash",
     }
     if not isinstance(payload, Mapping) or set(payload) != fields:
         raise LyraGovernedEvidenceError("liquidity evidence fields are invalid")
+    policy = validate_lyra_forecast_risk_policy(payload.get("governed_policy"))
+    proposal = validate_lyra_forecast_risk_policy_proposal(
+        payload.get("governed_policy_proposal")
+    )
+    owner_decision = validate_lyra_forecast_risk_policy_owner_decision(
+        payload.get("governed_policy_owner_decision"), proposal=proposal
+    )
     rows = payload.get("symbol_results")
     if (
         payload.get("schema_version") != LYRA_LIQUIDITY_SCHEMA
@@ -600,6 +834,9 @@ def validate_lyra_liquidity_evidence(payload: Mapping[str, Any]) -> dict[str, An
         or payload.get("maximum_order_participation_rate") != MAX_ORDER_PARTICIPATION_RATE
         or payload.get("minimum_mean_dollar_volume_usd") != MINIMUM_MEAN_DOLLAR_VOLUME_USD
         or payload.get("capital_reference_usd") != LIVE_V1_CAPITAL_REFERENCE_USD
+        or policy["owner_decision_hash"] != owner_decision["content_hash"]
+        or _risk_policy_terms(effective_from=policy["effective_from"])
+        != proposal["policy_terms"]
         or payload.get("execution_authority") is not False
         or not isinstance(rows, list) or not rows
     ):
@@ -771,6 +1008,8 @@ def governed_evidence_source_artifacts(
         {"artifact_type": "lyra_market_data_snapshot", "schema_version": market["schema_version"], "content_hash": market["content_hash"], "sleeve_id": "caerus_lyra"},
         {"artifact_type": "lyra_forecast_risk_evidence", "schema_version": risk["schema_version"], "content_hash": risk["content_hash"], "sleeve_id": "caerus_lyra"},
         {"artifact_type": "lyra_forecast_risk_policy", "schema_version": risk["risk_policy"]["schema_version"], "content_hash": risk["risk_policy"]["content_hash"], "sleeve_id": "caerus_lyra"},
+        {"artifact_type": "lyra_forecast_risk_policy_proposal", "schema_version": risk["risk_policy_proposal"]["schema_version"], "content_hash": risk["risk_policy_proposal"]["content_hash"], "sleeve_id": "caerus_lyra"},
+        {"artifact_type": "lyra_forecast_risk_policy_owner_decision", "schema_version": risk["risk_policy_owner_decision"]["schema_version"], "content_hash": risk["risk_policy_owner_decision"]["content_hash"], "sleeve_id": "caerus_lyra"},
         {"artifact_type": "lyra_target_selection_evidence", "schema_version": risk["target_selection_evidence"]["schema_version"], "content_hash": risk["target_selection_evidence"]["content_hash"], "sleeve_id": "caerus_lyra"},
         {"artifact_type": "lyra_capacity_evidence", "schema_version": cap["schema_version"], "content_hash": cap["content_hash"], "sleeve_id": "caerus_lyra"},
         {"artifact_type": "lyra_liquidity_evidence", "schema_version": liquidity["schema_version"], "content_hash": liquidity["content_hash"], "sleeve_id": "caerus_lyra"},
@@ -781,7 +1020,8 @@ __all__ = [
     "ANNUALIZATION_FACTOR", "CAPACITY_FORMULA", "LIQUIDITY_FORMULA",
     "LIVE_V1_CAPITAL_REFERENCE_USD", "LYRA_CAPACITY_SCHEMA",
     "LYRA_FORECAST_RISK_SCHEMA", "LYRA_LIQUIDITY_SCHEMA",
-    "LYRA_RISK_POLICY_SCHEMA",
+    "LYRA_RISK_POLICY_SCHEMA", "LYRA_RISK_POLICY_PROPOSAL_SCHEMA",
+    "LYRA_RISK_POLICY_OWNER_DECISION_SCHEMA",
     "LYRA_MARKET_DATA_SNAPSHOT_SCHEMA", "LYRA_SESSION_SNAPSHOT_SCHEMA",
     "LyraGovernedEvidenceError", "MAX_PARTICIPATION_RATE",
     "MAX_ORDER_PARTICIPATION_RATE", "MINIMUM_CAPACITY_MULTIPLE",
@@ -793,4 +1033,6 @@ __all__ = [
     "validate_lyra_capacity_evidence", "validate_lyra_forecast_risk_evidence",
     "validate_lyra_governed_session_snapshot", "validate_lyra_liquidity_evidence",
     "validate_lyra_market_data_snapshot", "validate_lyra_forecast_risk_policy",
+    "validate_lyra_forecast_risk_policy_proposal",
+    "validate_lyra_forecast_risk_policy_owner_decision",
 ]

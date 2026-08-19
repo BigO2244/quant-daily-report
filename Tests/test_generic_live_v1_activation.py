@@ -32,6 +32,8 @@ from core.lyra_governed_evidence import (
     RISK_FORMULA,
     TURNOVER_FORMULA,
     LYRA_RISK_POLICY_SCHEMA,
+    LYRA_RISK_POLICY_PROPOSAL_SCHEMA,
+    LYRA_RISK_POLICY_OWNER_DECISION_SCHEMA,
     build_lyra_capacity_evidence,
     build_lyra_forecast_risk_evidence,
     build_lyra_governed_session_snapshot,
@@ -44,12 +46,22 @@ from core.lane_allocator import allocate_lane
 from core.lane_risk_authority import build_lane_risk_package
 from core.lane_target_authority import build_lane_target_package
 from core.sleeve_decision import build_sleeve_decision_batch, seal_sleeve_decision
+from core.governed_xnys_calendar import previous_xnys_session
+from core.generic_lyra_v2_raw_sources import (
+    GENERIC_LYRA_RAW_RECOMPUTE_SCHEMA,
+    GENERIC_LYRA_RAW_SOURCE_NAMES,
+    validate_generic_lyra_v2_raw_source_recompute,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OWNER = json.loads(
     (ROOT / "docs/evidence/generic_live_v1_lyra_owner_decision_2026-08-19.json").read_text()
 )
+OWNER = copy.deepcopy(OWNER)
+OWNER["effective_session"] = "2026-08-25"
+OWNER["expires_at"] = "2026-08-26T20:00:00+00:00"
+OWNER["content_hash"] = artifact_content_hash(OWNER)
 OBSERVATION = json.loads(
     (ROOT / "docs/evidence/generic_live_account_observation_2026-08-18.json").read_text()
 )
@@ -102,32 +114,69 @@ def _capture() -> dict:
         "execution_authority": False,
     }
     freeze["content_hash"] = artifact_content_hash(freeze)
-    date = dt.date(2026, 8, 18)
-    dates = []
+    dates = ["2026-08-24"]
     while len(dates) < 253:
-        if date.weekday() < 5:
-            dates.append(date)
-        date -= dt.timedelta(days=1)
+        dates.append(previous_xnys_session(dates[-1]))
     dates.reverse()
     full_rows = [{
-        "date": day.isoformat(), "ticker": symbol,
+        "date": day, "ticker": symbol,
         "close": 100.0 * ((1.0 + 0.003 - index * 0.0001) ** day_index),
         "volume": 2_000_000.0 + index * 10_000,
     } for day_index, day in enumerate(dates) for index, symbol in enumerate(symbols)]
     selection = build_lyra_target_selection_evidence(
-        execution_session="2026-08-19", signal_as_of="2026-08-18",
-        captured_at="2026-08-19T12:55:00+00:00",
+        execution_session="2026-08-25", signal_as_of="2026-08-24",
+        captured_at="2026-08-25T12:55:00+00:00",
         source_path="outputs/research/flow_detection_v1/price_panel.parquet",
         source_sha256="1" * 64, universe_freeze_hash=freeze["content_hash"],
         universe_source_hash="1" * 64, frozen_universe_symbols=symbols,
         price_rows=full_rows,
     )
     market = build_lyra_market_data_snapshot(
-        trade_date="2026-08-19", data_as_of="2026-08-18",
-        captured_at="2026-08-19T12:55:00+00:00",
+        trade_date="2026-08-25", data_as_of="2026-08-24",
+        captured_at="2026-08-25T12:55:00+00:00",
         source_path="outputs/research/flow_detection_v1/price_panel.parquet",
         source_sha256="1" * 64, required_symbols=symbols,
         price_rows=full_rows,
+    )
+    risk_policy_proposal = {
+        "schema_version": LYRA_RISK_POLICY_PROPOSAL_SCHEMA,
+        "proposal_id": "lyra-risk-policy-proposal:activation-test-v1",
+        "proposed_at": "2026-08-18T22:00:00+00:00",
+        "proposed_by": "CAERUS_OPERATING_MODEL_MIGRATION",
+        "policy_terms": {
+            "sleeve_id": "caerus_lyra", "metric": "annualized_volatility",
+            "formula_id": RISK_FORMULA, "lookback_sessions": 20,
+            "minimum_price_observations": 21, "annualization_factor": 252,
+            "liquidity_formula_id": LIQUIDITY_FORMULA,
+            "liquidity_lookback_sessions": 20,
+            "minimum_mean_dollar_volume_usd": 20_000_000.0,
+            "maximum_order_participation_rate": 0.01,
+            "maximum_liquidation_participation_rate": 0.05,
+            "capacity_formula_id": CAPACITY_FORMULA,
+            "minimum_capacity_multiple": 20.0,
+            "capital_reference_usd": 460.0,
+            "turnover_formula_id": TURNOVER_FORMULA,
+            "calendar_policy_id": "XNYS_US_EQUITIES_HOLIDAY_RULES_V1",
+            "effective_from": "2026-08-18", "execution_authority": False,
+            "activation_authority": False,
+        },
+        "execution_authority": False, "activation_authority": False,
+    }
+    risk_policy_proposal["content_hash"] = artifact_content_hash(
+        risk_policy_proposal
+    )
+    risk_policy_owner_decision = {
+        "schema_version": LYRA_RISK_POLICY_OWNER_DECISION_SCHEMA,
+        "owner_decision_id": "owner-decision:lyra-risk-policy:activation-test-v1",
+        "proposal_id": risk_policy_proposal["proposal_id"],
+        "proposal_hash": risk_policy_proposal["content_hash"],
+        "decision": "APPROVE", "owner": "Brett Olson",
+        "decided_at": "2026-08-19T00:00:00+00:00",
+        "expires_at": "2026-08-26T20:00:00+00:00",
+        "execution_authority": False, "activation_authority": False,
+    }
+    risk_policy_owner_decision["content_hash"] = artifact_content_hash(
+        risk_policy_owner_decision
     )
     risk_policy = {
         "schema_version": LYRA_RISK_POLICY_SCHEMA,
@@ -135,18 +184,30 @@ def _capture() -> dict:
         "status": "APPROVED", "sleeve_id": "caerus_lyra",
         "metric": "annualized_volatility", "formula_id": RISK_FORMULA,
         "lookback_sessions": 20, "minimum_price_observations": 21,
-        "annualization_factor": 252, "approved_by": "OWNER",
+        "annualization_factor": 252,
+        "liquidity_formula_id": LIQUIDITY_FORMULA,
+        "liquidity_lookback_sessions": 20,
+        "minimum_mean_dollar_volume_usd": 20_000_000.0,
+        "maximum_order_participation_rate": 0.01,
+        "maximum_liquidation_participation_rate": 0.05,
+        "capacity_formula_id": CAPACITY_FORMULA,
+        "minimum_capacity_multiple": 20.0,
+        "capital_reference_usd": 460.0,
+        "turnover_formula_id": TURNOVER_FORMULA,
+        "calendar_policy_id": "XNYS_US_EQUITIES_HOLIDAY_RULES_V1",
+        "approved_by": "OWNER",
         "approved_at": "2026-08-19T00:00:00+00:00",
-        "effective_from": "2026-08-18", "owner_decision_hash": "2" * 64,
+        "effective_from": "2026-08-18",
+        "owner_decision_hash": risk_policy_owner_decision["content_hash"],
         "execution_authority": False,
     }
     risk_policy["content_hash"] = artifact_content_hash(risk_policy)
     session = build_lyra_governed_session_snapshot(
-        trade_date="2026-08-19", execution_session="2026-08-19",
-        signal_as_of="2026-08-18", effective_target_date="2026-08-18",
-        as_of="2026-08-19T12:56:00+00:00",
-        captured_at="2026-08-19T12:57:00+00:00",
-        source_session_id="session:2026-08-19:lyra-live-v1",
+        trade_date="2026-08-25", execution_session="2026-08-25",
+        signal_as_of="2026-08-24", effective_target_date="2026-08-24",
+        as_of="2026-08-25T12:56:00+00:00",
+        captured_at="2026-08-25T12:57:00+00:00",
+        source_session_id="session:2026-08-25:lyra-live-v1",
         source_session_hash="a" * 64, evaluation_file_hash="b" * 64,
         legacy_decision_file_hash="c" * 64, legacy_lyra_decision_hash="3" * 64,
         lyra_source_hash="d" * 64,
@@ -156,15 +217,24 @@ def _capture() -> dict:
         market_data_snapshot_hash=market["content_hash"],
         target_selection_evidence_hash=selection["content_hash"],
         forecast_risk_policy_hash=risk_policy["content_hash"],
+        forecast_risk_policy_proposal_hash=risk_policy_proposal["content_hash"],
+        forecast_risk_policy_owner_decision_hash=(
+            risk_policy_owner_decision["content_hash"]
+        ),
     )
     risk = build_lyra_forecast_risk_evidence(
         session_snapshot=session, market_data_snapshot=market,
         target_rows=target_rows, risk_policy=risk_policy,
+        risk_policy_proposal=risk_policy_proposal,
+        risk_policy_owner_decision=risk_policy_owner_decision,
         target_selection_evidence=selection,
     )
     liquidity = build_lyra_liquidity_evidence(
         session_snapshot=session, market_data_snapshot=market,
         target_rows=target_rows,
+        governed_policy=risk_policy,
+        governed_policy_proposal=risk_policy_proposal,
+        governed_policy_owner_decision=risk_policy_owner_decision,
     )
     capacity = build_lyra_capacity_evidence(liquidity_evidence=liquidity)
     sources = governed_evidence_source_artifacts(
@@ -183,7 +253,7 @@ def _capture() -> dict:
     ])
     body = {
         "schema_version": "caerus.sleeve_decision.v2",
-        "trade_date": "2026-08-19",
+        "trade_date": "2026-08-25",
         "session_id": session["session_id"],
         "session_hash": session["content_hash"],
         "sleeve_id": "caerus_lyra",
@@ -203,7 +273,7 @@ def _capture() -> dict:
             "FORECAST_RISK_20D_FORMULA_BOUND",
             "LIQUIDITY_20D_FORMULA_BOUND",
             "CAPACITY_5PCT_ADV_FORMULA_BOUND",
-            "TURNOVER_HALF_L1_FORMULA_BOUND",
+            "TURNOVER_FULL_L1_FORMULA_BOUND",
             f"RISK_FORMULA:{RISK_FORMULA}",
             f"LIQUIDITY_FORMULA:{LIQUIDITY_FORMULA}",
             f"CAPACITY_FORMULA:{CAPACITY_FORMULA}",
@@ -213,25 +283,30 @@ def _capture() -> dict:
         "decision_id": "pending",
     }
     body["decision_id"] = (
-        "sleeve-decision:v2:2026-08-19:caerus_lyra:"
+        "sleeve-decision:v2:2026-08-25:caerus_lyra:"
         + artifact_content_hash(body)[:24]
     )
     decision = seal_sleeve_decision(body)
     readiness = build_generic_lyra_v2_readiness(
-        trade_date="2026-08-19", evaluated_at="2026-08-19T12:57:00+00:00",
+        trade_date="2026-08-25", evaluated_at="2026-08-25T12:57:00+00:00",
         session_snapshot=session, decision=decision,
         evidence_hashes=[
             risk["content_hash"], liquidity["content_hash"], capacity["content_hash"],
             market["content_hash"], selection["content_hash"], risk_policy["content_hash"],
+            risk_policy_proposal["content_hash"],
+            risk_policy_owner_decision["content_hash"],
         ],
     )
     result = {
         "schema_version": GENERIC_LYRA_CAPTURE_RESULT_SCHEMA,
-        "trade_date": "2026-08-19", "execution_session": "2026-08-19",
-        "signal_as_of": "2026-08-18", "effective_target_date": "2026-08-18",
-        "captured_at": "2026-08-19T12:57:00+00:00", "status": "READY_NO_SUBMIT",
+        "trade_date": "2026-08-25", "execution_session": "2026-08-25",
+        "signal_as_of": "2026-08-24", "effective_target_date": "2026-08-24",
+        "captured_at": "2026-08-25T12:57:00+00:00", "status": "READY_NO_SUBMIT",
         "market_data_snapshot": market, "target_selection_evidence": selection,
-        "forecast_risk_policy": risk_policy, "universe_freeze": freeze,
+        "forecast_risk_policy": risk_policy,
+        "forecast_risk_policy_proposal": risk_policy_proposal,
+        "forecast_risk_policy_owner_decision": risk_policy_owner_decision,
+        "universe_freeze": freeze,
         "universe_members": symbols, "prior_target_rows": target_rows,
         "session_snapshot": session, "forecast_risk": risk,
         "liquidity": liquidity, "capacity": capacity, "decision": decision,
@@ -248,9 +323,38 @@ def _decision() -> dict:
     return _capture()["decision"]
 
 
+def _raw_source_recompute(capture: dict | None = None) -> dict:
+    capture = capture or _capture()
+    proof = {
+        "schema_version": GENERIC_LYRA_RAW_RECOMPUTE_SCHEMA,
+        "status": "PASS_NO_WRITE",
+        "execution_session": capture["execution_session"],
+        "expected_capture_hash": capture["content_hash"],
+        "recomputed_capture_hash": capture["content_hash"],
+        "source_files": [
+            {
+                "name": name,
+                "path": f"/protected/lyra/{name}",
+                "sha256": hashlib.sha256(name.encode("utf-8")).hexdigest(),
+            }
+            for name in sorted(GENERIC_LYRA_RAW_SOURCE_NAMES)
+        ],
+        "write_enabled": False,
+        "broker_call_performed": False,
+        "broker_write_performed": False,
+        "submission_allowed": False,
+        "execution_authority": False,
+        "activation_authority": False,
+    }
+    proof["content_hash"] = artifact_content_hash(proof)
+    return validate_generic_lyra_v2_raw_source_recompute(
+        proof, expected_capture=capture
+    )
+
+
 def _plan(decision: dict, *, already_at_target: bool = False) -> dict:
     batch = build_sleeve_decision_batch(
-        decisions=[decision], generated_at="2026-08-19T13:29:00+00:00"
+        decisions=[decision], generated_at="2026-08-25T13:29:00+00:00"
     )
     policy = {
         "lane_id": "generic-live-v1",
@@ -292,11 +396,11 @@ def _plan(decision: dict, *, already_at_target: bool = False) -> dict:
     allocation = allocate_lane(
         decision_batch=batch, lane_policy=policy,
         deployment_version=policy["deployment_version"],
-        allocated_at="2026-08-19T13:29:10+00:00",
+        allocated_at="2026-08-25T13:29:10+00:00",
     )
     target = build_lane_target_package(
         lane_allocation=allocation, decision_batch=batch,
-        sealed_at="2026-08-19T13:29:20+00:00",
+        sealed_at="2026-08-25T13:29:20+00:00",
     )
     contribution = copy.deepcopy(target["target_rows"][0]["sleeve_contributions"][0])
     contribution["quantity"] = 4.0
@@ -317,28 +421,28 @@ def _plan(decision: dict, *, already_at_target: bool = False) -> dict:
         cash = 60.9
     snapshot = {
         "schema_version": BROKER_SNAPSHOT_SCHEMA,
-        "snapshot_id": "broker-snapshot:generic-live-v1:2026-08-19:fixture",
-        "trade_date": "2026-08-19", "captured_at": "2026-08-19T13:29:30+00:00",
+        "snapshot_id": "broker-snapshot:generic-live-v1:2026-08-25:fixture",
+        "trade_date": "2026-08-25", "captured_at": "2026-08-25T13:29:30+00:00",
         "account_id_hash": OBSERVATION["account_id_hash"],
         "broker_environment": "alpaca_live", "currency": "USD",
         "equity": 460.9, "cash": cash, "positions": positions,
         "price_marks": [
             {"symbol": row["symbol"], "price": 20.0 if already_at_target else 100.0,
-             "as_of": "2026-08-19T13:29:30+00:00"}
+             "as_of": "2026-08-25T13:29:30+00:00"}
             for row in decision["target_rows"]
         ] + ([] if already_at_target else [{
             "symbol": "OLD", "price": 100.0,
-            "as_of": "2026-08-19T13:29:30+00:00",
+            "as_of": "2026-08-25T13:29:30+00:00",
         }]),
     }
     snapshot["content_hash"] = artifact_content_hash(snapshot)
     risk = build_lane_risk_package(
         lane_target_package=target, account_state_hash=snapshot["content_hash"],
-        decision="APPROVE", evaluated_at="2026-08-19T13:29:40+00:00",
+        decision="APPROVE", evaluated_at="2026-08-25T13:29:40+00:00",
     )
     return build_lane_exact_execution_plan(
         lane_risk_package=risk, broker_snapshot=snapshot,
-        governed_lane_policy=policy, planned_at="2026-08-19T13:29:50+00:00",
+        governed_lane_policy=policy, planned_at="2026-08-25T13:29:50+00:00",
     )
 
 
@@ -386,15 +490,19 @@ def test_every_green_gate_binds_exact_lyra_decision_and_v4_plan() -> None:
             order_lifecycle_pipeline_green=True, reconciliation_pipeline_green=True,
             accounting_pipeline_green=True, reporting_pipeline_green=True,
         ),
-        evaluated_at="2026-08-19T13:30:00+00:00",
+        evaluated_at="2026-08-25T13:30:00+00:00",
         lyra_decision=decision,
         lyra_capture_result=capture,
+        lyra_raw_source_recompute=_raw_source_recompute(capture),
         exact_plan=plan,
     )
 
     assert result["status"] == "READY_TO_DISARM_FOR_SESSION"
     assert result["reason_codes"] == ["ALL_OWNER_APPROVED_LIVE_V1_GATES_GREEN"]
     assert result["lyra_decision_hash"] == decision["content_hash"]
+    assert result["lyra_raw_source_recompute_hash"] == _raw_source_recompute(
+        capture
+    )["content_hash"]
     assert result["exact_plan_hash"] == plan["content_hash"]
     assert result["execution_authority"] is False
 
@@ -411,13 +519,15 @@ def test_ready_preflight_recomputes_exactly_from_all_protected_sources() -> None
     )
     preflight = build_generic_live_v1_activation_preflight(
         owner_decision=OWNER, live_account_observation=OBSERVATION,
-        operational_proofs=proofs, evaluated_at="2026-08-19T13:30:00+00:00",
-        lyra_decision=decision, lyra_capture_result=capture, exact_plan=plan,
+        operational_proofs=proofs, evaluated_at="2026-08-25T13:30:00+00:00",
+        lyra_decision=decision, lyra_capture_result=capture,
+        lyra_raw_source_recompute=_raw_source_recompute(capture), exact_plan=plan,
     )
     assert recompute_generic_live_v1_activation_preflight(
         expected_preflight=preflight, owner_decision=OWNER,
         live_account_observation=OBSERVATION, operational_proofs=proofs,
-        lyra_decision=decision, lyra_capture_result=capture, exact_plan=plan,
+        lyra_decision=decision, lyra_capture_result=capture,
+        lyra_raw_source_recompute=_raw_source_recompute(capture), exact_plan=plan,
     ) == preflight
     forged_sources = copy.deepcopy(proofs)
     forged_sources["reporting_pipeline_green"] = False
@@ -426,7 +536,19 @@ def test_ready_preflight_recomputes_exactly_from_all_protected_sources() -> None
             expected_preflight=preflight, owner_decision=OWNER,
             live_account_observation=OBSERVATION,
             operational_proofs=forged_sources,
-            lyra_decision=decision, lyra_capture_result=capture, exact_plan=plan,
+            lyra_decision=decision, lyra_capture_result=capture,
+            lyra_raw_source_recompute=_raw_source_recompute(capture),
+            exact_plan=plan,
+        )
+    forged_raw = _raw_source_recompute(capture)
+    forged_raw["source_files"][0]["path"] = "/protected/other-source"
+    forged_raw["content_hash"] = artifact_content_hash(forged_raw)
+    with pytest.raises(GenericLiveV1ActivationError, match="does not exactly recompute"):
+        recompute_generic_live_v1_activation_preflight(
+            expected_preflight=preflight, owner_decision=OWNER,
+            live_account_observation=OBSERVATION, operational_proofs=proofs,
+            lyra_decision=decision, lyra_capture_result=capture,
+            lyra_raw_source_recompute=forged_raw, exact_plan=plan,
         )
 
 
@@ -466,7 +588,7 @@ def test_resealed_governed_evidence_cannot_bypass_activation(
             order_lifecycle_pipeline_green=True, reconciliation_pipeline_green=True,
             accounting_pipeline_green=True, reporting_pipeline_green=True,
         ),
-        evaluated_at="2026-08-19T13:30:00+00:00",
+        evaluated_at="2026-08-25T13:30:00+00:00",
         lyra_decision=forged, exact_plan=plan,
     )
     assert result["status"] == "BLOCKED"
@@ -475,7 +597,10 @@ def test_resealed_governed_evidence_cannot_bypass_activation(
 
 
 @pytest.mark.parametrize(
-    "mutation", ["freeze_timing", "universe_members", "session", "market", "target_rank"]
+    "mutation", [
+        "freeze_timing", "universe_members", "session", "market", "target_rank",
+        "risk_policy_owner",
+    ]
 )
 def test_protected_capture_source_mutations_fail_activation(mutation: str) -> None:
     capture = _capture()
@@ -499,10 +624,15 @@ def test_protected_capture_source_mutations_fail_activation(mutation: str) -> No
         forged["market_data_snapshot"]["content_hash"] = artifact_content_hash(
             forged["market_data_snapshot"]
         )
-    else:
+    elif mutation == "target_rank":
         forged["target_selection_evidence"]["ranked_candidates"][0]["momentum_score"] += 1.0
         forged["target_selection_evidence"]["content_hash"] = artifact_content_hash(
             forged["target_selection_evidence"]
+        )
+    else:
+        forged["forecast_risk_policy_owner_decision"]["owner"] = "NOT_THE_OWNER"
+        forged["forecast_risk_policy_owner_decision"]["content_hash"] = (
+            artifact_content_hash(forged["forecast_risk_policy_owner_decision"])
         )
     forged["content_hash"] = artifact_content_hash(forged)
     result = build_generic_live_v1_activation_preflight(
@@ -513,7 +643,7 @@ def test_protected_capture_source_mutations_fail_activation(mutation: str) -> No
             order_lifecycle_pipeline_green=True, reconciliation_pipeline_green=True,
             accounting_pipeline_green=True, reporting_pipeline_green=True,
         ),
-        evaluated_at="2026-08-19T13:30:00+00:00",
+        evaluated_at="2026-08-25T13:30:00+00:00",
         lyra_decision=decision, lyra_capture_result=forged, exact_plan=plan,
     )
     assert result["status"] == "BLOCKED"
@@ -547,9 +677,9 @@ def test_fabricated_ready_status_is_rejected() -> None:
 
 def test_owner_approval_must_still_be_current_at_execution() -> None:
     require_generic_live_v1_owner_current_at_execution(
-        owner_decision=OWNER, executed_at="2026-08-19T13:31:00+00:00",
+        owner_decision=OWNER, executed_at="2026-08-25T13:31:00+00:00",
     )
     with pytest.raises(GenericLiveV1ActivationError, match="expired before"):
         require_generic_live_v1_owner_current_at_execution(
-            owner_decision=OWNER, executed_at="2026-08-20T20:00:01+00:00",
+            owner_decision=OWNER, executed_at="2026-08-26T20:00:01+00:00",
         )

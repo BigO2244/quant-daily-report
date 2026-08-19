@@ -19,6 +19,8 @@ from core.lyra_governed_evidence import (
     LIQUIDITY_FORMULA,
     RISK_FORMULA,
     LYRA_RISK_POLICY_SCHEMA,
+    LYRA_RISK_POLICY_PROPOSAL_SCHEMA,
+    LYRA_RISK_POLICY_OWNER_DECISION_SCHEMA,
     build_lyra_market_data_snapshot,
 )
 from core.governed_universe_freeze import read_governed_universe_symbols
@@ -28,7 +30,9 @@ from core.sleeve_decision import seal_sleeve_decision
 from scripts.capture_generic_lyra_v2 import (
     capture_from_explicit_paths,
     file_sha256,
+    recompute_capture_from_explicit_paths,
 )
+from core.governed_xnys_calendar import previous_xnys_session
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,20 +136,16 @@ def _sources() -> dict:
         "session_hash": session["content_hash"], "decisions": [legacy],
     }
     legacy_batch["content_hash"] = content_hash(legacy_batch["decisions"])
-    date = dt.date(2026, 8, 24)
-    observation_dates = []
+    observation_dates = ["2026-08-24"]
     while len(observation_dates) < 253:
-        if date.weekday() < 5:
-            observation_dates.append(date)
-        date -= dt.timedelta(days=1)
+        observation_dates.append(previous_xnys_session(observation_dates[-1]))
     observation_dates.reverse()
     universe_symbols = read_governed_universe_symbols(
         freeze=FREEZE, universe_path=ROOT / "data/universe.csv",
         session_as_of="2026-08-25T11:05:00+00:00",
     )
     price_rows = []
-    for day_index, observation_date in enumerate(observation_dates):
-        date = observation_date.isoformat()
+    for day_index, date in enumerate(observation_dates):
         for symbol_index, symbol in enumerate(universe_symbols):
             if symbol in SYMBOLS:
                 slope = 0.0030 - SYMBOLS.index(symbol) * 0.0001
@@ -172,15 +172,65 @@ def _sources() -> dict:
         source_sha256=PRICE_SOURCE_HASH, required_symbols=SYMBOLS,
         price_rows=price_rows,
     )
+    risk_policy_proposal = {
+        "schema_version": LYRA_RISK_POLICY_PROPOSAL_SCHEMA,
+        "proposal_id": "lyra-risk-policy-proposal:test-v1",
+        "proposed_at": "2026-08-19T11:00:00+00:00",
+        "proposed_by": "CAERUS_OPERATING_MODEL_MIGRATION",
+        "policy_terms": {
+            "sleeve_id": "caerus_lyra", "metric": "annualized_volatility",
+            "formula_id": RISK_FORMULA, "lookback_sessions": 20,
+            "minimum_price_observations": 21, "annualization_factor": 252,
+            "liquidity_formula_id": LIQUIDITY_FORMULA,
+            "liquidity_lookback_sessions": 20,
+            "minimum_mean_dollar_volume_usd": 20_000_000.0,
+            "maximum_order_participation_rate": 0.01,
+            "maximum_liquidation_participation_rate": 0.05,
+            "capacity_formula_id": CAPACITY_FORMULA,
+            "minimum_capacity_multiple": 20.0,
+            "capital_reference_usd": 460.0,
+            "turnover_formula_id": "FULL_L1_TARGET_WEIGHT_CHANGE_V1",
+            "calendar_policy_id": "XNYS_US_EQUITIES_HOLIDAY_RULES_V1",
+            "effective_from": "2026-08-19", "execution_authority": False,
+            "activation_authority": False,
+        },
+        "execution_authority": False, "activation_authority": False,
+    }
+    risk_policy_proposal["content_hash"] = content_hash(risk_policy_proposal)
+    risk_policy_owner_decision = {
+        "schema_version": LYRA_RISK_POLICY_OWNER_DECISION_SCHEMA,
+        "owner_decision_id": "owner-decision:lyra-risk-policy:test-v1",
+        "proposal_id": risk_policy_proposal["proposal_id"],
+        "proposal_hash": risk_policy_proposal["content_hash"],
+        "decision": "APPROVE", "owner": "Brett Olson",
+        "decided_at": "2026-08-19T12:00:00+00:00",
+        "expires_at": "2026-08-26T20:00:00+00:00",
+        "execution_authority": False, "activation_authority": False,
+    }
+    risk_policy_owner_decision["content_hash"] = content_hash(
+        risk_policy_owner_decision
+    )
     risk_policy = {
         "schema_version": LYRA_RISK_POLICY_SCHEMA,
         "policy_id": "lyra-risk-policy:test-owner-approved-v1",
         "status": "APPROVED", "sleeve_id": "caerus_lyra",
         "metric": "annualized_volatility", "formula_id": RISK_FORMULA,
         "lookback_sessions": 20, "minimum_price_observations": 21,
-        "annualization_factor": 252, "approved_by": "OWNER",
+        "annualization_factor": 252,
+        "liquidity_formula_id": LIQUIDITY_FORMULA,
+        "liquidity_lookback_sessions": 20,
+        "minimum_mean_dollar_volume_usd": 20_000_000.0,
+        "maximum_order_participation_rate": 0.01,
+        "maximum_liquidation_participation_rate": 0.05,
+        "capacity_formula_id": CAPACITY_FORMULA,
+        "minimum_capacity_multiple": 20.0,
+        "capital_reference_usd": 460.0,
+        "turnover_formula_id": "FULL_L1_TARGET_WEIGHT_CHANGE_V1",
+        "calendar_policy_id": "XNYS_US_EQUITIES_HOLIDAY_RULES_V1",
+        "approved_by": "OWNER",
         "approved_at": "2026-08-19T12:00:00+00:00",
-        "effective_from": "2026-08-19", "owner_decision_hash": "f" * 64,
+        "effective_from": "2026-08-19",
+        "owner_decision_hash": risk_policy_owner_decision["content_hash"],
         "execution_authority": False,
     }
     risk_policy["content_hash"] = content_hash(risk_policy)
@@ -194,17 +244,20 @@ def _sources() -> dict:
         "lyra_source_hash": LYRA_SOURCE_HASH,
         "prior_lyra_source": _shadow("2026-08-17"),
         "prior_lyra_source_hash": PRIOR_SOURCE_HASH,
-        "universe_freeze": FREEZE,
+        "universe_freeze": copy.deepcopy(FREEZE),
         "universe_path": ROOT / "data/universe.csv",
         "market_data_snapshot": market,
         "target_selection_evidence": selection,
         "forecast_risk_policy": risk_policy,
+        "forecast_risk_policy_proposal": risk_policy_proposal,
+        "forecast_risk_policy_owner_decision": risk_policy_owner_decision,
         "session_as_of": "2026-08-25T11:05:00+00:00",
         "generated_at": "2026-08-25T11:06:00+00:00",
     }
 
 
 def _path_sources(tmp_path: Path) -> tuple[dict, list[dict]]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     arguments = _sources()
     paths = {
         "evaluation_batch_path": tmp_path / "sleeve_evaluations.json",
@@ -212,6 +265,10 @@ def _path_sources(tmp_path: Path) -> tuple[dict, list[dict]]:
         "prior_lyra_source_path": tmp_path / "caerus_lyra_prior.json",
         "universe_freeze_path": tmp_path / "universe_freeze.json",
         "forecast_risk_policy_path": tmp_path / "risk_policy.json",
+        "forecast_risk_policy_proposal_path": tmp_path / "risk_policy_proposal.json",
+        "forecast_risk_policy_owner_decision_path": (
+            tmp_path / "risk_policy_owner_decision.json"
+        ),
         "source_session_manifest_path": tmp_path / "session_manifest.json",
         "legacy_decision_batch_path": tmp_path / "sleeve_decisions.json",
         "price_panel_path": tmp_path / "price_panel.parquet",
@@ -244,12 +301,20 @@ def _path_sources(tmp_path: Path) -> tuple[dict, list[dict]]:
     paths["forecast_risk_policy_path"].write_text(
         json.dumps(arguments["forecast_risk_policy"])
     )
+    paths["forecast_risk_policy_proposal_path"].write_text(
+        json.dumps(arguments["forecast_risk_policy_proposal"])
+    )
+    paths["forecast_risk_policy_owner_decision_path"].write_text(
+        json.dumps(arguments["forecast_risk_policy_owner_decision"])
+    )
     paths["price_panel_path"].write_bytes(b"explicit-price-panel-fixture")
+    universe_path = tmp_path / "universe.csv"
+    universe_path.write_bytes((ROOT / "data/universe.csv").read_bytes())
     paths.update({
         "execution_session": "2026-08-25", "signal_as_of": "2026-08-24",
         "session_as_of": "2026-08-25T11:05:00+00:00",
         "captured_at": "2026-08-25T11:06:00+00:00",
-        "universe_path": ROOT / "data/universe.csv",
+        "universe_path": universe_path,
         "output_root": tmp_path / "output",
     })
     rows = [
@@ -282,6 +347,16 @@ def test_current_governed_capture_derives_all_decision_grade_evidence() -> None:
     assert generic_lyra_v2_readiness_path(
         output_root="outputs/generic_lyra_v2", readiness=result["readiness"],
     ).name == f"readiness-{result['readiness']['content_hash']}.json"
+
+
+def test_turnover_matches_canonical_full_l1_semantics() -> None:
+    arguments = _sources()
+    arguments["prior_lyra_source"] = _shadow(
+        "2026-08-17", symbols=["AAPL", "GOOG", "META", "MSFT", "NVDA"]
+    )
+    decision = build_generic_lyra_v2_decision_batch(**arguments)["decision"]
+    assert decision["expected_turnover"] == 2.0
+    assert "TURNOVER_FULL_L1_FORMULA_BOUND" in decision["reason_codes"]
 
 
 @pytest.mark.parametrize("field", ["annualized_volatility", "formula_id", "status"])
@@ -361,9 +436,101 @@ def test_explicit_path_capture_is_no_write_by_default_and_idempotent_when_enable
         **paths, price_row_loader=loader, write_advisory_artifacts=True,
     )
     assert first["persisted_paths"] == second["persisted_paths"]
-    assert len(first["persisted_paths"]) == 10
+    assert len(first["persisted_paths"]) == 12
     assert all(Path(path).is_file() for path in first["persisted_paths"])
     assert first["broker_write_performed"] is False
+
+
+def test_runtime_raw_source_recompute_rejects_changed_bytes(tmp_path: Path) -> None:
+    paths, rows = _path_sources(tmp_path)
+
+    def loader(path, *, symbols, data_as_of):
+        return [row for row in rows if row["ticker"] in set(symbols)]
+
+    expected = capture_from_explicit_paths(
+        **paths, price_row_loader=loader
+    )["capture_result"]
+    recompute_args = {
+        key: value for key, value in paths.items()
+        if key not in {"output_root"}
+    }
+    proof = recompute_capture_from_explicit_paths(
+        expected_capture=expected, **recompute_args, price_row_loader=loader,
+    )
+    assert proof["status"] == "PASS_NO_WRITE"
+    assert proof["expected_capture_hash"] == expected["content_hash"]
+    assert proof["broker_write_performed"] is False
+    assert [row["name"] for row in proof["source_files"]] == sorted(
+        {
+            "source_session_manifest", "evaluation_batch",
+            "legacy_decision_batch", "lyra_source", "prior_lyra_source",
+            "universe_freeze", "universe_bytes", "forecast_risk_policy",
+            "forecast_risk_policy_proposal",
+            "forecast_risk_policy_owner_decision", "price_panel",
+        }
+    )
+    assert all(Path(row["path"]).is_absolute() for row in proof["source_files"])
+
+    changed = json.loads(paths["lyra_source_path"].read_text())
+    changed["rank_table"][0]["momentum_score"] += 1.0
+    paths["lyra_source_path"].write_text(json.dumps(changed))
+    with pytest.raises(Exception):
+        recompute_capture_from_explicit_paths(
+            expected_capture=expected, **recompute_args, price_row_loader=loader,
+        )
+
+
+def test_runtime_raw_source_recompute_rejects_panel_and_universe_bytes(
+    tmp_path: Path,
+) -> None:
+    paths, rows = _path_sources(tmp_path)
+
+    def loader(path, *, symbols, data_as_of):
+        return [row for row in rows if row["ticker"] in set(symbols)]
+
+    expected = capture_from_explicit_paths(
+        **paths, price_row_loader=loader
+    )["capture_result"]
+    recompute_args = {
+        key: value for key, value in paths.items() if key != "output_root"
+    }
+    paths["price_panel_path"].write_bytes(b"changed-price-panel-bytes")
+    with pytest.raises(Exception):
+        recompute_capture_from_explicit_paths(
+            expected_capture=expected, **recompute_args, price_row_loader=loader,
+        )
+
+    paths, rows = _path_sources(tmp_path / "universe-case")
+    expected = capture_from_explicit_paths(
+        **paths, price_row_loader=lambda path, *, symbols, data_as_of: [
+            row for row in rows if row["ticker"] in set(symbols)
+        ],
+    )["capture_result"]
+    recompute_args = {
+        key: value for key, value in paths.items() if key != "output_root"
+    }
+    paths["universe_path"].write_text(
+        paths["universe_path"].read_text() + "\nZZZZ\n", encoding="utf-8"
+    )
+    with pytest.raises(Exception):
+        recompute_capture_from_explicit_paths(
+            expected_capture=expected, **recompute_args,
+            price_row_loader=lambda path, *, symbols, data_as_of: [
+                row for row in rows if row["ticker"] in set(symbols)
+            ],
+        )
+
+
+def test_freeze_must_be_effective_by_signal_date() -> None:
+    arguments = _sources()
+    freeze = arguments["universe_freeze"]
+    freeze["effective_from"] = "2026-08-25T00:00:00-04:00"
+    freeze["no_retroactive_use_before"] = "2026-08-25"
+    freeze["content_hash"] = content_hash({
+        key: value for key, value in freeze.items() if key != "content_hash"
+    })
+    with pytest.raises(GenericLyraV2ProducerError, match="signal predates"):
+        build_generic_lyra_v2_decision_batch(**arguments)
 
 
 def test_unapproved_risk_policy_and_resealed_rank_fail_closed() -> None:
@@ -382,4 +549,45 @@ def test_unapproved_risk_policy_and_resealed_rank_fail_closed() -> None:
         key: value for key, value in selection.items() if key != "content_hash"
     })
     with pytest.raises(Exception, match="not recomputed"):
+        build_generic_lyra_v2_decision_batch(**arguments)
+
+
+def test_resealed_risk_policy_owner_approval_bypasses_fail_closed() -> None:
+    arguments = _sources()
+    arguments["forecast_risk_policy"]["owner_decision_hash"] = "9" * 64
+    arguments["forecast_risk_policy"]["content_hash"] = content_hash({
+        key: value for key, value in arguments["forecast_risk_policy"].items()
+        if key != "content_hash"
+    })
+    with pytest.raises(Exception, match="owner approval binding"):
+        build_generic_lyra_v2_decision_batch(**arguments)
+
+    arguments = _sources()
+    proposal = arguments["forecast_risk_policy_proposal"]
+    proposal["policy_terms"]["formula_id"] = "UNAPPROVED_PLACEHOLDER"
+    proposal["content_hash"] = content_hash({
+        key: value for key, value in proposal.items() if key != "content_hash"
+    })
+    owner_decision = arguments["forecast_risk_policy_owner_decision"]
+    owner_decision["proposal_hash"] = proposal["content_hash"]
+    owner_decision["content_hash"] = content_hash({
+        key: value for key, value in owner_decision.items() if key != "content_hash"
+    })
+    arguments["forecast_risk_policy"]["owner_decision_hash"] = owner_decision[
+        "content_hash"
+    ]
+    arguments["forecast_risk_policy"]["content_hash"] = content_hash({
+        key: value for key, value in arguments["forecast_risk_policy"].items()
+        if key != "content_hash"
+    })
+    with pytest.raises(Exception, match="proposal terms differ"):
+        build_generic_lyra_v2_decision_batch(**arguments)
+
+    arguments = _sources()
+    proposal = arguments["forecast_risk_policy_proposal"]
+    proposal["policy_terms"]["maximum_order_participation_rate"] = 0.02
+    proposal["content_hash"] = content_hash({
+        key: value for key, value in proposal.items() if key != "content_hash"
+    })
+    with pytest.raises(Exception, match="proposal terms differ"):
         build_generic_lyra_v2_decision_batch(**arguments)

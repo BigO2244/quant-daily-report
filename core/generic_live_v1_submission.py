@@ -34,6 +34,10 @@ from core.lane_reconciliation import validate_lane_reconciliation
 from core.lane_oms import build_lane_oms_intents
 from core.lane_truth_status import validate_dashboard_performance_surfaces
 from core.generic_live_v1_ops import reject_sensitive_payload
+from core.generic_lyra_v2_raw_sources import (
+    GenericLyraV2RawSourceError,
+    validate_generic_lyra_v2_raw_source_recompute,
+)
 
 
 GENERIC_LIVE_V1_SUBMISSION_RESULT_SCHEMA = "caerus.generic_live_v1_submission_result.v1"
@@ -645,6 +649,7 @@ def _execute_generic_live_v1_session(
     exact_plan: Mapping[str, Any],
     lyra_decision: Mapping[str, Any] | None = None,
     lyra_capture_result: Mapping[str, Any] | None = None,
+    lyra_raw_source_recompute: Mapping[str, Any] | None = None,
     executed_at: str,
     submit_enabled: bool = False,
     broker: GenericLiveV1Broker | None = None,
@@ -686,6 +691,25 @@ def _execute_generic_live_v1_session(
             )
         if lyra_capture_result.get("content_hash") != preflight.get("lyra_capture_hash"):
             raise GenericLiveV1SubmissionError("submission Lyra capture pin differs")
+        if not isinstance(lyra_raw_source_recompute, Mapping):
+            raise GenericLiveV1SubmissionError(
+                "submission requires the exact raw-source reproduction proof"
+            )
+        try:
+            raw_proof = validate_generic_lyra_v2_raw_source_recompute(
+                lyra_raw_source_recompute,
+                expected_capture=lyra_capture_result,
+            )
+        except (GenericLyraV2RawSourceError, TypeError, ValueError) as exc:
+            raise GenericLiveV1SubmissionError(
+                "submission raw-source reproduction proof is invalid"
+            ) from exc
+        if raw_proof["content_hash"] != preflight.get(
+            "lyra_raw_source_recompute_hash"
+        ):
+            raise GenericLiveV1SubmissionError(
+                "submission raw-source reproduction proof pin differs"
+            )
         validate_generic_live_v1_lyra_plan_chain(
             lyra_decision=lyra_decision, lyra_capture_result=lyra_capture_result,
             exact_plan=exact_plan,
@@ -1144,6 +1168,7 @@ def execute_generic_live_v1_session(
     exact_plan: Mapping[str, Any],
     lyra_decision: Mapping[str, Any] | None = None,
     lyra_capture_result: Mapping[str, Any] | None = None,
+    lyra_raw_source_recompute: Mapping[str, Any] | None = None,
     executed_at: str,
     submit_enabled: bool = False,
     broker: GenericLiveV1Broker | None = None,
@@ -1161,6 +1186,7 @@ def execute_generic_live_v1_session(
             exact_plan=exact_plan,
             lyra_decision=lyra_decision,
             lyra_capture_result=lyra_capture_result,
+            lyra_raw_source_recompute=lyra_raw_source_recompute,
             executed_at=executed_at,
             submit_enabled=submit_enabled,
             broker=broker,

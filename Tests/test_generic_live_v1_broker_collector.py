@@ -45,7 +45,7 @@ class ReadBroker:
             return []
         return [{
             "id": "alpaca-fill-activity-1", "activity_type": "FILL",
-            "transaction_time": "2026-08-19T13:34:30+00:00",
+            "transaction_time": "2026-08-25T13:34:30+00:00",
             "order_id": self.submission["broker_order"]["broker_order_id"],
             "symbol": self.order["symbol"], "side": self.order["side"],
             "qty": str(self.filled_quantity),
@@ -99,7 +99,7 @@ def test_fresh_read_only_broker_evidence_closes_before_publishing_pointer(tmp_pa
     raw, arguments = _collector_arguments(tmp_path)
     pointer = tmp_path / "published" / "posttrade.json"
     result = collect_and_finalize_generic_live_v1_posttrade(
-        broker=ReadBroker(raw), observed_at="2026-08-19T20:00:00+00:00",
+        broker=ReadBroker(raw), observed_at="2026-08-25T20:00:00+00:00",
         evidence_directory=tmp_path / "broker-evidence",
         published_pointer_path=pointer, **arguments,
     )
@@ -134,7 +134,7 @@ def test_terminal_order_break_collects_fresh_truth_before_suppressed_pointer(
     )
 
     result = collect_and_finalize_generic_live_v1_posttrade(
-        broker=ReadBroker(raw), observed_at="2026-08-19T20:00:00+00:00",
+        broker=ReadBroker(raw), observed_at="2026-08-25T20:00:00+00:00",
         evidence_directory=tmp_path / "broker-evidence",
         published_pointer_path=pointer, **arguments,
     )
@@ -190,7 +190,7 @@ def test_pointer_is_never_published_when_broker_state_cannot_reconcile(tmp_path)
     pointer = tmp_path / "published" / "posttrade.json"
     with pytest.raises(Exception):
         collect_and_finalize_generic_live_v1_posttrade(
-            broker=BadStateBroker(raw), observed_at="2026-08-19T20:00:00+00:00",
+            broker=BadStateBroker(raw), observed_at="2026-08-25T20:00:00+00:00",
             evidence_directory=tmp_path / "broker-evidence",
             published_pointer_path=pointer, **arguments,
         )
@@ -220,21 +220,21 @@ def test_alpaca_fill_activity_reader_preserves_order_and_explicit_fee_lineage() 
     class Client:
         def get(self, path, data):
             assert path == "/account/activities/FILL"
-            assert data["date"] == "2026-08-19"
+            assert data["date"] == "2026-08-25"
             return [{
                 "id": "fill-1", "activity_type": "FILL",
-                "transaction_time": "2026-08-19T13:34:30Z",
+                "transaction_time": "2026-08-25T13:34:30Z",
                 "order_id": "broker-order-1", "symbol": "AAPL",
                 "side": "buy", "qty": "4", "price": "100.25",
                 "fee_amount": "0",
             }]
 
     rows = AlpacaBroker(Client(), paper=False).list_generic_live_v1_fill_activities(
-        "2026-08-19"
+        "2026-08-25"
     )
     assert rows == [{
         "id": "fill-1", "activity_type": "FILL",
-        "transaction_time": "2026-08-19T13:34:30Z",
+        "transaction_time": "2026-08-25T13:34:30Z",
         "order_id": "broker-order-1", "symbol": "AAPL", "side": "buy",
         "qty": "4", "price": "100.25", "fee_amount": "0",
     }]
@@ -245,12 +245,12 @@ def test_alpaca_sell_fill_without_explicit_fee_fails_closed() -> None:
         def get(self, path, data):
             return [{
                 "id": "fill-1", "activity_type": "FILL",
-                "transaction_time": "2026-08-19T13:34:30Z",
+                "transaction_time": "2026-08-25T13:34:30Z",
                 "order_id": "broker-order-1", "symbol": "AAPL",
                 "side": "sell", "qty": "1", "price": "100.25",
             }]
 
     with pytest.raises(RuntimeError, match="SELL fill lacks explicit fee"):
         AlpacaBroker(Client(), paper=False).list_generic_live_v1_fill_activities(
-            "2026-08-19"
+            "2026-08-25"
         )
