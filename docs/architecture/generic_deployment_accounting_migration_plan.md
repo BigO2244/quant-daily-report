@@ -1451,12 +1451,21 @@ owner record
 content hash
 `abc334ba680afe4b9ae50ce815ad2f591a842931f8c3a12b797e2fdadc58b506`.
 Dynamic gross capacity is 95% of fresh factual net-liquidation equity; new buys
-must fit fresh cash after a 5% equity reserve and only when pending transfers
-are zero. No nominal ceiling, buying-power field, margin multiplier, borrowing,
+must fit settled cash after a 5% equity reserve. Settled cash is recomputed from
+complete fresh paginated order and fill history, subtracting T+1-unsettled sell
+proceeds; zero pending transfers alone is never sufficient. No nominal ceiling,
+buying-power field, margin multiplier, borrowing,
 unsettled proceeds, or pending funds may contribute. The new account,
 operational-freshness, and dynamic-capital proof contracts are advisory and
 fail closed, with the disabled runtime template retaining all submit/schedule
 flags at zero.
+
+The hardened source contracts additionally bind the exact protected owner hash,
+the governed no-ceiling capital policy, raw account bytes, causal order/fill
+history, fresh positions/open orders/asset evidence, trusted pipeline evidence,
+and an independently pinned current broker fee schedule. No green proof is
+emitted when a 95% gross or 5% settled-cash reserve check fails. This source is
+not runtime authority and must pass independent review before deployment.
 
 The Monday rehearsal is sealed at
 [`generic_live_v1_dynamic_monday_rehearsal_20260824.json`](../evidence/generic_live_v1_dynamic_monday_rehearsal_20260824.json),

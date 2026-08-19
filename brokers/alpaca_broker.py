@@ -138,6 +138,32 @@ def _safe_bool(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _required_account_field(payload: Mapping[str, Any], account: Any, name: str) -> Any:
+    """Return an explicitly present account field; never invent a safe default."""
+
+    if name in payload:
+        value = payload[name]
+    elif hasattr(account, name):
+        value = getattr(account, name)
+    else:
+        raise RuntimeError(f"Alpaca account response missing required field: {name}")
+    if value is None or value == "":
+        raise RuntimeError(f"Alpaca account response missing required field: {name}")
+    return value
+
+
+def _required_account_bool(payload: Mapping[str, Any], account: Any, name: str) -> bool:
+    value = _required_account_field(payload, account, name)
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1"}:
+        return True
+    if normalized in {"false", "0"}:
+        return False
+    raise RuntimeError(f"Alpaca account response field is not boolean: {name}")
+
+
 def json_safe_primitive(value: Any) -> Any:
     """Normalize Alpaca SDK payloads into deterministic JSON-safe primitives."""
     import decimal
@@ -496,33 +522,29 @@ class AlpacaBroker:
         d = _as_dict(account)
         out = {
             "id": _safe_str(d.get("id") or getattr(account, "id", "")),
-            "status": _safe_str(d.get("status") or getattr(account, "status", "")),
+            "status": _safe_str(_required_account_field(d, account, "status")),
             "cash": _safe_str(d.get("cash") or getattr(account, "cash", "")),
             "equity": _safe_str(d.get("equity") or getattr(account, "equity", "")),
             "buying_power": _safe_str(
                 d.get("buying_power") or getattr(account, "buying_power", "")
             ),
             "pending_transfer_in": _safe_str(
-                d.get("pending_transfer_in") or getattr(account, "pending_transfer_in", "0")
+                _required_account_field(d, account, "pending_transfer_in")
             ),
             "pending_transfer_out": _safe_str(
-                d.get("pending_transfer_out") or getattr(account, "pending_transfer_out", "0")
+                _required_account_field(d, account, "pending_transfer_out")
             ),
             "long_market_value": _safe_str(
-                d.get("long_market_value") or getattr(account, "long_market_value", "0")
+                _required_account_field(d, account, "long_market_value")
             ),
             "short_market_value": _safe_str(
-                d.get("short_market_value") or getattr(account, "short_market_value", "0")
+                _required_account_field(d, account, "short_market_value")
             ),
             "portfolio_value": _safe_str(
                 d.get("portfolio_value") or getattr(account, "portfolio_value", "")
             ),
-            "trading_blocked": _safe_bool(
-                d.get("trading_blocked") or getattr(account, "trading_blocked", False)
-            ),
-            "account_blocked": _safe_bool(
-                d.get("account_blocked") or getattr(account, "account_blocked", False)
-            ),
+            "trading_blocked": _required_account_bool(d, account, "trading_blocked"),
+            "account_blocked": _required_account_bool(d, account, "account_blocked"),
             "raw": d,
         }
         out["id_hash"] = hashlib.sha256(out["id"].encode("utf-8")).hexdigest()

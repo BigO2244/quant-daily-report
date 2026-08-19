@@ -282,11 +282,14 @@ content hash
 `abc334ba680afe4b9ae50ce815ad2f591a842931f8c3a12b797e2fdadc58b506`.
 It sets no nominal dollar ceiling: gross capacity is 95% of fresh factual
 broker net-liquidation equity, while new buys are separately limited by fresh
-cash with zero pending transfers and a 5% equity cash reserve. Buying power,
+settled cash proven from complete fresh order and fill history after subtracting
+T+1-unsettled sell proceeds, with zero pending transfers and a 5% equity cash
+reserve. The broker account `cash` field is explicitly not treated as settled
+cash. Buying power,
 margin multipliers, borrowing, unsettled proceeds, and unverified pending
 funds are forbidden. Deposits affect limits only after they appear in factual
-net equity and zero-pending-transfer cash; withdrawals and losses reduce limits
-automatically. The record lists and supersedes every named fixed-cap candidate,
+net equity and the complete-history settled-cash proof; withdrawals and losses
+reduce limits automatically. The record lists and supersedes every named fixed-cap candidate,
 proposal, owner decision, installation, and activation-preflight hash. It
 grants no execution or activation authority by itself, and PAPER is unchanged.
 
@@ -302,6 +305,13 @@ therefore concludes `BLOCKED_NO_TRADE_REARMED`: no order, broker call, schedule
 enable, or kill-switch change is authorized. Using Monday as an executing
 session would require a separate owner decision to change Lyra's weekly
 economics; otherwise Tuesday requires a session-specific owner decision.
+
+The corrected dynamic contracts remain source-only and non-authoritative until
+independent review. They require raw byte-bound account evidence, complete
+paginated order and fill sources, exact order/fill reconciliation, an externally
+pinned owner hash, a dynamic no-ceiling capital-policy hash, and an independently
+pinned current broker fee schedule. Missing history, stale bytes, an untrusted
+fee schedule, or a fixed-capital plan fails closed before any authority exists.
 
 A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),

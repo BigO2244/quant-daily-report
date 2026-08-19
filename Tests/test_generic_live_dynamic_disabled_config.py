@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 
 from core.generic_live_v1_ops import install_config_with_backup
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,10 +20,12 @@ def test_dynamic_disabled_config_has_no_fixed_ceiling_or_execution_enable():
     assert "CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED=0" in text
     assert "CAERUS_GENERIC_LIVE_BUYING_POWER_ALLOWED=0" in text
     assert "CAERUS_GENERIC_LIVE_PENDING_TRANSFERS_REQUIRED_ZERO=1" in text
-    assert "REPLACE_WITH_" not in text
+    assert "CAERUS_GENERIC_LIVE_COMPLETE_ORDER_HISTORY_REQUIRED=1" in text
+    assert "CAERUS_GENERIC_LIVE_COMPLETE_FILL_HISTORY_REQUIRED=1" in text
+    assert "CAERUS_GENERIC_LIVE_GOVERNED_FEE_SCHEDULE_HASH=REPLACE_WITH_" in text
 
 
-def test_dynamic_disabled_config_passes_protected_installer(tmp_path: Path):
+def test_dynamic_disabled_config_cannot_install_until_fee_schedule_is_pinned(tmp_path: Path):
     protected = tmp_path / "protected"
     protected.mkdir(mode=0o700)
     candidate = protected / "candidate.env"
@@ -30,13 +33,12 @@ def test_dynamic_disabled_config_passes_protected_installer(tmp_path: Path):
     candidate.chmod(0o600)
     active = protected / "active.env"
     backup = protected / "active.env.rollback"
-    result = install_config_with_backup(
-        candidate_path=candidate,
-        active_path=active,
-        backup_path=backup,
-        allowed_roots=[protected],
-        expected_candidate_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
-    )
-    assert result["backup_created"] is False
-    assert active.read_bytes() == TEMPLATE.read_bytes()
-    assert active.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(Exception, match="unresolved template token"):
+        install_config_with_backup(
+            candidate_path=candidate,
+            active_path=active,
+            backup_path=backup,
+            allowed_roots=[protected],
+            expected_candidate_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),
+        )
+    assert not active.exists()

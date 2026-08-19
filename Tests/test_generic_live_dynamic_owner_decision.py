@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from core.generic_live_dynamic_owner_decision import (
+    EXPECTED_FIXED_CAPITAL_ARTIFACT_HASHES,
     GenericLiveDynamicOwnerDecisionError,
     build_generic_live_dynamic_owner_decision,
     content_hash,
@@ -14,7 +15,7 @@ from core.generic_live_dynamic_owner_decision import (
 )
 
 
-SUPERSEDED = ["a" * 64, "b" * 64]
+SUPERSEDED = sorted(EXPECTED_FIXED_CAPITAL_ARTIFACT_HASHES)
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -62,6 +63,28 @@ def test_dynamic_owner_decision_rejects_unlisted_or_duplicate_supersession():
     changed["content_hash"] = content_hash(changed)
     with pytest.raises(GenericLiveDynamicOwnerDecisionError):
         validate_generic_live_dynamic_owner_decision(changed)
+
+
+def test_dynamic_owner_decision_requires_trusted_hash_and_current_session():
+    decision = _decision()
+    assert validate_generic_live_dynamic_owner_decision(
+        decision,
+        expected_content_hash=decision["content_hash"],
+        as_of="2026-08-24T13:30:00+00:00",
+        require_effective_session="2026-08-24",
+    )["owner_decision_id"] == decision["owner_decision_id"]
+    with pytest.raises(GenericLiveDynamicOwnerDecisionError, match="trusted authority"):
+        validate_generic_live_dynamic_owner_decision(
+            decision, expected_content_hash="f" * 64,
+        )
+    with pytest.raises(GenericLiveDynamicOwnerDecisionError, match="different session"):
+        validate_generic_live_dynamic_owner_decision(
+            decision, require_effective_session="2026-08-25",
+        )
+    with pytest.raises(GenericLiveDynamicOwnerDecisionError, match="not current"):
+        validate_generic_live_dynamic_owner_decision(
+            decision, as_of="2026-08-24T20:00:01+00:00",
+        )
 
 
 def test_sealed_owner_record_is_valid_and_invalidates_fixed_cap_artifacts():

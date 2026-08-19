@@ -69,6 +69,18 @@ _ROLLBACK = frozenset(
         "RECONCILIATION_BREAK", "ACCOUNTING_BREAK", "REPORTING_BREAK",
     }
 )
+EXPECTED_FIXED_CAPITAL_ARTIFACT_HASHES = frozenset(
+    {
+        "4b697447a9f5760c10df7ba0e65cbef2ab627feb177a3ec4f1437ace57b8068b",
+        "5ebc0a035c6436509646200b5f69ee26e515c44280071832a3a0b0aa272dd0e7",
+        "8a07df4852a30358761e2be62054cf202b406bb4ca096c70be55e3b1e60cd641",
+        "bd056ac57670f31016adea140d9ed8951f832bb6ebb030d6028f47c91714aaca",
+        "c523bc96aae5e45688449750dd7fb995564958545972411f0510ed15cf434eeb",
+        "cc182585a35b6f2b842ebb20f832ee51c5366278b0380bd10a50f2a5a26f1070",
+        "e70f35069c8fde796be9118cfc115c3458b54c6df653b2078c5403eaca33184f",
+        "ef5d9ae5ab9833208c0c3979a4ce743fbd0c36fa5676c3910af799444bc94ba7",
+    }
+)
 
 
 class GenericLiveDynamicOwnerDecisionError(ValueError):
@@ -105,6 +117,10 @@ def _timestamp(value: Any, label: str) -> dt.datetime:
 
 def validate_generic_live_dynamic_owner_decision(
     payload: Mapping[str, Any],
+    *,
+    expected_content_hash: str | None = None,
+    as_of: str | None = None,
+    require_effective_session: str | None = None,
 ) -> dict[str, Any]:
     if not isinstance(payload, Mapping) or set(payload) != _FIELDS:
         raise GenericLiveDynamicOwnerDecisionError("owner decision fields are invalid")
@@ -120,8 +136,14 @@ def validate_generic_live_dynamic_owner_decision(
         effective = dt.date.fromisoformat(str(payload.get("effective_session")))
     except ValueError as exc:
         raise GenericLiveDynamicOwnerDecisionError("effective_session is invalid") from exc
-    if effective < decided.date() or expires <= decided:
+    if effective < decided.date() or expires <= decided or expires.date() < effective:
         raise GenericLiveDynamicOwnerDecisionError("decision chronology is invalid")
+    if require_effective_session is not None and payload.get("effective_session") != require_effective_session:
+        raise GenericLiveDynamicOwnerDecisionError("owner decision is for a different session")
+    if as_of is not None:
+        evaluated = _timestamp(as_of, "as_of")
+        if evaluated < decided or evaluated > expires:
+            raise GenericLiveDynamicOwnerDecisionError("owner decision is not current at as_of")
     if payload.get("lane_id") != "generic-live-v1" or payload.get("lane_kind") != "LIVE":
         raise GenericLiveDynamicOwnerDecisionError("lane scope is invalid")
     if payload.get("eligible_sleeve_ids") != ["caerus_lyra"]:
@@ -171,12 +193,8 @@ def validate_generic_live_dynamic_owner_decision(
     if frozenset(payload.get("automatic_rearm_and_rollback_triggers") or ()) != _ROLLBACK:
         raise GenericLiveDynamicOwnerDecisionError("rollback triggers differ")
     supersedes = payload.get("supersedes_fixed_capital_artifact_hashes")
-    if (
-        not isinstance(supersedes, list) or not supersedes
-        or supersedes != sorted(set(supersedes))
-        or any(not isinstance(value, str) or not _SHA.fullmatch(value) for value in supersedes)
-    ):
-        raise GenericLiveDynamicOwnerDecisionError("superseded artifact hashes are invalid")
+    if not isinstance(supersedes, list) or supersedes != sorted(EXPECTED_FIXED_CAPITAL_ARTIFACT_HASHES):
+        raise GenericLiveDynamicOwnerDecisionError("superseded artifact hashes are not the exact governed set")
     for field in (
         "paper_authority_changed", "legacy_live_executor_allowed",
         "execution_authority", "activation_authority",
@@ -187,12 +205,17 @@ def validate_generic_live_dynamic_owner_decision(
         raise GenericLiveDynamicOwnerDecisionError("content_hash is invalid")
     if payload["content_hash"] != content_hash(payload):
         raise GenericLiveDynamicOwnerDecisionError("content_hash mismatch")
+    if expected_content_hash is not None:
+        if not isinstance(expected_content_hash, str) or not _SHA.fullmatch(expected_content_hash):
+            raise GenericLiveDynamicOwnerDecisionError("trusted owner decision hash is invalid")
+        if payload["content_hash"] != expected_content_hash:
+            raise GenericLiveDynamicOwnerDecisionError("owner decision differs from trusted authority")
     return copy.deepcopy(dict(payload))
 
 
 def build_generic_live_dynamic_owner_decision(
     *, decided_at: str, effective_session: str, expires_at: str,
-    supersedes_fixed_capital_artifact_hashes: list[str],
+    supersedes_fixed_capital_artifact_hashes: list[str] | None = None,
 ) -> dict[str, Any]:
     body = {
         "schema_version": SCHEMA,
@@ -234,7 +257,11 @@ def build_generic_live_dynamic_owner_decision(
         },
         "preflight_requirements": sorted(_PREFLIGHT),
         "automatic_rearm_and_rollback_triggers": sorted(_ROLLBACK),
-        "supersedes_fixed_capital_artifact_hashes": sorted(set(supersedes_fixed_capital_artifact_hashes)),
+        "supersedes_fixed_capital_artifact_hashes": sorted(
+            EXPECTED_FIXED_CAPITAL_ARTIFACT_HASHES
+            if supersedes_fixed_capital_artifact_hashes is None
+            else supersedes_fixed_capital_artifact_hashes
+        ),
         "paper_authority_changed": False,
         "legacy_live_executor_allowed": False,
         "execution_authority": False,
@@ -245,7 +272,8 @@ def build_generic_live_dynamic_owner_decision(
 
 
 __all__ = [
-    "CAPITAL_POLICY_VERSION", "SCHEMA", "GenericLiveDynamicOwnerDecisionError",
+    "CAPITAL_POLICY_VERSION", "EXPECTED_FIXED_CAPITAL_ARTIFACT_HASHES", "SCHEMA",
+    "GenericLiveDynamicOwnerDecisionError",
     "build_generic_live_dynamic_owner_decision", "content_hash",
     "validate_generic_live_dynamic_owner_decision",
 ]
