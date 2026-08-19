@@ -172,6 +172,13 @@ def test_explicit_submission_writes_wal_first_and_automatically_rearms(tmp_path)
     assert broker.submit_calls == 1
     assert len(list((tmp_path / "wal").glob("intent-*.json"))) == 1
     assert len(list((tmp_path / "wal").glob("receipt-*.json"))) == 1
+    observations = [json.loads(path.read_text()) for path in sorted((tmp_path / "wal").glob("observation-*.json"))]
+    assert [row["sequence"] for row in observations] == list(range(1, len(observations) + 1))
+    assert {row["kind"] for row in observations} == {
+        "account", "positions", "open_orders", "asset", "calendar",
+        "client_order_lookup", "submission_response", "order_poll",
+    }
+    assert result["broker_observation_hashes"] == [row["content_hash"] for row in observations]
     assert json.loads((tmp_path / "rearm.json").read_text())["status"] == "ARMED"
 
 
@@ -223,6 +230,96 @@ def test_rejected_broker_response_is_order_break_and_rearms(tmp_path) -> None:
     )
     assert result["status"] == "ORDER_BREAK_REARMED"
     assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
+
+
+def test_unresolved_async_cancellation_is_bounded_and_persisted(tmp_path) -> None:
+    class NeverCancelBroker(Broker):
+        def cancel_generic_live_v4_order(self, **kwargs):
+            self.cancel_contexts.append(kwargs["mutation_context"])
+
+    preflight, plan = _ready()
+    _disarm(tmp_path / "rearm.json", preflight, plan)
+    with pytest.raises(GenericLiveV1SubmissionError, match="remained unresolved"):
+        execute_generic_live_v1_session(
+            activation_preflight=preflight,
+            exact_plan=plan,
+            executed_at="2026-08-19T13:31:00+00:00",
+            submit_enabled=True,
+            broker=NeverCancelBroker(terminal_status="accepted"),
+            wal_directory=tmp_path / "wal",
+            rearm_state_path=tmp_path / "rearm.json",
+            result_path=tmp_path / "result.json",
+            poll_attempts=2,
+            poll_interval_seconds=0,
+        )
+    cancellation_files = list((tmp_path / "wal").glob("cancellation-*.json"))
+    assert len(cancellation_files) == 1
+    cancellation = json.loads(cancellation_files[0].read_text())
+    assert cancellation["status"] == "UNRESOLVED"
+    cancellation_polls = [
+        json.loads(path.read_text())
+        for path in (tmp_path / "wal").glob("observation-*-cancellation_poll-*.json")
+    ]
+    assert len(cancellation_polls) == 2
+    assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
+
+
+def test_cancellation_provider_secret_is_never_persisted_or_raised(
+    tmp_path, monkeypatch,
+) -> None:
+    class SecretCancelBroker(Broker):
+        def cancel_generic_live_v4_order(self, **kwargs):
+            raise RuntimeError("provider leaked SENTINEL_SECRET_VALUE")
+
+    monkeypatch.setenv("CAERUS_SECRET_SENTINEL", "SENTINEL_SECRET_VALUE")
+    preflight, plan = _ready()
+    _disarm(tmp_path / "rearm.json", preflight, plan)
+    with pytest.raises(GenericLiveV1SubmissionError, match="remained unresolved") as error:
+        execute_generic_live_v1_session(
+            activation_preflight=preflight,
+            exact_plan=plan,
+            executed_at="2026-08-19T13:31:00+00:00",
+            submit_enabled=True,
+            broker=SecretCancelBroker(terminal_status="accepted"),
+            wal_directory=tmp_path / "wal",
+            rearm_state_path=tmp_path / "rearm.json",
+            result_path=tmp_path / "result.json",
+            poll_attempts=1,
+            poll_interval_seconds=0,
+        )
+    assert "SENTINEL_SECRET_VALUE" not in str(error.value)
+    cancellation = json.loads(next((tmp_path / "wal").glob("cancellation-*.json")).read_text())
+    assert cancellation["status"] == "UNRESOLVED"
+    assert cancellation["operation_failed"] is True
+    for path in tmp_path.rglob("*"):
+        if path.is_file():
+            assert b"SENTINEL_SECRET_VALUE" not in path.read_bytes()
+
+
+def test_raw_broker_account_id_is_never_persisted(tmp_path) -> None:
+    class RawAccountBroker(Broker):
+        def get_account(self):
+            account = super().get_account()
+            account["id"] = "SENTINEL_RAW_ACCOUNT_ID"
+            account["account_number"] = "SENTINEL_RAW_ACCOUNT_NUMBER"
+            return account
+
+    preflight, plan = _ready()
+    _disarm(tmp_path / "rearm.json", preflight, plan)
+    execute_generic_live_v1_session(
+        activation_preflight=preflight,
+        exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00",
+        submit_enabled=True,
+        broker=RawAccountBroker(),
+        wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "rearm.json",
+        result_path=tmp_path / "result.json",
+        poll_interval_seconds=0,
+    )
+    persisted = b"".join(path.read_bytes() for path in tmp_path.rglob("*") if path.is_file())
+    assert b"SENTINEL_RAW_ACCOUNT_ID" not in persisted
+    assert b"SENTINEL_RAW_ACCOUNT_NUMBER" not in persisted
 
 
 def test_receipt_failure_after_accept_rearms_and_replay_does_not_resubmit(tmp_path, monkeypatch) -> None:
@@ -501,11 +598,27 @@ def test_every_typed_downstream_break_rearms(tmp_path, monkeypatch, stage) -> No
             (_ for _ in ()).throw(ValueError("reporting break"))
         ))
     with pytest.raises(Exception):
+        def rollback_handler(observed_trigger):
+            rearm = module.rearm_generic_live_v1_session(
+                state_path=tmp_path / "rearm.json",
+                preflight_hash=submitted["preflight_hash"],
+                plan_hash=submitted["plan_hash"],
+                rearmed_at="2026-08-19T22:00:00+00:00",
+                trigger=observed_trigger,
+            )
+            return {
+                "status": "ROLLED_BACK_ARMED", "trigger": observed_trigger,
+                "paper_bytes_unchanged": True, "cron_exact_line_removed": True,
+                "rearm_hash": rearm["content_hash"],
+                "config_action": "RESTORED_BACKUP",
+            }
+
         finalize_generic_live_v1_posttrade(
             submission_result=submitted, exact_plan=plan, order_lifecycle=order,
             reconciliation={}, journal_entries=[], performance={}, dashboard_projection={},
             finalized_at="2026-08-19T22:00:00+00:00",
             rearm_state_path=tmp_path / "rearm.json", result_path=tmp_path / "posttrade.json",
+            rollback_handler=rollback_handler,
         )
     assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == trigger
 
