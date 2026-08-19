@@ -1,0 +1,60 @@
+{
+  "activation_authority": false,
+  "active_runtime": {
+    "active_checkout_clean": true,
+    "active_head": "20743ad2b25217d0a236d10a0f64f0430288c744",
+    "config_deployed_sha_pin": "2d12a3c86e27c175319b226e9ff745f197da71a8",
+    "config_source_pin_matches_active_head": false,
+    "generic_cron_entry_count": 1,
+    "generic_gate_status": "ARMED",
+    "generic_posttrade_observation_enabled": false,
+    "generic_schedule_enabled": false,
+    "generic_submit_approved": false,
+    "legacy_kill_switch_status": "ARMED"
+  },
+  "broker_call_performed": false,
+  "broker_write_performed": false,
+  "content_hash": "507d7787d8e751343c8421c86f482b891e999b3bb3f1fd1cf71f228d8b66d377",
+  "deployed_at": "2026-08-19T07:29:07.282913Z",
+  "deployed_sha": "20743ad2b25217d0a236d10a0f64f0430288c744",
+  "deployment_authority": false,
+  "deployment_mode": "DISABLED_SOURCE_ONLY",
+  "factual_activation_status": "NO_GO_PENDING_FUTURE_EVIDENCE_AND_OWNER_APPROVALS",
+  "file_hashes": {
+    "active_deploy_state_sha256": "79af809c63eeb2c7222006e90c60221e52e1e7f5b08a29e969df33167086e42e",
+    "generic_config_sha256": "86fc1cd75b3dcd2d002aa7ce7bd2d433f6fdd5f4628e6178c86bc420fdd2779e",
+    "generic_gate_state_sha256": "7986d332b19ad2d386838a32ec676baff12d059a0b5daa80874365c8e7a62cda",
+    "legacy_live_env_sha256": "3896bec8adc485a136f1d636fad2b37e6a45c0fcbc86f8095c827ff6d62a3597",
+    "user_crontab_sha256": "6500fad56880668df23736eebc8cf980149d72b9f1e771c301ec946b5f1ed7e5"
+  },
+  "implementation_review": {
+    "known_implementation_blockers": [],
+    "p0_1_implementation_status": "CLOSED",
+    "replacement_owner_chain_attack": "REJECTED",
+    "reviewed_sha": "20743ad2b25217d0a236d10a0f64f0430288c744",
+    "source_only_verdict": "GO",
+    "future_dated_owner_attack": "REJECTED"
+  },
+  "next_required_inputs": [
+    "BRETT_APPROVAL_OF_EXACT_LYRA_GOVERNED_EVIDENCE_POLICY_PROPOSAL",
+    "BRETT_APPROVAL_OF_SUPERSEDING_2026_08_25_LIVE_SESSION_OWNER_DECISION",
+    "COMPLETED_2026_08_24_GOVERNED_CLOSE_AND_WEEKLY_LYRA_TARGET",
+    "IMMUTABLE_2026_08_25_PRECOMPUTE_AND_CAPTURE",
+    "FRESH_LIVE_ACCOUNT_OBSERVATION",
+    "EXACT_LYRA_ONLY_V4_PLAN",
+    "RAW_SOURCE_REPRODUCTION_PROOF",
+    "ALL_GREEN_OPERATIONAL_PREFLIGHT"
+  ],
+  "order_submitted": false,
+  "paper_authority_changed": false,
+  "schema_version": "caerus.generic_lyra_v2_source_deployment.v1",
+  "source_ref": "origin/main",
+  "validation": {
+    "independent_execution_adjacent_tests_passed": 84,
+    "producer_branch_tests_passed": 163,
+    "vm_deploy_operational_checks_passed": 6,
+    "vm_deploy_targeted_tests_passed": 35,
+    "vm_deploy_tests_passed": 138,
+    "vm_validation_status": "PASS"
+  }
+}

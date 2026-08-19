@@ -1414,6 +1414,18 @@ Its risk, liquidity, capacity, XNYS-calendar, and canonical full-L1 turnover
 terms cannot enter a READY capture until Brett approves this exact proposal in
 a separate immutable owner-decision artifact.
 
+The complete prospective producer and activation binding is deployed as
+disabled source at exact SHA `20743ad2b25217d0a236d10a0f64f0430288c744`.
+Independent adversarial review found no remaining implementation blocker: raw
+source bytes, XNYS chronology, owner-policy causality, full-L1 turnover,
+preflight v4, and submission revalidation all fail closed. Deployment evidence
+is sealed at
+[`generic_lyra_v2_source_deployment_2026-08-19.json`](../evidence/generic_lyra_v2_source_deployment_2026-08-19.json),
+content hash
+`507d7787d8e751343c8421c86f482b891e999b3bb3f1fd1cf71f228d8b66d377`.
+Actual activation remains blocked on future facts and explicit owner actions,
+not on additional source implementation.
+
 The adaptive policy choice is now concrete rather than implicit. Candidate
 hash `0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`
 selects only registry/deployment-approved Shadow sleeves that pass 60-session,
