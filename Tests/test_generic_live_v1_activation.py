@@ -108,7 +108,7 @@ def _plan(decision: dict) -> dict:
             "capital_ceiling": 460.0,
         },
         "execution_policy": {
-            "policy_id": "generic-live-v1-execution", "order_type": "market",
+            "policy_id": "generic-live-v1-execution", "order_type": "limit",
             "time_in_force": "day", "allow_extended_hours": False,
             "allow_fractional_shares": False, "quantity_precision": 0,
             "price_precision": 4, "minimum_order_notional_usd": 100.0,

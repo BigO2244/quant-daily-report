@@ -182,10 +182,23 @@ def _valid_plan(
         blockers.append("EXACT_V4_PLAN_WRONG_SESSION")
     if plan.get("account_id_hash") != account_id_hash:
         blockers.append("EXACT_V4_PLAN_ACCOUNT_PIN_MISMATCH")
+    if plan.get("broker_environment") != "alpaca_live":
+        blockers.append("EXACT_V4_PLAN_BROKER_ENVIRONMENT_DIFFERS")
     deployable = float(plan.get("deployable_capital", math.inf))
     if not math.isfinite(deployable) or deployable > effective_capital + 0.01:
         blockers.append("EXACT_V4_PLAN_CAPITAL_CEILING_EXCEEDED")
     orders = [*plan.get("sell_orders", []), *plan.get("buy_orders", [])]
+    constraints = plan.get("constraints") or {}
+    required_execution_policy = {
+        "order_type": "limit", "time_in_force": "day",
+        "allow_extended_hours": False, "allow_fractional_shares": False,
+        "quantity_precision": 0, "minimum_order_notional_usd": 100.0,
+        "maximum_order_notional_usd": 437.0,
+        "maximum_total_buy_notional_usd": 437.0, "maximum_orders": 1,
+        "price_precision": 4, "max_adverse_slippage_bps": 25.0,
+    }
+    if any(constraints.get(key) != value for key, value in required_execution_policy.items()):
+        blockers.append("EXACT_V4_PLAN_EXECUTION_POLICY_DIFFERS")
     if len(orders) > 1:
         blockers.append("EXACT_V4_PLAN_ORDER_COUNT_EXCEEDED")
     for order in orders:
@@ -194,6 +207,10 @@ def _valid_plan(
             blockers.append("EXACT_V4_PLAN_NOT_WHOLE_SHARE")
         if float(order.get("notional", 0.0)) + 0.01 < 100.0:
             blockers.append("EXACT_V4_PLAN_BELOW_MINIMUM_TRADE")
+        if order.get("order_type") != "limit" or order.get("time_in_force") != "day" or order.get("extended_hours") is not False:
+            blockers.append("EXACT_V4_PLAN_ORDER_EXECUTION_SEMANTICS_DIFFER")
+        if float(order.get("quantity", 0.0)) * float(order.get("enforcement_price", math.inf)) + 0.01 > 437.0 + 1e-9:
+            blockers.append("EXACT_V4_PLAN_LIMIT_PRICE_BREACHES_GROSS_CAP")
         contributions = order.get("sleeve_contributions")
         if not isinstance(contributions, list) or not contributions:
             blockers.append("EXACT_V4_PLAN_SLEEVE_LINEAGE_MISSING")

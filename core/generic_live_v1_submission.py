@@ -16,6 +16,7 @@ import json
 import math
 import os
 import fcntl
+import time
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
@@ -25,12 +26,14 @@ from core.generic_live_v1_activation import validate_generic_live_v1_activation_
 from core.accounting_journal import validate_accounting_journal
 from core.lane_performance import validate_lane_performance
 from core.lane_reconciliation import validate_lane_reconciliation
+from core.lane_oms import build_lane_oms_intents
 from core.lane_truth_status import validate_dashboard_performance_surfaces
 
 
 GENERIC_LIVE_V1_SUBMISSION_RESULT_SCHEMA = "caerus.generic_live_v1_submission_result.v1"
 GENERIC_LIVE_V1_REARM_SCHEMA = "caerus.generic_live_v1_rearm.v1"
 GENERIC_LIVE_V1_POSTTRADE_RESULT_SCHEMA = "caerus.generic_live_v1_posttrade_result.v1"
+GENERIC_LIVE_V1_ORDER_LIFECYCLE_SCHEMA = "caerus.generic_live_v1_order_lifecycle.v1"
 
 
 class GenericLiveV1SubmissionError(RuntimeError):
@@ -45,13 +48,34 @@ class GenericLiveV1Broker(Protocol):
     def get_asset(self, symbol: str) -> Mapping[str, Any] | None: ...
     def find_order_by_client_id(self, client_id: str) -> Mapping[str, Any] | None: ...
 
-    def submit_generic_live_v4_market_order(self, **kwargs: Any) -> Mapping[str, Any]: ...
+    def submit_generic_live_v4_limit_order(self, **kwargs: Any) -> Mapping[str, Any]: ...
+    def cancel_generic_live_v4_order(self, **kwargs: Any) -> None: ...
+    def get_order(self, order_id: str) -> Mapping[str, Any] | None: ...
 
 
 def _hash(payload: Mapping[str, Any]) -> str:
     body = copy.deepcopy(dict(payload))
     body.pop("content_hash", None)
     return hashlib.sha256(canonical_json(body).encode("utf-8")).hexdigest()
+
+
+def _validate_submission_result(payload: Mapping[str, Any]) -> dict[str, Any]:
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("schema_version") != GENERIC_LIVE_V1_SUBMISSION_RESULT_SCHEMA
+        or payload.get("content_hash") != _hash(payload)
+    ):
+        raise GenericLiveV1SubmissionError("generic Live v1 submission result is invalid")
+    seed_body = copy.deepcopy(dict(payload))
+    seed_body.pop("content_hash", None)
+    seed_body["result_id"] = "pending"
+    expected_id = (
+        f"generic-live-v1-result:{payload.get('effective_session')}:"
+        f"{_hash(seed_body)[:24]}"
+    )
+    if payload.get("result_id") != expected_id:
+        raise GenericLiveV1SubmissionError("generic Live v1 submission result identity differs")
+    return copy.deepcopy(dict(payload))
 
 
 def _timestamp(value: str) -> tuple[str, dt.datetime]:
@@ -64,9 +88,56 @@ def _timestamp(value: str) -> tuple[str, dt.datetime]:
     return str(value), parsed
 
 
-def _stable_client_id(plan_hash: str, order_id: str) -> str:
-    seed = hashlib.sha256(f"{plan_hash}:{order_id}".encode("utf-8")).hexdigest()
-    return f"caerus-v4-{seed[:32]}"
+def _mutation_context(
+    *, preflight: Mapping[str, Any], plan: Mapping[str, Any], order: Mapping[str, Any]
+) -> dict[str, Any]:
+    body = {
+        "schema_version": "caerus.generic_live_v1_mutation_context.v1",
+        "effective_session": preflight["effective_session"],
+        "owner_decision_hash": preflight["owner_decision_hash"],
+        "preflight_hash": preflight["content_hash"],
+        "plan_hash": plan["content_hash"],
+        "execution_policy_hash": plan["execution_policy_hash"],
+        "account_id_hash": preflight["account_id_hash"],
+        "deployed_sha": preflight["deployed_sha"],
+        "order_id": order["order_id"],
+        "client_order_id": order["client_order_id"],
+        "symbol": order["symbol"],
+        "side": order["side"],
+        "quantity": float(order["quantity"]),
+        "order_type": "limit",
+        "time_in_force": "day",
+        "extended_hours": False,
+        "allow_fractional_shares": False,
+        "quantity_precision": 0,
+        "limit_price": float(order["enforcement_price"]),
+        "max_fee_usd": 0.01,
+        "maximum_gross_usd": 437.0,
+    }
+    body["content_hash"] = _hash(body)
+    body["capability_signature"] = _GENERIC_LIVE_V4_CAPABILITY.sign(body["content_hash"])
+    return body
+
+
+def _validate_owner_execution_policy(plan: Mapping[str, Any]) -> None:
+    if plan.get("broker_environment") != "alpaca_live":
+        raise GenericLiveV1SubmissionError("exact plan broker environment is not Alpaca Live")
+    constraints = plan["constraints"]
+    required = {
+        "order_type": "limit", "time_in_force": "day",
+        "allow_extended_hours": False, "allow_fractional_shares": False,
+        "quantity_precision": 0, "minimum_order_notional_usd": 100.0,
+        "maximum_order_notional_usd": 437.0,
+        "maximum_total_buy_notional_usd": 437.0, "maximum_orders": 1,
+        "price_precision": 4, "max_adverse_slippage_bps": 25.0,
+    }
+    if any(constraints.get(key) != value for key, value in required.items()):
+        raise GenericLiveV1SubmissionError("exact plan execution policy differs from Live v1")
+    for order in [*plan["sell_orders"], *plan["buy_orders"]]:
+        if order["order_type"] != "limit" or order["time_in_force"] != "day" or order["extended_hours"] is not False:
+            raise GenericLiveV1SubmissionError("exact order is not DAY limit/no-extended")
+        if float(order["quantity"]) * float(order["enforcement_price"]) + 0.01 > 437.0 + 1e-9:
+            raise GenericLiveV1SubmissionError("exact limit plus maximum fee breaches $437")
 
 
 def _write_exclusive(path: Path, payload: Mapping[str, Any]) -> None:
@@ -188,9 +259,9 @@ def _safe_broker_order(order: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "broker_order_id": str(order.get("id") or ""),
         "broker_client_order_id": str(order.get("client_order_id") or ""),
-        "broker_status": str(order.get("status") or ""),
-        "symbol": str(order.get("symbol") or ""),
-        "side": str(order.get("side") or ""),
+        "broker_status": str(order.get("status") or "").strip().lower().split(".")[-1],
+        "symbol": str(order.get("symbol") or "").strip().upper(),
+        "side": str(order.get("side") or "").strip().upper().split(".")[-1],
         "quantity": str(order.get("qty") or order.get("quantity") or ""),
     }
 
@@ -274,8 +345,9 @@ def _validate_recovered_order(
 
 
 def _validate_existing_receipt(
-    path: Path, *, intent_hash: str, client_id: str, broker_order: Mapping[str, Any]
-) -> None:
+    path: Path, *, intent_hash: str, client_id: str, broker_order: Mapping[str, Any],
+    mutation_context_hash: str,
+) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -284,11 +356,14 @@ def _validate_existing_receipt(
         raise GenericLiveV1SubmissionError("existing broker receipt schema differs")
     if payload.get("content_hash") != _hash(payload) or payload.get("intent_hash") != intent_hash:
         raise GenericLiveV1SubmissionError("existing broker receipt hash/intent differs")
+    if payload.get("mutation_context_hash") != mutation_context_hash:
+        raise GenericLiveV1SubmissionError("existing broker receipt mutation context differs")
     recorded = payload.get("broker_order")
     if not isinstance(recorded, Mapping) or recorded.get("broker_client_order_id") != client_id:
         raise GenericLiveV1SubmissionError("existing broker receipt client id differs")
     if recorded.get("broker_order_id") != str(broker_order.get("id") or ""):
         raise GenericLiveV1SubmissionError("existing broker receipt order id differs")
+    return copy.deepcopy(dict(payload))
 
 
 def execute_generic_live_v1_session(
@@ -301,6 +376,8 @@ def execute_generic_live_v1_session(
     wal_directory: Path | str | None = None,
     rearm_state_path: Path | str | None = None,
     result_path: Path | str | None = None,
+    poll_attempts: int = 3,
+    poll_interval_seconds: float = 1.0,
 ) -> dict[str, Any]:
     """Validate/dry-run or execute one exact session, then always re-arm."""
 
@@ -320,6 +397,11 @@ def execute_generic_live_v1_session(
     orders = [*exact_plan["sell_orders"], *exact_plan["buy_orders"]]
     if len(orders) > 1:
         raise GenericLiveV1SubmissionError("owner-approved Live v1 permits at most one order")
+    _validate_owner_execution_policy(exact_plan)
+    if type(poll_attempts) is not int or poll_attempts < 1 or poll_attempts > 10:
+        raise GenericLiveV1SubmissionError("poll_attempts must be in [1, 10]")
+    if not math.isfinite(float(poll_interval_seconds)) or not 0.0 <= float(poll_interval_seconds) <= 5.0:
+        raise GenericLiveV1SubmissionError("poll_interval_seconds must be in [0, 5]")
     effective_capital = min(460.0, float(preflight["observed_equity_usd"]))
     if float(exact_plan["deployable_capital"]) > effective_capital + 0.01:
         raise GenericLiveV1SubmissionError("exact plan exceeds effective account capital ceiling")
@@ -356,8 +438,11 @@ def execute_generic_live_v1_session(
             **base,
             "status": "VALIDATED_NO_WRITE",
             "reason_codes": ["EXPLICIT_SUBMISSION_NOT_ENABLED"],
-            "client_order_id": _stable_client_id(exact_plan["content_hash"], orders[0]["order_id"]) if orders else None,
+            "exact_order_id": orders[0]["order_id"] if orders else None,
+            "client_order_id": orders[0]["client_order_id"] if orders else None,
             "intent_hash": None,
+            "mutation_context_hash": None,
+            "receipt_hash": None,
             "broker_order": None,
             "broker_lookup_performed": False,
             "broker_submission_performed": False,
@@ -397,6 +482,8 @@ def execute_generic_live_v1_session(
             _atomic_rearm(rearm_path, rearm_payload)
             broker_order = None
             intent_hash = None
+            mutation_context_hash = None
+            receipt_hash = None
             client_id = None
             lookup = False
             submitted = False
@@ -405,27 +492,16 @@ def execute_generic_live_v1_session(
         else:
             order = orders[0]
             quantity = float(order["quantity"])
-            notional = float(order["notional"])
+            notional = float(order["quantity"]) * float(order["enforcement_price"]) + 0.01
             if not math.isfinite(quantity) or quantity <= 0 or abs(quantity - round(quantity)) > 1e-9:
                 raise GenericLiveV1SubmissionError("submission order is not whole-share")
             if not math.isfinite(notional) or notional < 100.0 or notional > 437.0:
                 raise GenericLiveV1SubmissionError("submission order breaches $100-$437 bound")
-            client_id = _stable_client_id(exact_plan["content_hash"], order["order_id"])
-            intent = {
-                "schema_version": "caerus.generic_live_v1_wal_intent.v1",
-                "created_at": executed_raw,
-                "effective_session": preflight["effective_session"],
-                "account_id_hash": preflight["account_id_hash"],
-                "preflight_hash": preflight["content_hash"],
-                "plan_hash": exact_plan["content_hash"],
-                "order_id": order["order_id"],
-                "client_order_id": client_id,
-                "symbol": order["symbol"],
-                "side": order["side"],
-                "quantity": quantity,
-                "estimated_notional": notional,
-            }
-            intent["content_hash"] = _hash(intent)
+            client_id = str(order["client_order_id"])
+            intents = build_lane_oms_intents(exact_plan)
+            if len(intents) != 1 or intents[0]["order_id"] != order["order_id"]:
+                raise GenericLiveV1SubmissionError("exact plan did not produce one exact OMS intent")
+            intent = intents[0]
             intent_hash = intent["content_hash"]
             intent_path = wal_root / f"intent-{client_id}.json"
             _write_exclusive(intent_path, intent)
@@ -433,61 +509,97 @@ def execute_generic_live_v1_session(
             existing = broker.find_order_by_client_id(client_id)
             lookup = True
             if existing is None:
-                existing = broker.submit_generic_live_v4_market_order(
+                context = _mutation_context(preflight=preflight, plan=exact_plan, order=order)
+                existing = broker.submit_generic_live_v4_limit_order(
                     symbol=order["symbol"], qty=quantity, side=order["side"],
-                    client_order_id=client_id, estimated_notional=notional, tif="day",
+                    client_order_id=client_id, limit_price=float(order["enforcement_price"]),
+                    max_fee_usd=0.01, mutation_context=context, tif="day",
                     _generic_live_v4_capability=_GENERIC_LIVE_V4_CAPABILITY,
                 )
                 submitted = True
-                broker_status = _validate_recovered_order(
-                    existing, client_id=client_id, symbol=order["symbol"],
-                    side=order["side"], quantity=quantity,
-                )
-                accepted_statuses = {
-                    "accepted", "new", "pending_new", "filled",
-                    "accepted_for_bidding", "held",
-                }
-                if broker_status not in accepted_statuses:
-                    failure_trigger = "ORDER_BREAK"
-                    raise GenericLiveV1SubmissionError(
-                        f"broker order returned terminal/unknown status: {broker_status or 'missing'}"
-                    )
-                status = "SUBMITTED_REARMED"
-                reasons = ["EXACT_V4_ORDER_SUBMITTED"]
             else:
+                submitted = False
+                context = _mutation_context(preflight=preflight, plan=exact_plan, order=order)
+            mutation_context_hash = context["content_hash"]
+            broker_status = _validate_recovered_order(
+                existing, client_id=client_id, symbol=order["symbol"],
+                side=order["side"], quantity=quantity,
+            )
+            failure_trigger = "ORDER_BREAK"
+            broker_order_id = str(existing.get("id") or "")
+            open_statuses = {"accepted", "new", "pending_new", "accepted_for_bidding", "held"}
+            terminal_break_statuses = {"canceled", "cancelled", "rejected", "expired", "stopped", "suspended"}
+            for attempt in range(poll_attempts):
+                if broker_status == "filled" or broker_status in terminal_break_statuses or broker_status == "partially_filled":
+                    break
+                if broker_status not in open_statuses:
+                    failure_trigger = "ORDER_BREAK"
+                    raise GenericLiveV1SubmissionError(f"broker order status is unknown: {broker_status or 'missing'}")
+                if attempt + 1 < poll_attempts and poll_interval_seconds:
+                    time.sleep(float(poll_interval_seconds))
+                refreshed = broker.get_order(broker_order_id)
+                if refreshed is None:
+                    failure_trigger = "ORDER_BREAK"
+                    raise GenericLiveV1SubmissionError("broker order disappeared during lifecycle poll")
+                existing = refreshed
                 broker_status = _validate_recovered_order(
                     existing, client_id=client_id, symbol=order["symbol"],
                     side=order["side"], quantity=quantity,
                 )
-                if broker_status not in {
-                    "accepted", "new", "pending_new", "filled",
-                    "accepted_for_bidding", "held",
-                }:
+            cancel_performed = False
+            if broker_status in open_statuses or broker_status == "partially_filled":
+                broker.cancel_generic_live_v4_order(
+                    broker_order_id=broker_order_id, mutation_context=context,
+                    _generic_live_v4_capability=_GENERIC_LIVE_V4_CAPABILITY,
+                )
+                cancel_performed = True
+                refreshed = broker.get_order(broker_order_id)
+                if refreshed is None:
                     failure_trigger = "ORDER_BREAK"
-                    raise GenericLiveV1SubmissionError(
-                        f"recovered broker order has terminal/partial/unknown status: {broker_status or 'missing'}"
-                    )
-                submitted = False
-                status = "RECOVERED_EXISTING_REARMED"
-                reasons = ["EXISTING_CLIENT_ORDER_RECOVERED_NO_RESUBMIT"]
+                    raise GenericLiveV1SubmissionError("broker order missing after cancellation")
+                existing = refreshed
+                broker_status = _validate_recovered_order(
+                    existing, client_id=client_id, symbol=order["symbol"],
+                    side=order["side"], quantity=quantity,
+                )
+            filled_quantity = float(existing.get("filled_qty") or (quantity if broker_status == "filled" else 0.0))
+            if broker_status == "filled" and abs(filled_quantity - quantity) <= 1e-9:
+                status = "FILLED_REARMED" if submitted else "RECOVERED_FILLED_REARMED"
+                reasons = ["EXACT_V4_ORDER_FILLED"] if submitted else ["EXISTING_FILLED_ORDER_RECOVERED_NO_RESUBMIT"]
+            elif broker_status in terminal_break_statuses or broker_status == "partially_filled":
+                failure_trigger = "ORDER_BREAK"
+                status = "ORDER_BREAK_REARMED"
+                reasons = ["PARTIAL_OR_TERMINAL_ORDER_REQUIRES_RECONCILIATION"]
+            else:
+                failure_trigger = "ORDER_BREAK"
+                raise GenericLiveV1SubmissionError("broker order did not reach a safe terminal state")
             broker_order = _safe_broker_order(existing)
             receipt = {
                 "schema_version": "caerus.generic_live_v1_broker_receipt.v1",
                 "recorded_at": executed_raw,
                 "intent_hash": intent_hash,
+                "mutation_context_hash": mutation_context_hash,
                 "broker_order": broker_order,
                 "submission_performed": submitted,
             }
             receipt["content_hash"] = _hash(receipt)
+            receipt_hash = receipt["content_hash"]
             receipt_path = wal_root / f"receipt-{client_id}.json"
             if not receipt_path.exists():
                 _write_exclusive(receipt_path, receipt)
             else:
-                _validate_existing_receipt(
+                receipt = _validate_existing_receipt(
                     receipt_path, intent_hash=intent_hash,
                     client_id=client_id, broker_order=existing,
+                    mutation_context_hash=mutation_context_hash,
                 )
-            _atomic_rearm(rearm_path, rearm_payload)
+                receipt_hash = receipt["content_hash"]
+            terminal_rearm = _rearm(
+                preflight_hash=preflight["content_hash"], plan_hash=exact_plan["content_hash"],
+                executed_at=executed_raw,
+                trigger="ORDER_BREAK" if status == "ORDER_BREAK_REARMED" else "SESSION_COMPLETE",
+            )
+            _atomic_rearm(rearm_path, terminal_rearm)
     except Exception:
         failure_rearm = _rearm(
             preflight_hash=preflight["content_hash"], plan_hash=exact_plan["content_hash"],
@@ -507,11 +619,17 @@ def execute_generic_live_v1_session(
         **base,
         "status": status,
         "reason_codes": reasons,
+        "exact_order_id": orders[0]["order_id"] if orders else None,
         "client_order_id": client_id,
         "intent_hash": intent_hash,
+        "mutation_context_hash": mutation_context_hash,
+        "receipt_hash": receipt_hash,
         "broker_order": broker_order,
         "broker_lookup_performed": lookup,
         "broker_submission_performed": submitted,
+        "order_lifecycle_status": broker_status if orders else "no_trade",
+        "filled_quantity": filled_quantity if orders else 0.0,
+        "cancel_performed": cancel_performed if orders else False,
         "wal_written": bool(orders),
         "rearm_written": True,
         "result_written": True,
@@ -524,32 +642,194 @@ def execute_generic_live_v1_session(
     return body
 
 
+def seal_generic_live_v1_order_lifecycle(
+    *, submission_result: Mapping[str, Any], observed_at: str,
+    broker_order_evidence_hash: str | None,
+    broker_fill_evidence_hashes: list[str],
+) -> dict[str, Any]:
+    """Seal exact terminal broker evidence already captured by submission/recovery."""
+
+    submission_result = _validate_submission_result(submission_result)
+    observed_raw, _ = _timestamp(observed_at)
+    if not isinstance(broker_fill_evidence_hashes, list) or any(
+        not isinstance(value, str) or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+        for value in broker_fill_evidence_hashes
+    ) or len(set(broker_fill_evidence_hashes)) != len(broker_fill_evidence_hashes):
+        raise GenericLiveV1SubmissionError("order lifecycle fill evidence hashes are invalid")
+    submission_status = submission_result.get("status")
+    broker = submission_result.get("broker_order")
+    if submission_status == "NO_TRADE_REARMED":
+        lifecycle_status = "NO_TRADE"
+        broker_order_id = symbol = side = None
+        planned_quantity = filled_quantity = 0.0
+    elif submission_status in {
+        "FILLED_REARMED", "RECOVERED_FILLED_REARMED", "ORDER_BREAK_REARMED"
+    } and isinstance(broker, Mapping):
+        broker_status = str(broker.get("broker_status") or "").lower()
+        filled_quantity = float(submission_result.get("filled_quantity") or 0.0)
+        planned_quantity = float(broker.get("quantity") or 0.0)
+        if submission_status in {"FILLED_REARMED", "RECOVERED_FILLED_REARMED"}:
+            lifecycle_status = "FILLED"
+        elif broker_status in {"rejected"}:
+            lifecycle_status = "REJECTED"
+        elif broker_status in {"expired"}:
+            lifecycle_status = "EXPIRED"
+        elif filled_quantity > 0.0:
+            lifecycle_status = "PARTIAL_CANCELED"
+        else:
+            lifecycle_status = "CANCELED"
+        broker_order_id = str(broker.get("broker_order_id") or "")
+        symbol = str(broker.get("symbol") or "").upper()
+        side = str(broker.get("side") or "").upper()
+    else:
+        raise GenericLiveV1SubmissionError("dry-run/nonterminal submission cannot become posttrade evidence")
+    if (filled_quantity > 0.0) is not bool(broker_fill_evidence_hashes):
+        raise GenericLiveV1SubmissionError("fill quantity and broker fill evidence differ")
+    if lifecycle_status == "NO_TRADE":
+        if broker_order_evidence_hash is not None:
+            raise GenericLiveV1SubmissionError("no-trade lifecycle cannot carry broker order evidence")
+    elif (
+        not isinstance(broker_order_evidence_hash, str)
+        or len(broker_order_evidence_hash) != 64
+        or any(character not in "0123456789abcdef" for character in broker_order_evidence_hash)
+    ):
+        raise GenericLiveV1SubmissionError("broker order evidence hash is invalid")
+    body = {
+        "schema_version": GENERIC_LIVE_V1_ORDER_LIFECYCLE_SCHEMA,
+        "lifecycle_id": "pending",
+        "status": lifecycle_status,
+        "observed_at": observed_raw,
+        "submission_result_hash": submission_result["content_hash"],
+        "preflight_hash": submission_result["preflight_hash"],
+        "plan_hash": submission_result["plan_hash"],
+        "account_id_hash": submission_result["account_id_hash"],
+        "lane_id": "generic-live-v1",
+        "exact_order_id": submission_result.get("exact_order_id"),
+        "client_order_id": submission_result.get("client_order_id"),
+        "broker_order_id": broker_order_id,
+        "broker_order_evidence_hash": broker_order_evidence_hash,
+        "receipt_hash": submission_result.get("receipt_hash"),
+        "mutation_context_hash": submission_result.get("mutation_context_hash"),
+        "symbol": symbol,
+        "side": side,
+        "planned_quantity": planned_quantity,
+        "filled_quantity": filled_quantity,
+        "broker_fill_evidence_hashes": sorted(broker_fill_evidence_hashes),
+        "cancel_performed": bool(submission_result.get("cancel_performed", False)),
+    }
+    seed = _hash(body)
+    body["lifecycle_id"] = f"generic-live-v1-order:{submission_result['effective_session']}:{seed[:24]}"
+    body["content_hash"] = _hash(body)
+    return _validate_order_lifecycle(body, submission_result=submission_result)
+
+
 def _validate_order_lifecycle(
     payload: Mapping[str, Any], *, submission_result: Mapping[str, Any]
 ) -> dict[str, Any]:
     fields = {
-        "schema_version", "status", "observed_at", "submission_result_hash",
-        "plan_hash", "account_id_hash", "lane_id", "broker_order_id",
-        "filled_quantity", "content_hash",
+        "schema_version", "lifecycle_id", "status", "observed_at",
+        "submission_result_hash", "preflight_hash", "plan_hash",
+        "account_id_hash", "lane_id", "exact_order_id", "client_order_id",
+        "broker_order_id", "receipt_hash", "mutation_context_hash", "symbol",
+        "broker_order_evidence_hash",
+        "side", "planned_quantity", "filled_quantity",
+        "broker_fill_evidence_hashes", "cancel_performed", "content_hash",
     }
     if not isinstance(payload, Mapping) or set(payload) != fields:
         raise GenericLiveV1SubmissionError("order lifecycle artifact fields are invalid")
-    if payload.get("schema_version") != "caerus.generic_live_v1_order_lifecycle.v1":
+    if payload.get("schema_version") != GENERIC_LIVE_V1_ORDER_LIFECYCLE_SCHEMA:
         raise GenericLiveV1SubmissionError("order lifecycle schema differs")
     _timestamp(str(payload["observed_at"]))
     if payload.get("content_hash") != _hash(payload):
         raise GenericLiveV1SubmissionError("order lifecycle content_hash mismatch")
-    if payload.get("submission_result_hash") != submission_result["content_hash"] or payload.get("plan_hash") != submission_result["plan_hash"]:
+    identity_body = copy.deepcopy(dict(payload))
+    identity_body.pop("content_hash", None)
+    identity_body["lifecycle_id"] = "pending"
+    expected_id = (
+        f"generic-live-v1-order:{submission_result['effective_session']}:"
+        f"{_hash(identity_body)[:24]}"
+    )
+    if payload.get("lifecycle_id") != expected_id:
+        raise GenericLiveV1SubmissionError("order lifecycle identity differs")
+    if (
+        payload.get("submission_result_hash") != submission_result["content_hash"]
+        or payload.get("preflight_hash") != submission_result["preflight_hash"]
+        or payload.get("plan_hash") != submission_result["plan_hash"]
+    ):
         raise GenericLiveV1SubmissionError("order lifecycle submission/plan lineage differs")
     if payload.get("account_id_hash") != submission_result["account_id_hash"] or payload.get("lane_id") != "generic-live-v1":
         raise GenericLiveV1SubmissionError("order lifecycle account/lane scope differs")
-    if payload.get("status") not in {"FILLED", "NO_TRADE"}:
-        raise GenericLiveV1SubmissionError("order lifecycle is not terminal green")
+    if payload.get("status") not in {
+        "FILLED", "PARTIAL_CANCELED", "REJECTED", "CANCELED", "EXPIRED", "NO_TRADE"
+    }:
+        raise GenericLiveV1SubmissionError("order lifecycle is not a known terminal state")
+    hashes = payload.get("broker_fill_evidence_hashes")
+    if not isinstance(hashes, list) or hashes != sorted(set(hashes)) or any(
+        not isinstance(value, str) or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+        for value in hashes
+    ):
+        raise GenericLiveV1SubmissionError("order lifecycle fill hashes are invalid")
     if payload["status"] == "FILLED":
-        if not payload.get("broker_order_id") or float(payload.get("filled_quantity") or 0.0) <= 0.0:
+        if (
+            submission_result.get("status") not in {"FILLED_REARMED", "RECOVERED_FILLED_REARMED"}
+            or not payload.get("broker_order_id")
+            or float(payload.get("filled_quantity") or 0.0) <= 0.0
+            or float(payload["filled_quantity"]) != float(payload["planned_quantity"])
+        ):
             raise GenericLiveV1SubmissionError("filled order lifecycle evidence is incomplete")
-    elif payload.get("broker_order_id") is not None or float(payload.get("filled_quantity") or 0.0) != 0.0:
-        raise GenericLiveV1SubmissionError("NO_TRADE lifecycle cannot carry a fill")
+    elif payload["status"] == "NO_TRADE":
+        if submission_result.get("status") != "NO_TRADE_REARMED" or any(
+            payload.get(field) is not None
+            for field in (
+                "exact_order_id", "client_order_id", "broker_order_id",
+                "broker_order_evidence_hash", "receipt_hash",
+                "mutation_context_hash", "symbol", "side",
+            )
+        ) or float(payload.get("filled_quantity") or 0.0) != 0.0:
+            raise GenericLiveV1SubmissionError("NO_TRADE lifecycle cannot carry an order/fill")
+    elif submission_result.get("status") != "ORDER_BREAK_REARMED":
+        raise GenericLiveV1SubmissionError("order-break lifecycle differs from submission result")
+    if (float(payload.get("filled_quantity") or 0.0) > 0.0) is not bool(hashes):
+        raise GenericLiveV1SubmissionError("order lifecycle quantity/fill lineage differs")
+    broker = submission_result.get("broker_order")
+    if payload["status"] != "NO_TRADE":
+        expected = {
+            "exact_order_id": submission_result.get("exact_order_id"),
+            "client_order_id": submission_result.get("client_order_id"),
+            "broker_order_id": broker.get("broker_order_id") if isinstance(broker, Mapping) else None,
+            "receipt_hash": submission_result.get("receipt_hash"),
+            "mutation_context_hash": submission_result.get("mutation_context_hash"),
+            "symbol": broker.get("symbol") if isinstance(broker, Mapping) else None,
+            "side": broker.get("side") if isinstance(broker, Mapping) else None,
+            "planned_quantity": float(broker.get("quantity") or 0.0) if isinstance(broker, Mapping) else 0.0,
+            "filled_quantity": float(submission_result.get("filled_quantity") or 0.0),
+            "cancel_performed": bool(submission_result.get("cancel_performed", False)),
+        }
+        if any(payload.get(field) != value for field, value in expected.items()):
+            raise GenericLiveV1SubmissionError("order lifecycle exact submission lineage differs")
+        broker_status = str(broker.get("broker_status") or "").lower()
+        allowed_by_status = {
+            "FILLED": {"filled"},
+            "PARTIAL_CANCELED": {"canceled", "cancelled", "partially_filled"},
+            "REJECTED": {"rejected"},
+            "CANCELED": {"canceled", "cancelled"},
+            "EXPIRED": {"expired"},
+        }
+        if broker_status not in allowed_by_status[payload["status"]]:
+            raise GenericLiveV1SubmissionError("order lifecycle status differs from broker receipt")
+        order_evidence_hash = payload.get("broker_order_evidence_hash")
+        if not isinstance(order_evidence_hash, str) or len(order_evidence_hash) != 64 or any(
+            character not in "0123456789abcdef" for character in order_evidence_hash
+        ):
+            raise GenericLiveV1SubmissionError("order lifecycle broker order evidence hash is invalid")
+        filled = float(payload["filled_quantity"])
+        planned = float(payload["planned_quantity"])
+        if payload["status"] == "PARTIAL_CANCELED" and not (0.0 < filled < planned):
+            raise GenericLiveV1SubmissionError("partial lifecycle quantity is not partial")
+        if payload["status"] in {"REJECTED", "CANCELED", "EXPIRED"} and filled != 0.0:
+            raise GenericLiveV1SubmissionError("zero-fill terminal lifecycle carries a fill")
     return copy.deepcopy(dict(payload))
 
 
@@ -562,27 +842,73 @@ def finalize_generic_live_v1_posttrade(
 ) -> dict[str, Any]:
     """Validate factual typed artifacts; arbitrary booleans/hashes are rejected."""
 
-    if not isinstance(submission_result, Mapping) or submission_result.get("schema_version") != GENERIC_LIVE_V1_SUBMISSION_RESULT_SCHEMA or submission_result.get("content_hash") != _hash(submission_result):
-        raise GenericLiveV1SubmissionError("posttrade submission result is invalid")
+    submission_result = _validate_submission_result(submission_result)
+    if submission_result.get("status") not in {
+        "FILLED_REARMED", "RECOVERED_FILLED_REARMED", "ORDER_BREAK_REARMED",
+        "NO_TRADE_REARMED",
+    }:
+        raise GenericLiveV1SubmissionError("dry-run/nonterminal result cannot enter posttrade")
     if exact_plan.get("content_hash") != submission_result.get("plan_hash") or validate_lane_exact_execution_plan(exact_plan):
         raise GenericLiveV1SubmissionError("posttrade exact plan lineage is invalid")
     finalized_raw, _ = _timestamp(finalized_at)
-    trigger = "SESSION_COMPLETE"
     try:
         order = _validate_order_lifecycle(order_lifecycle, submission_result=submission_result)
     except Exception:
-        trigger = "ORDER_BREAK"
-        raise
-    finally:
-        if trigger != "SESSION_COMPLETE":
+        try:
             rearm_generic_live_v1_session(
                 state_path=rearm_state_path, preflight_hash=submission_result["preflight_hash"],
-                plan_hash=submission_result["plan_hash"], rearmed_at=finalized_raw, trigger=trigger,
+                plan_hash=submission_result["plan_hash"], rearmed_at=finalized_raw,
+                trigger="ORDER_BREAK",
             )
+        finally:
+            raise
+    order_green = order["status"] in {"FILLED", "NO_TRADE"}
     try:
         reconciled = validate_lane_reconciliation(reconciliation, exact_plan=exact_plan)
-        if reconciled["status"] != "PASS" or reconciled["accounting_ready"] is not True:
-            raise GenericLiveV1SubmissionError("reconciliation is not PASS/accounting-ready")
+        if (
+            reconciled["account_id_hash"] != submission_result["account_id_hash"]
+            or reconciled["lane_id"] != "generic-live-v1"
+            or reconciled["plan_hash"] != submission_result["plan_hash"]
+        ):
+            raise GenericLiveV1SubmissionError("reconciliation scope differs from submission")
+        if order["status"] == "FILLED" and (
+            reconciled["status"] != "PASS" or reconciled["accounting_ready"] is not True
+        ):
+            raise GenericLiveV1SubmissionError("filled order is not PASS/accounting-ready")
+        if order["status"] == "PARTIAL_CANCELED" and (
+            reconciled["status"] != "PARTIAL" or reconciled["accounting_ready"] is not True
+        ):
+            raise GenericLiveV1SubmissionError("partial order is not PARTIAL/accounting-ready")
+        if order["status"] in {"REJECTED", "CANCELED", "EXPIRED"} and (
+            reconciled["status"] not in {"REJECTED", "PARTIAL"}
+            or reconciled["accounting_ready"] is not False
+            or reconciled["reconciled_fills"]
+        ):
+            raise GenericLiveV1SubmissionError("zero-fill order break is not exactly reconciled")
+        if order["status"] == "NO_TRADE" and (
+            reconciled["status"] != "PASS" or reconciled["reconciled_fills"]
+        ):
+            raise GenericLiveV1SubmissionError("no-trade session is not exactly reconciled")
+        summaries = reconciled["broker_orders"]
+        if order["status"] == "NO_TRADE":
+            if summaries or reconciled["broker_fills"]:
+                raise GenericLiveV1SubmissionError("no-trade reconciliation carries broker activity")
+        else:
+            if len(summaries) != 1:
+                raise GenericLiveV1SubmissionError("reconciliation does not contain exact broker order")
+            summary = summaries[0]
+            if (
+                summary["order_id"] != order["exact_order_id"]
+                or summary["broker_order_id"] != order["broker_order_id"]
+                or abs(float(summary["filled_quantity"]) - float(order["filled_quantity"])) > 1e-9
+                or sorted(reconciled["source_hashes"]["broker_fills"])
+                != order["broker_fill_evidence_hashes"]
+                or reconciled["source_hashes"]["broker_orders"]
+                != [order["broker_order_evidence_hash"]]
+                or reconciled["source_hashes"]["wal_intents"]
+                != [submission_result["intent_hash"]]
+            ):
+                raise GenericLiveV1SubmissionError("reconciliation order/fill causality differs")
     except Exception:
         rearm_generic_live_v1_session(
             state_path=rearm_state_path, preflight_hash=submission_result["preflight_hash"],
@@ -594,6 +920,8 @@ def finalize_generic_live_v1_posttrade(
         journal = validate_accounting_journal(journal_entries)
         if reconciled["reconciled_fills"] and not journal:
             raise GenericLiveV1SubmissionError("filled reconciliation has no accounting journal")
+        if not reconciled["reconciled_fills"] and journal:
+            raise GenericLiveV1SubmissionError("zero-fill reconciliation cannot create accounting economics")
         if any(
             row["source_hash"] != reconciled["content_hash"]
             or row["account_id_hash"] != submission_result["account_id_hash"]
@@ -625,10 +953,11 @@ def finalize_generic_live_v1_posttrade(
             trigger="REPORTING_BREAK",
         )
         raise
+    final_trigger = "SESSION_COMPLETE" if order_green else "ORDER_BREAK"
     rearm = rearm_generic_live_v1_session(
         state_path=rearm_state_path, preflight_hash=submission_result["preflight_hash"],
         plan_hash=submission_result["plan_hash"], rearmed_at=finalized_raw,
-        trigger="SESSION_COMPLETE",
+        trigger=final_trigger,
     )
     evidence_hashes = sorted([
         order["content_hash"], reconciled["content_hash"],
@@ -636,14 +965,19 @@ def finalize_generic_live_v1_posttrade(
     ])
     body = {
         "schema_version": GENERIC_LIVE_V1_POSTTRADE_RESULT_SCHEMA,
-        "finalized_at": finalized_raw, "status": "GREEN_REARMED",
-        "reason_codes": ["ALL_TYPED_POSTTRADE_ARTIFACTS_GREEN"],
+        "finalized_at": finalized_raw,
+        "status": "GREEN_REARMED" if order_green else "ROLLBACK_REQUIRED_REARMED",
+        "reason_codes": [
+            "ALL_TYPED_POSTTRADE_ARTIFACTS_GREEN" if order_green
+            else "TERMINAL_ORDER_BREAK_RECONCILED_ACCOUNTED_AND_REPORTED"
+        ],
         "submission_result_hash": submission_result["content_hash"],
         "preflight_hash": submission_result["preflight_hash"],
         "plan_hash": submission_result["plan_hash"],
         "evidence_hashes": evidence_hashes, "rearm_hash": rearm["content_hash"],
         "generic_kill_switch_state": "ARMED", "legacy_executor_enabled": False,
         "paper_cutover_enabled": False, "broker_submission_allowed": False,
+        "rollback_required": not order_green,
     }
     body["content_hash"] = _hash(body)
     _write_exclusive(Path(result_path), body)
@@ -651,7 +985,8 @@ def finalize_generic_live_v1_posttrade(
 
 
 __all__ = [
+    "GENERIC_LIVE_V1_ORDER_LIFECYCLE_SCHEMA",
     "GENERIC_LIVE_V1_SUBMISSION_RESULT_SCHEMA", "GenericLiveV1SubmissionError",
     "execute_generic_live_v1_session", "finalize_generic_live_v1_posttrade",
-    "rearm_generic_live_v1_session",
+    "rearm_generic_live_v1_session", "seal_generic_live_v1_order_lifecycle",
 ]

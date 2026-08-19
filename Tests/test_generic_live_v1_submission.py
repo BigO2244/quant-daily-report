@@ -10,8 +10,10 @@ from core.generic_live_v1_submission import (
     GenericLiveV1SubmissionError,
     execute_generic_live_v1_session,
     finalize_generic_live_v1_posttrade,
+    seal_generic_live_v1_order_lifecycle,
 )
 from authority.lane_exact_plan import canonical_json
+from brokers.alpaca_broker import _GENERIC_LIVE_V4_CAPABILITY
 from Tests.test_generic_live_v1_activation import (
     EXPECTED,
     OBSERVATION,
@@ -23,11 +25,13 @@ from Tests.test_generic_live_v1_activation import (
 
 
 class Broker:
-    def __init__(self, *, fail: bool = False, status: str = "accepted"):
+    def __init__(self, *, fail: bool = False, status: str = "accepted", terminal_status: str = "filled"):
         self.orders = {}
         self.submit_calls = 0
         self.fail = fail
         self.status = status
+        self.terminal_status = terminal_status
+        self.by_id = {}
 
     def get_account(self):
         return {
@@ -55,7 +59,7 @@ class Broker:
     def find_order_by_client_id(self, client_id):
         return self.orders.get(client_id)
 
-    def submit_generic_live_v4_market_order(self, **kwargs):
+    def submit_generic_live_v4_limit_order(self, **kwargs):
         self.submit_calls += 1
         if self.fail:
             raise RuntimeError("broker unavailable")
@@ -63,10 +67,25 @@ class Broker:
         order = {
             "id": "broker-order-1", "client_order_id": kwargs["client_order_id"],
             "status": self.status, "symbol": kwargs["symbol"], "side": kwargs["side"],
-            "qty": kwargs["qty"],
+            "qty": kwargs["qty"], "filled_qty": "0",
         }
         self.orders[kwargs["client_order_id"]] = order
+        self.by_id[order["id"]] = order
         return order
+
+    def get_order(self, order_id):
+        order = self.by_id.get(order_id)
+        if order is not None and order["status"] in {"accepted", "new", "pending_new"}:
+            order["status"] = self.terminal_status
+            if self.terminal_status == "filled":
+                order["filled_qty"] = order["qty"]
+            elif self.terminal_status == "partially_filled":
+                order["filled_qty"] = str(float(order["qty"]) / 2.0)
+        return order
+
+    def cancel_generic_live_v4_order(self, **kwargs):
+        order = self.by_id[kwargs["broker_order_id"]]
+        order["status"] = "canceled"
 
 
 def _ready():
@@ -131,7 +150,7 @@ def test_explicit_submission_writes_wal_first_and_automatically_rearms(tmp_path)
         rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result.json",
     )
-    assert result["status"] == "SUBMITTED_REARMED"
+    assert result["status"] == "FILLED_REARMED"
     assert result["broker_submission_performed"] is True
     assert broker.submit_calls == 1
     assert len(list((tmp_path / "wal").glob("intent-*.json"))) == 1
@@ -154,7 +173,7 @@ def test_rerun_recovers_by_stable_client_id_without_resubmission(tmp_path) -> No
     _disarm(tmp_path / "rearm.json", preflight, plan)
     kwargs["result_path"] = tmp_path / "result-2.json"
     replay = execute_generic_live_v1_session(**kwargs)
-    assert replay["status"] == "RECOVERED_EXISTING_REARMED"
+    assert replay["status"] == "RECOVERED_FILLED_REARMED"
     assert replay["broker_submission_performed"] is False
     assert broker.submit_calls == 1
 
@@ -178,14 +197,14 @@ def test_submission_break_rearms_before_raising(tmp_path) -> None:
 def test_rejected_broker_response_is_order_break_and_rearms(tmp_path) -> None:
     preflight, plan = _ready()
     _disarm(tmp_path / "rearm.json", preflight, plan)
-    with pytest.raises(GenericLiveV1SubmissionError, match="terminal/unknown status"):
-        execute_generic_live_v1_session(
-            activation_preflight=preflight, exact_plan=plan,
-            executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
-            broker=Broker(status="rejected"), wal_directory=tmp_path / "wal",
-            rearm_state_path=tmp_path / "rearm.json",
-            result_path=tmp_path / "result.json",
-        )
+    result = execute_generic_live_v1_session(
+        activation_preflight=preflight, exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        broker=Broker(status="rejected"), wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "rearm.json",
+        result_path=tmp_path / "result.json",
+    )
+    assert result["status"] == "ORDER_BREAK_REARMED"
     assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
 
 
@@ -212,7 +231,7 @@ def test_receipt_failure_after_accept_rearms_and_replay_does_not_resubmit(tmp_pa
             result_path=tmp_path / "result.json",
         )
     assert broker.submit_calls == 1
-    assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "SUBMISSION_BREAK"
+    assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
     monkeypatch.setattr(module, "_write_exclusive", original)
     _disarm(tmp_path / "rearm.json", preflight, plan)
     recovered = execute_generic_live_v1_session(
@@ -222,8 +241,127 @@ def test_receipt_failure_after_accept_rearms_and_replay_does_not_resubmit(tmp_pa
         rearm_state_path=tmp_path / "rearm.json",
         result_path=tmp_path / "result-recovered.json",
     )
-    assert recovered["status"] == "RECOVERED_EXISTING_REARMED"
+    assert recovered["status"] == "RECOVERED_FILLED_REARMED"
     assert broker.submit_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("terminal_status", "expected_filled", "expected_cancel"),
+    [("partially_filled", 2.0, True), ("accepted", 0.0, True)],
+)
+def test_partial_or_still_open_order_is_canceled_and_never_treated_as_green(
+    tmp_path, terminal_status, expected_filled, expected_cancel,
+) -> None:
+    preflight, plan = _ready()
+    _disarm(tmp_path / "rearm.json", preflight, plan)
+    broker = Broker(terminal_status=terminal_status)
+    result = execute_generic_live_v1_session(
+        activation_preflight=preflight, exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        broker=broker, wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "rearm.json",
+        result_path=tmp_path / "result.json", poll_attempts=2,
+        poll_interval_seconds=0,
+    )
+    assert result["status"] == "ORDER_BREAK_REARMED"
+    assert result["filled_quantity"] == expected_filled
+    assert result["cancel_performed"] is expected_cancel
+    assert result["broker_order"]["broker_status"] == "canceled"
+    assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
+
+
+def test_unknown_broker_status_fails_closed_and_rearms(tmp_path) -> None:
+    preflight, plan = _ready()
+    _disarm(tmp_path / "rearm.json", preflight, plan)
+    with pytest.raises(GenericLiveV1SubmissionError, match="status is unknown"):
+        execute_generic_live_v1_session(
+            activation_preflight=preflight, exact_plan=plan,
+            executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+            broker=Broker(status="calculated"), wal_directory=tmp_path / "wal",
+            rearm_state_path=tmp_path / "rearm.json",
+            result_path=tmp_path / "result.json", poll_interval_seconds=0,
+        )
+    assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
+
+
+def test_recovered_partial_order_is_canceled_without_resubmission(tmp_path) -> None:
+    preflight, plan = _ready()
+    order = [*plan["sell_orders"], *plan["buy_orders"]][0]
+    broker = Broker(terminal_status="partially_filled")
+    recovered = {
+        "id": "broker-order-1", "client_order_id": order["client_order_id"],
+        "status": "accepted", "symbol": order["symbol"], "side": order["side"],
+        "qty": order["quantity"], "filled_qty": "0",
+    }
+    broker.orders[order["client_order_id"]] = recovered
+    broker.by_id[recovered["id"]] = recovered
+    _disarm(tmp_path / "rearm.json", preflight, plan)
+    result = execute_generic_live_v1_session(
+        activation_preflight=preflight, exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        broker=broker, wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "rearm.json",
+        result_path=tmp_path / "result.json", poll_interval_seconds=0,
+    )
+    assert result["status"] == "ORDER_BREAK_REARMED"
+    assert result["broker_submission_performed"] is False
+    assert result["cancel_performed"] is True
+    assert broker.submit_calls == 0
+
+
+def test_exact_plan_client_id_and_signed_mutation_context_reach_boundary(tmp_path) -> None:
+    preflight, plan = _ready()
+    order = [*plan["sell_orders"], *plan["buy_orders"]][0]
+    broker = Broker()
+    captured = {}
+    original = broker.submit_generic_live_v4_limit_order
+
+    def capture(**kwargs):
+        captured.update(kwargs)
+        return original(**kwargs)
+
+    broker.submit_generic_live_v4_limit_order = capture
+    _disarm(tmp_path / "rearm.json", preflight, plan)
+    result = execute_generic_live_v1_session(
+        activation_preflight=preflight, exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        broker=broker, wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "rearm.json",
+        result_path=tmp_path / "result.json", poll_interval_seconds=0,
+    )
+    context = captured["mutation_context"]
+    assert captured["client_order_id"] == order["client_order_id"]
+    assert context["client_order_id"] == order["client_order_id"]
+    assert context["limit_price"] == order["enforcement_price"]
+    assert context["content_hash"] == result["mutation_context_hash"]
+    assert len(context["capability_signature"]) == 64
+    assert _GENERIC_LIVE_V4_CAPABILITY.verify(
+        context["content_hash"], context["capability_signature"]
+    )
+    assert not _GENERIC_LIVE_V4_CAPABILITY.verify(
+        "f" * 64, context["capability_signature"]
+    )
+
+
+def test_order_lifecycle_builder_binds_partial_fill_hashes(tmp_path) -> None:
+    preflight, plan = _ready()
+    _disarm(tmp_path / "rearm.json", preflight, plan)
+    result = execute_generic_live_v1_session(
+        activation_preflight=preflight, exact_plan=plan,
+        executed_at="2026-08-19T13:31:00+00:00", submit_enabled=True,
+        broker=Broker(terminal_status="partially_filled"),
+        wal_directory=tmp_path / "wal", rearm_state_path=tmp_path / "rearm.json",
+        result_path=tmp_path / "result.json", poll_interval_seconds=0,
+    )
+    fill_hash = "a" * 64
+    lifecycle = seal_generic_live_v1_order_lifecycle(
+        submission_result=result, observed_at="2026-08-19T13:35:00+00:00",
+        broker_order_evidence_hash="c" * 64,
+        broker_fill_evidence_hashes=[fill_hash],
+    )
+    assert lifecycle["status"] == "PARTIAL_CANCELED"
+    assert lifecycle["exact_order_id"] == result["exact_order_id"]
+    assert lifecycle["broker_fill_evidence_hashes"] == [fill_hash]
 
 
 @pytest.mark.parametrize("stage", ["order", "reconciliation", "accounting", "reporting"])
@@ -231,18 +369,21 @@ def test_every_typed_downstream_break_rearms(tmp_path, monkeypatch, stage) -> No
     import core.generic_live_v1_submission as module
 
     preflight, plan = _ready()
-    dry = execute_generic_live_v1_session(
+    broker = Broker()
+    _disarm(tmp_path / "session.json", preflight, plan)
+    submitted = execute_generic_live_v1_session(
         activation_preflight=preflight, exact_plan=plan,
         executed_at="2026-08-19T13:31:00+00:00",
+        submit_enabled=True, broker=broker, wal_directory=tmp_path / "wal",
+        rearm_state_path=tmp_path / "session.json",
+        result_path=tmp_path / "submission.json", poll_interval_seconds=0,
     )
-    order = {
-        "schema_version": "caerus.generic_live_v1_order_lifecycle.v1",
-        "status": "NO_TRADE", "observed_at": "2026-08-19T20:00:00+00:00",
-        "submission_result_hash": dry["content_hash"], "plan_hash": dry["plan_hash"],
-        "account_id_hash": dry["account_id_hash"], "lane_id": "generic-live-v1",
-        "broker_order_id": None, "filled_quantity": 0.0,
-    }
-    order["content_hash"] = hashlib.sha256(canonical_json(order).encode()).hexdigest()
+    fill_hash = "b" * 64
+    order = seal_generic_live_v1_order_lifecycle(
+        submission_result=submitted, observed_at="2026-08-19T20:00:00+00:00",
+        broker_order_evidence_hash="c" * 64,
+        broker_fill_evidence_hashes=[fill_hash],
+    )
     trigger = {
         "order": "ORDER_BREAK", "reconciliation": "RECONCILIATION_BREAK",
         "accounting": "ACCOUNTING_BREAK", "reporting": "REPORTING_BREAK",
@@ -252,7 +393,20 @@ def test_every_typed_downstream_break_rearms(tmp_path, monkeypatch, stage) -> No
     else:
         monkeypatch.setattr(module, "validate_lane_reconciliation", lambda *a, **k: (
             (_ for _ in ()).throw(ValueError("reconciliation break"))
-            if stage == "reconciliation" else {"status": "PASS", "accounting_ready": True, "reconciled_fills": [], "content_hash": "a" * 64}
+            if stage == "reconciliation" else {
+                "status": "PASS", "accounting_ready": True, "reconciled_fills": [],
+                "content_hash": "a" * 64, "account_id_hash": submitted["account_id_hash"],
+                "lane_id": "generic-live-v1", "plan_hash": submitted["plan_hash"],
+                "broker_orders": [{
+                    "order_id": submitted["exact_order_id"],
+                    "broker_order_id": submitted["broker_order"]["broker_order_id"],
+                    "filled_quantity": submitted["filled_quantity"],
+                }],
+                "broker_fills": [{}], "source_hashes": {
+                    "broker_fills": [fill_hash], "broker_orders": ["c" * 64],
+                    "wal_intents": [submitted["intent_hash"]],
+                },
+            }
         ))
         monkeypatch.setattr(module, "validate_accounting_journal", lambda rows: (
             (_ for _ in ()).throw(ValueError("accounting break"))
@@ -263,7 +417,7 @@ def test_every_typed_downstream_break_rearms(tmp_path, monkeypatch, stage) -> No
         ))
     with pytest.raises(Exception):
         finalize_generic_live_v1_posttrade(
-            submission_result=dry, exact_plan=plan, order_lifecycle=order,
+            submission_result=submitted, exact_plan=plan, order_lifecycle=order,
             reconciliation={}, journal_entries=[], performance={}, dashboard_projection={},
             finalized_at="2026-08-19T22:00:00+00:00",
             rearm_state_path=tmp_path / "rearm.json", result_path=tmp_path / "posttrade.json",

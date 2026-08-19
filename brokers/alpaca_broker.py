@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import math
@@ -8,7 +9,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, time as datetime_time, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from zoneinfo import ZoneInfo
 
 from core.live_pilot_preflight import validate_alpaca_submission_guardrails
@@ -35,7 +36,18 @@ class _ExactExecutionCapability:
 
 
 class _GenericLiveV4Capability:
-    __slots__ = ()
+    __slots__ = ("_signing_key",)
+
+    def __init__(self) -> None:
+        self._signing_key = os.urandom(32)
+
+    def sign(self, content_hash: str) -> str:
+        return hmac.new(
+            self._signing_key, str(content_hash).encode("ascii"), hashlib.sha256
+        ).hexdigest()
+
+    def verify(self, content_hash: str, signature: str) -> bool:
+        return hmac.compare_digest(self.sign(content_hash), str(signature))
 
 
 # Process-local capability held only by the exact-v3 executor. Ambient
@@ -952,14 +964,16 @@ class AlpacaBroker:
         )
         return out
 
-    def submit_generic_live_v4_market_order(
+    def submit_generic_live_v4_limit_order(
         self,
         *,
         symbol: str,
         qty: float,
         side: str,
         client_order_id: str,
-        estimated_notional: float,
+        limit_price: float,
+        max_fee_usd: float,
+        mutation_context: Mapping[str, Any],
         tif: str = "day",
         _generic_live_v4_capability: object | None = None,
     ) -> Dict[str, Any]:
@@ -977,30 +991,103 @@ class AlpacaBroker:
         if base_url_norm != "https://api.alpaca.markets":
             raise RuntimeError("generic Live v4 submission requires the canonical Alpaca Live endpoint")
         qty_float = float(qty)
-        notional = float(estimated_notional)
+        limit_price_float = float(limit_price)
+        fee = float(max_fee_usd)
+        notional = qty_float * limit_price_float + fee
         if not math.isfinite(qty_float) or qty_float <= 0.0 or abs(qty_float - round(qty_float)) > 1e-9:
             raise RuntimeError("generic Live v4 requires a positive whole-share quantity")
+        if not math.isfinite(limit_price_float) or limit_price_float <= 0.0 or not math.isfinite(fee) or fee < 0.0:
+            raise RuntimeError("generic Live v4 limit price/fee is invalid")
         if not math.isfinite(notional) or notional < 100.0 or notional > 437.0:
             raise RuntimeError("generic Live v4 notional must remain within $100-$437")
         side_norm = str(side or "").strip().upper()
         if side_norm not in {"BUY", "SELL"}:
             raise RuntimeError("generic Live v4 side must be BUY or SELL")
         client_id = str(client_order_id or "").strip()
-        if not client_id.startswith("caerus-v4-") or len(client_id) > 48:
+        if not re.fullmatch(r"cx4-[0-9a-f]{39}", client_id):
             raise RuntimeError("generic Live v4 client order id is invalid")
         if str(tif).strip().lower() != "day":
             raise RuntimeError("generic Live v4 requires DAY time in force")
+        context_fields = {
+            "schema_version", "effective_session", "owner_decision_hash",
+            "preflight_hash", "plan_hash", "execution_policy_hash",
+            "account_id_hash", "deployed_sha", "order_id", "client_order_id",
+            "symbol", "side", "quantity", "order_type", "time_in_force",
+            "extended_hours", "allow_fractional_shares", "quantity_precision",
+            "limit_price", "max_fee_usd", "maximum_gross_usd",
+            "content_hash", "capability_signature",
+        }
+        if not isinstance(mutation_context, Mapping) or set(mutation_context) != context_fields:
+            raise RuntimeError("generic Live v4 mutation context fields are invalid")
+        context_body = dict(mutation_context)
+        declared_context_hash = context_body.pop("content_hash", None)
+        signature = context_body.pop("capability_signature", None)
+        expected_context_hash = hashlib.sha256(
+            json.dumps(context_body, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        ).hexdigest()
+        if declared_context_hash != expected_context_hash:
+            raise RuntimeError("generic Live v4 mutation context hash mismatch")
+        if not isinstance(signature, str) or not _GENERIC_LIVE_V4_CAPABILITY.verify(
+            declared_context_hash, signature
+        ):
+            raise RuntimeError("generic Live v4 mutation context signature mismatch")
+        if mutation_context.get("schema_version") != "caerus.generic_live_v1_mutation_context.v1":
+            raise RuntimeError("generic Live v4 mutation context schema differs")
+        for field in ("owner_decision_hash", "preflight_hash", "plan_hash", "execution_policy_hash", "account_id_hash"):
+            value = mutation_context.get(field)
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise RuntimeError(f"generic Live v4 mutation context {field} is invalid")
+        expected_order_context = {
+            "client_order_id": client_id,
+            "symbol": str(symbol or "").strip().upper(),
+            "side": side_norm,
+            "quantity": qty_float,
+            "order_type": "limit",
+            "time_in_force": "day",
+            "extended_hours": False,
+            "allow_fractional_shares": False,
+            "quantity_precision": 0,
+            "limit_price": limit_price_float,
+            "max_fee_usd": fee,
+            "maximum_gross_usd": 437.0,
+        }
+        if any(mutation_context.get(field) != value for field, value in expected_order_context.items()):
+            raise RuntimeError("generic Live v4 mutation context does not match order boundary")
+        if not re.fullmatch(r"[0-9a-f]{40}", str(mutation_context.get("deployed_sha") or "")):
+            raise RuntimeError("generic Live v4 mutation context deployed_sha is invalid")
         from alpaca.trading.enums import OrderSide, TimeInForce
-        from alpaca.trading.requests import MarketOrderRequest
+        from alpaca.trading.requests import LimitOrderRequest
 
-        request = MarketOrderRequest(
+        request = LimitOrderRequest(
             symbol=str(symbol or "").strip().upper(),
             qty=qty_float,
             side=OrderSide.BUY if side_norm == "BUY" else OrderSide.SELL,
             time_in_force=TimeInForce.DAY,
+            limit_price=limit_price_float,
+            extended_hours=False,
             client_order_id=client_id,
         )
         return _normalize_order_obj(self.trading_client.submit_order(order_data=request))
+
+    def cancel_generic_live_v4_order(
+        self, *, broker_order_id: str, mutation_context: Mapping[str, Any],
+        _generic_live_v4_capability: object | None = None,
+    ) -> None:
+        _require_generic_live_v4_capability(_generic_live_v4_capability)
+        if bool(self.paper) or str(self.base_url or "").strip().lower().rstrip("/") != "https://api.alpaca.markets":
+            raise RuntimeError("generic Live v4 cancellation requires canonical Live broker")
+        if not isinstance(mutation_context, Mapping) or mutation_context.get("schema_version") != "caerus.generic_live_v1_mutation_context.v1":
+            raise RuntimeError("generic Live v4 cancellation context is invalid")
+        body = dict(mutation_context)
+        signature = body.pop("capability_signature", None)
+        declared = body.pop("content_hash", None)
+        expected = hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+        if declared != expected or not isinstance(signature, str) or not _GENERIC_LIVE_V4_CAPABILITY.verify(declared, signature):
+            raise RuntimeError("generic Live v4 cancellation context hash/signature mismatch")
+        cancel = getattr(self.trading_client, "cancel_order_by_id", None)
+        if not callable(cancel):
+            raise RuntimeError("Alpaca client cannot cancel exact generic order")
+        cancel(str(broker_order_id))
 
     def submit_limit_order(
         self,
