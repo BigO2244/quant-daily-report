@@ -8,6 +8,7 @@ literal ``--install`` or ``--remove`` operator action.
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 
@@ -105,7 +106,12 @@ def _read_crontab() -> str:
     )
     if completed.returncode == 0:
         return completed.stdout
-    if completed.returncode == 1:
+    no_crontab = re.fullmatch(
+        r"(?:crontab:\s*)?no crontab for [A-Za-z0-9._-]+",
+        completed.stderr.strip(),
+        flags=re.IGNORECASE,
+    )
+    if completed.returncode == 1 and no_crontab:
         return ""
     raise GovernedLyraCaptureCronError("could not read crontab; no change made")
 

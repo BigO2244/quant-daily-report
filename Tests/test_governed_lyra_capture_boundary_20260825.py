@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from scripts import run_governed_lyra_capture_20260825 as subject
+from scripts import manage_governed_lyra_capture_cron as cron_subject
 from scripts.manage_governed_lyra_capture_cron import (
     CAPTURE_CRON,
     CRON_TZ,
@@ -228,3 +229,42 @@ def test_capture_cron_install_rejects_timezone_and_marker_conflicts() -> None:
 
     with pytest.raises(GovernedLyraCaptureCronError, match="not governed"):
         render_crontab(CAPTURE_CRON + "\n" + CRON_TZ + "\n", install=True)
+
+
+def test_capture_cron_permission_denied_never_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            args=args, returncode=1, stdout="", stderr="permission denied"
+        )
+
+    monkeypatch.setattr(cron_subject.subprocess, "run", fake_run)
+    assert cron_subject.main(["--install"]) == 2
+    assert calls == [["crontab", "-l"]]
+
+
+def test_capture_cron_positive_no_crontab_signal_can_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args == ["crontab", "-l"]:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=1,
+                stdout="",
+                stderr="crontab: no crontab for brettolson\n",
+            )
+        assert args == ["crontab", "-"]
+        assert CAPTURE_CRON in kwargs["input"]
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(cron_subject.subprocess, "run", fake_run)
+    assert cron_subject.main(["--install"]) == 0
+    assert calls == [["crontab", "-l"], ["crontab", "-"]]
