@@ -1445,6 +1445,29 @@ content hash
 This is observation preparation only; it grants no capture-enable, Live,
 activation, submission, or execution authority.
 
+The fixed-$460 Live candidate is superseded by the immutable dynamic-balance
+owner record
+[`generic_live_v1_dynamic_balance_owner_decision_20260824.json`](../governance/decision_records/generic_live_v1_dynamic_balance_owner_decision_20260824.json),
+content hash
+`abc334ba680afe4b9ae50ce815ad2f591a842931f8c3a12b797e2fdadc58b506`.
+Dynamic gross capacity is 95% of fresh factual net-liquidation equity; new buys
+must fit fresh cash after a 5% equity reserve and only when pending transfers
+are zero. No nominal ceiling, buying-power field, margin multiplier, borrowing,
+unsettled proceeds, or pending funds may contribute. The new account,
+operational-freshness, and dynamic-capital proof contracts are advisory and
+fail closed, with the disabled runtime template retaining all submit/schedule
+flags at zero.
+
+The Monday rehearsal is sealed at
+[`generic_live_v1_dynamic_monday_rehearsal_20260824.json`](../evidence/generic_live_v1_dynamic_monday_rehearsal_20260824.json),
+content hash
+`6950ac3f5b5b51b020bd453e92c20e4e93dcdf1134056c810cc12e62410a1756`.
+It records no order and requires both gates armed because the Monday morning
+session lacks the Monday-close weekly Lyra target. The first strategy-consistent
+execution remains Tuesday 2026-08-25. Activation work is gated on resolving
+that session-authority mismatch; it must not be bypassed with look-ahead or a
+different rebalance cadence.
+
 The adaptive policy choice is now concrete rather than implicit. Candidate
 hash `0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`
 selects only registry/deployment-approved Shadow sleeves that pass 60-session,

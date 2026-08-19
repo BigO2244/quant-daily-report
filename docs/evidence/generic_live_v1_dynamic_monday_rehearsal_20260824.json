@@ -1,0 +1,31 @@
+{
+  "activation_authority": false,
+  "broker_call_performed": false,
+  "broker_write_performed": false,
+  "completed_data_session_at_monday_precompute": "2026-08-21",
+  "content_hash": "6950ac3f5b5b51b020bd453e92c20e4e93dcdf1134056c810cc12e62410a1756",
+  "exact_v4_plan_available": false,
+  "execution_authority": false,
+  "first_executable_session_under_canonical_lyra_economics": "2026-08-25",
+  "first_governed_signal_session": "2026-08-24",
+  "generic_kill_switch_required_state": "ARMED",
+  "legacy_kill_switch_required_state": "ARMED",
+  "order_count": 0,
+  "owner_decision_hash": "abc334ba680afe4b9ae50ce815ad2f591a842931f8c3a12b797e2fdadc58b506",
+  "paper_authority_changed": false,
+  "reason_codes": [
+    "MONDAY_PRECOMPUTE_PRECEDES_MONDAY_COMPLETED_CLOSE",
+    "MONDAY_SESSION_HAS_NO_POST_FREEZE_WEEKLY_LYRA_TARGET",
+    "SAME_SESSION_READY_LYRA_V2_UNAVAILABLE_WITHOUT_LOOKAHEAD",
+    "EXACT_LYRA_ONLY_V4_PLAN_UNAVAILABLE",
+    "NO_ORDER_PERMITTED"
+  ],
+  "rehearsed_at": "2026-08-19T13:30:00+00:00",
+  "requested_effective_session": "2026-08-24",
+  "same_session_lyra_v2_available": false,
+  "schedule_enable_allowed": false,
+  "schema_version": "caerus.generic_live_monday_rehearsal.v1",
+  "status": "BLOCKED_NO_TRADE_REARMED",
+  "submission_allowed": false,
+  "universe_freeze_hash": "850e8104e0b5d913e96b6627d0b47219967802328a280e07a7c8f94e6835e434"
+}

@@ -275,6 +275,34 @@ content hash
 Enabling capture is not owner approval and still requires the exact policy and
 session owner artifacts named above. Live remains disabled and armed.
 
+On 2026-08-19 Brett superseded the fixed-$460 Live candidate with a cash-only
+dynamic-capital policy. The immutable owner record is
+[`generic_live_v1_dynamic_balance_owner_decision_20260824.json`](governance/decision_records/generic_live_v1_dynamic_balance_owner_decision_20260824.json),
+content hash
+`abc334ba680afe4b9ae50ce815ad2f591a842931f8c3a12b797e2fdadc58b506`.
+It sets no nominal dollar ceiling: gross capacity is 95% of fresh factual
+broker net-liquidation equity, while new buys are separately limited by fresh
+cash with zero pending transfers and a 5% equity cash reserve. Buying power,
+margin multipliers, borrowing, unsettled proceeds, and unverified pending
+funds are forbidden. Deposits affect limits only after they appear in factual
+net equity and zero-pending-transfer cash; withdrawals and losses reduce limits
+automatically. The record lists and supersedes every named fixed-cap candidate,
+proposal, owner decision, installation, and activation-preflight hash. It
+grants no execution or activation authority by itself, and PAPER is unchanged.
+
+The requested Monday 2026-08-24 session remains chronologically incapable of a
+same-session decision under canonical Lyra economics. Monday's 07:00 precompute
+has completed data only through Friday 2026-08-21; the first post-freeze weekly
+Lyra target is selected only after Monday's close and can first execute Tuesday
+2026-08-25. The sealed rehearsal
+[`generic_live_v1_dynamic_monday_rehearsal_20260824.json`](evidence/generic_live_v1_dynamic_monday_rehearsal_20260824.json),
+content hash
+`6950ac3f5b5b51b020bd453e92c20e4e93dcdf1134056c810cc12e62410a1756`,
+therefore concludes `BLOCKED_NO_TRADE_REARMED`: no order, broker call, schedule
+enable, or kill-switch change is authorized. Using Monday as an executing
+session would require a separate owner decision to change Lyra's weekly
+economics; otherwise Tuesday requires a session-specific owner decision.
+
 A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),
 with its owner brief at

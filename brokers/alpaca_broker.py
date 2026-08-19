@@ -502,6 +502,18 @@ class AlpacaBroker:
             "buying_power": _safe_str(
                 d.get("buying_power") or getattr(account, "buying_power", "")
             ),
+            "pending_transfer_in": _safe_str(
+                d.get("pending_transfer_in") or getattr(account, "pending_transfer_in", "0")
+            ),
+            "pending_transfer_out": _safe_str(
+                d.get("pending_transfer_out") or getattr(account, "pending_transfer_out", "0")
+            ),
+            "long_market_value": _safe_str(
+                d.get("long_market_value") or getattr(account, "long_market_value", "0")
+            ),
+            "short_market_value": _safe_str(
+                d.get("short_market_value") or getattr(account, "short_market_value", "0")
+            ),
             "portfolio_value": _safe_str(
                 d.get("portfolio_value") or getattr(account, "portfolio_value", "")
             ),
@@ -515,12 +527,11 @@ class AlpacaBroker:
         }
         out["id_hash"] = hashlib.sha256(out["id"].encode("utf-8")).hexdigest()
         logger.info(
-            "[ALPACA] account id_hash_prefix=%s status=%s equity=%s cash=%s buying_power=%s",
+            "[ALPACA] account id_hash_prefix=%s status=%s equity=%s cash=%s",
             str(out.get("id_hash", ""))[:12],
             out.get("status", ""),
             out.get("equity", ""),
             out.get("cash", ""),
-            out.get("buying_power", ""),
         )
         return out
 
