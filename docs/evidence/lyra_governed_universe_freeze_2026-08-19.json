@@ -1,0 +1,16 @@
+{
+  "content_hash": "850e8104e0b5d913e96b6627d0b47219967802328a280e07a7c8f94e6835e434",
+  "effective_from": "2026-08-19T00:00:00-04:00",
+  "execution_authority": false,
+  "freeze_id": "governed-universe:lyra-live-v1:2026-08-19:b1c524510810a4c804d1e3e9",
+  "generated_at": "2026-08-19T02:50:00+00:00",
+  "member_count": 200,
+  "membership_economics_changed": false,
+  "no_retroactive_use_before": "2026-08-19",
+  "ordered_members_sha256": "54b94c9f5189efccce2c9722d0d7c668a0a3a96d1a628613c7e93a65881a2243",
+  "prospective_only": true,
+  "schema_version": "caerus.governed_universe_freeze.v1",
+  "source_path": "data/universe.csv",
+  "source_revision": "1b397d004b4d75bbcc1a7efb0e1b2ad55613fdac",
+  "source_sha256": "b9b21f2311ef249facf4f7f699fe916b06f4c778262772a3ac2f63e1bfb8cc21"
+}

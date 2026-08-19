@@ -157,6 +157,9 @@ def _valid_lyra_decision(
         blockers.append("LYRA_V2_DECISION_NOT_READY_RECOMMENDATION")
     if decision.get("liquidity_status") not in {"PASS", "CONSTRAINED"}:
         blockers.append("LYRA_V2_DECISION_LIQUIDITY_NOT_APPROVED")
+    reasons = set(decision.get("reason_codes") or [])
+    if reasons & {"NON_DECISION_GRADE_UNIVERSE", "EVALUATION_ONLY"}:
+        blockers.append("LYRA_V2_DECISION_HISTORICAL_EVIDENCE_BLOCKER_UNRESOLVED")
     return not blockers, blockers
 
 
@@ -203,6 +206,23 @@ def _valid_plan(
                 or row.get("decision_hash") != decision.get("content_hash")
             ):
                 blockers.append("EXACT_V4_PLAN_LYRA_DECISION_LINEAGE_MISMATCH")
+    target_contributions = []
+    for target in plan.get("approved_target_rows", []):
+        contributions = target.get("sleeve_contributions")
+        if not isinstance(contributions, list) or not contributions:
+            blockers.append("EXACT_V4_PLAN_TARGET_LINEAGE_MISSING")
+            continue
+        target_contributions.extend(contributions)
+    if not target_contributions:
+        blockers.append("EXACT_V4_PLAN_TARGET_LINEAGE_MISSING")
+    for row in target_contributions:
+        if row.get("sleeve_id") != GENERIC_LIVE_V1_SLEEVE_ID:
+            blockers.append("EXACT_V4_PLAN_NON_LYRA_TARGET")
+        if decision is not None and (
+            row.get("decision_id") != decision.get("decision_id")
+            or row.get("decision_hash") != decision.get("content_hash")
+        ):
+            blockers.append("EXACT_V4_PLAN_LYRA_TARGET_LINEAGE_MISMATCH")
     if float(plan.get("expected_posttrade_cash", -1.0)) < -0.01:
         blockers.append("EXACT_V4_PLAN_NEGATIVE_CASH")
     marks = {

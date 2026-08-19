@@ -34,14 +34,24 @@ class _ExactExecutionCapability:
     __slots__ = ()
 
 
+class _GenericLiveV4Capability:
+    __slots__ = ()
+
+
 # Process-local capability held only by the exact-v3 executor. Ambient
 # environment variables and legacy callers cannot authorize broker mutation.
 _EXACT_EXECUTION_CAPABILITY = _ExactExecutionCapability()
+_GENERIC_LIVE_V4_CAPABILITY = _GenericLiveV4Capability()
 
 
 def _require_exact_execution_capability(value: object) -> None:
     if value is not _EXACT_EXECUTION_CAPABILITY:
         raise PermissionError("exact_execution_capability_required")
+
+
+def _require_generic_live_v4_capability(value: object) -> None:
+    if value is not _GENERIC_LIVE_V4_CAPABILITY:
+        raise PermissionError("generic_live_v4_capability_required")
 
 
 def _is_truthy(value: object, default: bool = False) -> bool:
@@ -483,11 +493,18 @@ class AlpacaBroker:
             "portfolio_value": _safe_str(
                 d.get("portfolio_value") or getattr(account, "portfolio_value", "")
             ),
+            "trading_blocked": _safe_bool(
+                d.get("trading_blocked") or getattr(account, "trading_blocked", False)
+            ),
+            "account_blocked": _safe_bool(
+                d.get("account_blocked") or getattr(account, "account_blocked", False)
+            ),
             "raw": d,
         }
+        out["id_hash"] = hashlib.sha256(out["id"].encode("utf-8")).hexdigest()
         logger.info(
-            "[ALPACA] account id=%s status=%s equity=%s cash=%s buying_power=%s",
-            out.get("id", ""),
+            "[ALPACA] account id_hash_prefix=%s status=%s equity=%s cash=%s buying_power=%s",
+            str(out.get("id_hash", ""))[:12],
             out.get("status", ""),
             out.get("equity", ""),
             out.get("cash", ""),
@@ -934,6 +951,56 @@ class AlpacaBroker:
             _safe_str(out.get("status")),
         )
         return out
+
+    def submit_generic_live_v4_market_order(
+        self,
+        *,
+        symbol: str,
+        qty: float,
+        side: str,
+        client_order_id: str,
+        estimated_notional: float,
+        tif: str = "day",
+        _generic_live_v4_capability: object | None = None,
+    ) -> Dict[str, Any]:
+        """Sole generic-v4 Live mutation boundary for the approved $460 lane.
+
+        The legacy Live executor cannot reach this method because it does not
+        possess the process-local capability.  The older submission methods
+        retain their unconditional Live-capital stop.
+        """
+
+        _require_generic_live_v4_capability(_generic_live_v4_capability)
+        if bool(self.paper):
+            raise RuntimeError("generic Live v4 submission requires the Live broker")
+        base_url_norm = str(self.base_url or "").strip().lower().rstrip("/")
+        if base_url_norm != "https://api.alpaca.markets":
+            raise RuntimeError("generic Live v4 submission requires the canonical Alpaca Live endpoint")
+        qty_float = float(qty)
+        notional = float(estimated_notional)
+        if not math.isfinite(qty_float) or qty_float <= 0.0 or abs(qty_float - round(qty_float)) > 1e-9:
+            raise RuntimeError("generic Live v4 requires a positive whole-share quantity")
+        if not math.isfinite(notional) or notional < 100.0 or notional > 437.0:
+            raise RuntimeError("generic Live v4 notional must remain within $100-$437")
+        side_norm = str(side or "").strip().upper()
+        if side_norm not in {"BUY", "SELL"}:
+            raise RuntimeError("generic Live v4 side must be BUY or SELL")
+        client_id = str(client_order_id or "").strip()
+        if not client_id.startswith("caerus-v4-") or len(client_id) > 48:
+            raise RuntimeError("generic Live v4 client order id is invalid")
+        if str(tif).strip().lower() != "day":
+            raise RuntimeError("generic Live v4 requires DAY time in force")
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import MarketOrderRequest
+
+        request = MarketOrderRequest(
+            symbol=str(symbol or "").strip().upper(),
+            qty=qty_float,
+            side=OrderSide.BUY if side_norm == "BUY" else OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+            client_order_id=client_id,
+        )
+        return _normalize_order_obj(self.trading_client.submit_order(order_data=request))
 
     def submit_limit_order(
         self,
