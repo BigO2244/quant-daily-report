@@ -117,7 +117,7 @@ def test_alpaca_dynamic_account_collection_never_defaults_missing_fields(field):
         base_url="https://api.alpaca.markets",
     )
     with pytest.raises(RuntimeError, match=f"missing required field: {field}"):
-        broker.get_account()
+        broker.get_generic_live_dynamic_account()
 
 
 def test_alpaca_dynamic_account_collection_preserves_explicit_zero_and_false():
@@ -125,9 +125,21 @@ def test_alpaca_dynamic_account_collection_preserves_explicit_zero_and_false():
         trading_client=_Client(json.loads(_raw())), paper=False,
         base_url="https://api.alpaca.markets",
     )
-    account = broker.get_account()
+    account = broker.get_generic_live_dynamic_account()
     assert account["pending_transfer_in"] == "0.00"
     assert account["long_market_value"] == "400.00"
     assert account["short_market_value"] == "0.00"
     assert account["trading_blocked"] is False
     assert account["account_blocked"] is False
+
+
+def test_dynamic_strict_read_is_separate_from_shared_paper_account_path():
+    payload = json.loads(_raw())
+    payload.pop("pending_transfer_in")
+    paper = AlpacaBroker(
+        trading_client=_Client(payload), paper=True,
+        base_url="https://paper-api.alpaca.markets",
+    )
+    assert paper.get_account()["cash"] == "200.00"
+    with pytest.raises(RuntimeError, match="cannot use a PAPER broker"):
+        paper.get_generic_live_dynamic_account()

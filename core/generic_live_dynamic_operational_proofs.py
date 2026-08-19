@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import hashlib
+import json
 import re
 from typing import Any, Mapping, Sequence
 
@@ -26,7 +27,7 @@ _PIPELINES = (
 _FIELDS = frozenset(
     {
         "schema_version", "generated_at", "plan_hash", "account_id_hash",
-        "deployed_sha", "expected_deployed_sha", "account_observation_hash",
+        "deployed_sha", "account_observation_hash",
         "positions_evidence", "open_orders_evidence", "asset_evidence",
         "runtime_evidence", "pipeline_evidence", "broker_write_performed",
         "execution_authority", "content_hash",
@@ -46,6 +47,29 @@ def _hash(payload: Mapping[str, Any]) -> str:
 
 def _source_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode()).hexdigest()
+
+
+def _strict_json(raw: bytes, *, label: str) -> Any:
+    if not isinstance(raw, bytes) or not raw:
+        raise GenericLiveDynamicOperationalProofError(f"raw {label} bytes are required")
+
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in items:
+            if key in result:
+                raise GenericLiveDynamicOperationalProofError(f"raw {label} contains duplicate keys")
+            result[key] = value
+        return result
+
+    try:
+        return json.loads(
+            raw.decode(), object_pairs_hook=pairs,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                GenericLiveDynamicOperationalProofError(f"raw {label} contains non-finite values")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise GenericLiveDynamicOperationalProofError(f"raw {label} is invalid JSON") from exc
 
 
 def _time(value: Any, label: str) -> dt.datetime:
@@ -85,6 +109,9 @@ def _normalized_positions(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, A
 def validate_generic_live_dynamic_operational_proofs(
     payload: Mapping[str, Any], *, exact_plan: Mapping[str, Any],
     account_observation: Mapping[str, Any], raw_account_response: bytes,
+    raw_positions_response: bytes, raw_open_orders_response: bytes,
+    raw_asset_response: bytes, raw_runtime_evidence: bytes,
+    trusted_deployed_sha: str, trusted_runtime_hash: str,
     trusted_pipeline_hashes: Mapping[str, str],
     as_of: str,
 ) -> dict[str, Any]:
@@ -106,18 +133,20 @@ def validate_generic_live_dynamic_operational_proofs(
         raise GenericLiveDynamicOperationalProofError("account pin differs")
     if payload.get("account_observation_hash") != account.get("content_hash"):
         raise GenericLiveDynamicOperationalProofError("account observation hash differs")
-    for field in ("deployed_sha", "expected_deployed_sha"):
-        if not isinstance(payload.get(field), str) or not _GIT.fullmatch(payload[field]):
-            raise GenericLiveDynamicOperationalProofError(f"{field} is invalid")
-    if payload["deployed_sha"] != payload["expected_deployed_sha"]:
-        raise GenericLiveDynamicOperationalProofError("deployed SHA differs")
+    if not isinstance(trusted_deployed_sha, str) or not _GIT.fullmatch(trusted_deployed_sha):
+        raise GenericLiveDynamicOperationalProofError("trusted deployed SHA is invalid")
+    if payload.get("deployed_sha") != trusted_deployed_sha:
+        raise GenericLiveDynamicOperationalProofError("deployed SHA differs from protected pin")
 
     positions = payload.get("positions_evidence")
     if not isinstance(positions, Mapping) or set(positions) != {"observed_at", "rows", "source_hash"}:
         raise GenericLiveDynamicOperationalProofError("positions evidence fields are invalid")
     _fresh(positions["observed_at"], generated=generated, as_of=evaluated, label="positions observed_at")
-    rows = _normalized_positions(positions["rows"])
-    if positions.get("source_hash") != _source_hash(positions["rows"]):
+    raw_positions = _strict_json(raw_positions_response, label="positions response")
+    if not isinstance(raw_positions, list):
+        raise GenericLiveDynamicOperationalProofError("raw positions response must be an array")
+    rows = _normalized_positions(raw_positions)
+    if positions.get("rows") != raw_positions or positions.get("source_hash") != hashlib.sha256(raw_positions_response).hexdigest():
         raise GenericLiveDynamicOperationalProofError("positions source hash differs")
     if rows != _normalized_positions(exact_plan["starting_positions"]):
         raise GenericLiveDynamicOperationalProofError("fresh positions differ from the exact plan")
@@ -126,9 +155,10 @@ def validate_generic_live_dynamic_operational_proofs(
     if not isinstance(open_orders, Mapping) or set(open_orders) != {"observed_at", "rows", "source_hash"}:
         raise GenericLiveDynamicOperationalProofError("open-orders evidence fields are invalid")
     _fresh(open_orders["observed_at"], generated=generated, as_of=evaluated, label="open orders observed_at")
-    if not isinstance(open_orders["rows"], list) or open_orders["rows"]:
+    raw_open_orders = _strict_json(raw_open_orders_response, label="open-orders response")
+    if not isinstance(raw_open_orders, list) or raw_open_orders:
         raise GenericLiveDynamicOperationalProofError("fresh open orders are present")
-    if open_orders.get("source_hash") != _source_hash(open_orders["rows"]):
+    if open_orders.get("rows") != raw_open_orders or open_orders.get("source_hash") != hashlib.sha256(raw_open_orders_response).hexdigest():
         raise GenericLiveDynamicOperationalProofError("open-orders source hash differs")
 
     orders = [*exact_plan["sell_orders"], *exact_plan["buy_orders"]]
@@ -136,7 +166,8 @@ def validate_generic_live_dynamic_operational_proofs(
     if not isinstance(asset, Mapping) or set(asset) != {"observed_at", "row", "source_hash"}:
         raise GenericLiveDynamicOperationalProofError("asset evidence fields are invalid")
     _fresh(asset["observed_at"], generated=generated, as_of=evaluated, label="asset observed_at")
-    if asset.get("source_hash") != _source_hash(asset["row"]):
+    raw_asset = _strict_json(raw_asset_response, label="asset response")
+    if asset.get("row") != raw_asset or asset.get("source_hash") != hashlib.sha256(raw_asset_response).hexdigest():
         raise GenericLiveDynamicOperationalProofError("asset source hash differs")
     if orders:
         row = asset.get("row")
@@ -152,13 +183,18 @@ def validate_generic_live_dynamic_operational_proofs(
     runtime_fields = {
         "legacy_executor_disabled", "legacy_kill_switch_armed", "generic_kill_switch_armed",
         "generic_schedule_installed", "generic_submission_adapter_deployed",
-        "source_hash", "trusted_source_hash",
+        "source_hash",
     }
     if not isinstance(runtime, Mapping) or set(runtime) != runtime_fields:
         raise GenericLiveDynamicOperationalProofError("runtime evidence fields are invalid")
-    if runtime.get("source_hash") != runtime.get("trusted_source_hash") or not _SHA.fullmatch(str(runtime.get("source_hash") or "")):
+    raw_runtime = _strict_json(raw_runtime_evidence, label="runtime evidence")
+    runtime_facts = {field: runtime.get(field) for field in runtime_fields if field != "source_hash"}
+    if not isinstance(raw_runtime, Mapping) or dict(raw_runtime) != runtime_facts:
+        raise GenericLiveDynamicOperationalProofError("runtime facts differ from protected source")
+    actual_runtime_hash = hashlib.sha256(raw_runtime_evidence).hexdigest()
+    if runtime.get("source_hash") != actual_runtime_hash or actual_runtime_hash != trusted_runtime_hash:
         raise GenericLiveDynamicOperationalProofError("runtime source is not independently pinned")
-    for field in runtime_fields - {"source_hash", "trusted_source_hash"}:
+    for field in runtime_fields - {"source_hash"}:
         if runtime.get(field) is not True:
             raise GenericLiveDynamicOperationalProofError(f"runtime {field} is not green")
 
@@ -189,27 +225,30 @@ def validate_generic_live_dynamic_operational_proofs(
 def build_generic_live_dynamic_operational_proofs(
     *, generated_at: str, exact_plan: Mapping[str, Any],
     account_observation: Mapping[str, Any], raw_account_response: bytes,
-    positions_observed_at: str,
-    positions: Sequence[Mapping[str, Any]], open_orders_observed_at: str,
-    open_orders: Sequence[Mapping[str, Any]], asset_observed_at: str,
-    asset: Mapping[str, Any] | None, deployed_sha: str, expected_deployed_sha: str,
-    runtime_evidence: Mapping[str, Any], pipeline_evidence: Mapping[str, Mapping[str, Any]],
+    positions_observed_at: str, raw_positions_response: bytes,
+    open_orders_observed_at: str, raw_open_orders_response: bytes,
+    asset_observed_at: str, raw_asset_response: bytes,
+    deployed_sha: str, trusted_deployed_sha: str, raw_runtime_evidence: bytes,
+    trusted_runtime_hash: str, pipeline_evidence: Mapping[str, Mapping[str, Any]],
     trusted_pipeline_hashes: Mapping[str, str], as_of: str,
 ) -> dict[str, Any]:
-    positions_rows = copy.deepcopy(list(positions))
-    open_order_rows = copy.deepcopy(list(open_orders))
+    positions_rows = _strict_json(raw_positions_response, label="positions response")
+    open_order_rows = _strict_json(raw_open_orders_response, label="open-orders response")
+    asset = _strict_json(raw_asset_response, label="asset response")
+    runtime_facts = _strict_json(raw_runtime_evidence, label="runtime evidence")
+    if not isinstance(runtime_facts, Mapping):
+        raise GenericLiveDynamicOperationalProofError("runtime evidence must be an object")
     body = {
         "schema_version": SCHEMA,
         "generated_at": generated_at,
         "plan_hash": exact_plan.get("content_hash"),
         "account_id_hash": exact_plan.get("account_id_hash"),
         "deployed_sha": deployed_sha,
-        "expected_deployed_sha": expected_deployed_sha,
         "account_observation_hash": account_observation.get("content_hash"),
-        "positions_evidence": {"observed_at": positions_observed_at, "rows": positions_rows, "source_hash": _source_hash(positions_rows)},
-        "open_orders_evidence": {"observed_at": open_orders_observed_at, "rows": open_order_rows, "source_hash": _source_hash(open_order_rows)},
-        "asset_evidence": {"observed_at": asset_observed_at, "row": copy.deepcopy(asset), "source_hash": _source_hash(asset)},
-        "runtime_evidence": copy.deepcopy(dict(runtime_evidence)),
+        "positions_evidence": {"observed_at": positions_observed_at, "rows": positions_rows, "source_hash": hashlib.sha256(raw_positions_response).hexdigest()},
+        "open_orders_evidence": {"observed_at": open_orders_observed_at, "rows": open_order_rows, "source_hash": hashlib.sha256(raw_open_orders_response).hexdigest()},
+        "asset_evidence": {"observed_at": asset_observed_at, "row": copy.deepcopy(asset), "source_hash": hashlib.sha256(raw_asset_response).hexdigest()},
+        "runtime_evidence": {**copy.deepcopy(dict(runtime_facts)), "source_hash": hashlib.sha256(raw_runtime_evidence).hexdigest()},
         "pipeline_evidence": copy.deepcopy(dict(pipeline_evidence)),
         "broker_write_performed": False,
         "execution_authority": False,
@@ -218,6 +257,12 @@ def build_generic_live_dynamic_operational_proofs(
     return validate_generic_live_dynamic_operational_proofs(
         body, exact_plan=exact_plan, account_observation=account_observation,
         raw_account_response=raw_account_response,
+        raw_positions_response=raw_positions_response,
+        raw_open_orders_response=raw_open_orders_response,
+        raw_asset_response=raw_asset_response,
+        raw_runtime_evidence=raw_runtime_evidence,
+        trusted_deployed_sha=trusted_deployed_sha,
+        trusted_runtime_hash=trusted_runtime_hash,
         trusted_pipeline_hashes=trusted_pipeline_hashes, as_of=as_of,
     )
 

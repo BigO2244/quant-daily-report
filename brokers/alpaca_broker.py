@@ -522,29 +522,21 @@ class AlpacaBroker:
         d = _as_dict(account)
         out = {
             "id": _safe_str(d.get("id") or getattr(account, "id", "")),
-            "status": _safe_str(_required_account_field(d, account, "status")),
+            "status": _safe_str(d.get("status") or getattr(account, "status", "")),
             "cash": _safe_str(d.get("cash") or getattr(account, "cash", "")),
             "equity": _safe_str(d.get("equity") or getattr(account, "equity", "")),
             "buying_power": _safe_str(
                 d.get("buying_power") or getattr(account, "buying_power", "")
             ),
-            "pending_transfer_in": _safe_str(
-                _required_account_field(d, account, "pending_transfer_in")
-            ),
-            "pending_transfer_out": _safe_str(
-                _required_account_field(d, account, "pending_transfer_out")
-            ),
-            "long_market_value": _safe_str(
-                _required_account_field(d, account, "long_market_value")
-            ),
-            "short_market_value": _safe_str(
-                _required_account_field(d, account, "short_market_value")
-            ),
             "portfolio_value": _safe_str(
                 d.get("portfolio_value") or getattr(account, "portfolio_value", "")
             ),
-            "trading_blocked": _required_account_bool(d, account, "trading_blocked"),
-            "account_blocked": _required_account_bool(d, account, "account_blocked"),
+            "trading_blocked": _safe_bool(
+                d.get("trading_blocked") or getattr(account, "trading_blocked", False)
+            ),
+            "account_blocked": _safe_bool(
+                d.get("account_blocked") or getattr(account, "account_blocked", False)
+            ),
             "raw": d,
         }
         out["id_hash"] = hashlib.sha256(out["id"].encode("utf-8")).hexdigest()
@@ -556,6 +548,49 @@ class AlpacaBroker:
             out.get("cash", ""),
         )
         return out
+
+    def get_generic_live_dynamic_account(self) -> Dict[str, Any]:
+        """Strict Live-only account read for the dynamic-balance evidence path.
+
+        This is intentionally separate from ``get_account`` so PAPER and legacy
+        readers retain byte-for-byte-compatible behavior. Missing or ambiguous
+        Live fields fail closed instead of being normalized to safe defaults.
+        """
+
+        if self.paper:
+            raise RuntimeError("dynamic Live account evidence cannot use a PAPER broker")
+        try:
+            account = self.trading_client.get_account()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Alpaca dynamic Live account read failed: {_safe_str(exc)}"
+            ) from exc
+        d = _as_dict(account)
+        required = {
+            name: _required_account_field(d, account, name)
+            for name in (
+                "id", "status", "cash", "equity", "pending_transfer_in",
+                "pending_transfer_out", "long_market_value", "short_market_value",
+            )
+        }
+        required["trading_blocked"] = _required_account_bool(
+            d, account, "trading_blocked"
+        )
+        required["account_blocked"] = _required_account_bool(
+            d, account, "account_blocked"
+        )
+        return {
+            "id": _safe_str(required["id"]),
+            "status": _safe_str(required["status"]),
+            "cash": _safe_str(required["cash"]),
+            "equity": _safe_str(required["equity"]),
+            "pending_transfer_in": _safe_str(required["pending_transfer_in"]),
+            "pending_transfer_out": _safe_str(required["pending_transfer_out"]),
+            "long_market_value": _safe_str(required["long_market_value"]),
+            "short_market_value": _safe_str(required["short_market_value"]),
+            "trading_blocked": required["trading_blocked"],
+            "account_blocked": required["account_blocked"],
+        }
 
     def get_market_session_calendar(self, trade_date: str) -> Dict[str, Any]:
         """Return Alpaca's authoritative open/close for one market date."""
