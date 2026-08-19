@@ -31,7 +31,7 @@ from core.generic_live_v1_submission import (
 from scripts.manage_generic_live_v1_cron import render_cron_line, update_crontab
 from scripts.run_generic_live_v1_session import _require_exact_env, _require_source_pins
 from Tests.test_generic_live_v1_activation import (
-    EXPECTED, OBSERVATION, OWNER, _decision, _proofs,
+    EXPECTED, OBSERVATION, OWNER, _capture, _decision, _proofs,
 )
 from Tests.test_generic_live_v1_submission import Broker, _disarm, _ready
 
@@ -146,6 +146,7 @@ def test_result_persistence_failure_leaves_gate_armed(tmp_path: Path, monkeypatc
             activation_preflight=preflight,
             exact_plan=plan,
             lyra_decision=_decision(),
+            lyra_capture_result=_capture(),
             executed_at="2026-08-19T13:31:00+00:00",
             submit_enabled=True,
             broker=Broker(),
@@ -181,6 +182,7 @@ def test_transient_rearm_persistence_failure_is_retried_before_raise(
             activation_preflight=preflight,
             exact_plan=plan,
             lyra_decision=_decision(),
+            lyra_capture_result=_capture(),
             executed_at="2026-08-19T13:31:00+00:00",
             submit_enabled=True,
             broker=Broker(),
@@ -390,7 +392,8 @@ def test_runtime_pin_mismatch_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_protected_source_hash_pin_mismatch_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     preflight, plan = _ready()
-    decision = _decision()
+    capture = _capture()
+    decision = capture["decision"]
     proofs = _proofs(
         deployed_sha=EXPECTED, generic_schedule_installed=True,
         generic_submission_adapter_deployed=True, rollback_rearm_proven=True,
@@ -400,12 +403,14 @@ def test_protected_source_hash_pin_mismatch_is_rejected(monkeypatch: pytest.Monk
     monkeypatch.setenv("CAERUS_GENERIC_LIVE_OWNER_DECISION_HASH", OWNER["content_hash"])
     monkeypatch.setenv("CAERUS_GENERIC_LIVE_ACCOUNT_OBSERVATION_HASH", OBSERVATION["content_hash"])
     monkeypatch.setenv("CAERUS_GENERIC_LIVE_LYRA_DECISION_HASH", decision["content_hash"])
+    monkeypatch.setenv("CAERUS_GENERIC_LIVE_LYRA_CAPTURE_HASH", capture["content_hash"])
     monkeypatch.setenv("CAERUS_GENERIC_LIVE_OPERATIONAL_PROOFS_HASH", "f" * 64)
     monkeypatch.setenv("CAERUS_GENERIC_LIVE_PLAN_HASH", plan["content_hash"])
     with pytest.raises(RuntimeError, match="protected source pins mismatch"):
         _require_source_pins(
             owner_decision=OWNER, account_observation=OBSERVATION,
-            lyra_decision=decision, operational_proofs=proofs, plan=plan,
+            lyra_decision=decision, lyra_capture_result=capture,
+            operational_proofs=proofs, plan=plan,
         )
 
 

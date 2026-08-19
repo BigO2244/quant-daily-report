@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 import copy
+import datetime as dt
+import hashlib
 import json
 from pathlib import Path
 
@@ -7,121 +11,375 @@ import pytest
 from core.generic_lyra_v2_producer import (
     GenericLyraV2ProducerError,
     build_generic_lyra_v2_decision_batch,
+    generic_lyra_v2_readiness_path,
+    validate_governed_lyra_v2_decision,
 )
-from core.governed_universe_freeze import GovernedUniverseFreezeError
+from core.lyra_governed_evidence import (
+    CAPACITY_FORMULA,
+    LIQUIDITY_FORMULA,
+    RISK_FORMULA,
+    LYRA_RISK_POLICY_SCHEMA,
+    build_lyra_market_data_snapshot,
+)
+from core.governed_universe_freeze import read_governed_universe_symbols
+from core.lyra_target_selection import build_lyra_target_selection_evidence
 from core.portfolio_operating_model import content_hash
+from core.sleeve_decision import seal_sleeve_decision
+from scripts.capture_generic_lyra_v2 import (
+    capture_from_explicit_paths,
+    file_sha256,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FREEZE = json.loads(
     (ROOT / "docs/evidence/lyra_governed_universe_freeze_2026-08-19.json").read_text()
 )
+SYMBOLS = ["DELL", "INTC", "MU", "STX", "WDC"]
+EVALUATION_FILE_HASH = "a" * 64
+LYRA_SOURCE_HASH = "b" * 64
+LEGACY_DECISION_FILE_HASH = "c" * 64
+PRIOR_SOURCE_HASH = "d" * 64
+PRICE_SOURCE_HASH = "e" * 64
 
 
-def _sources(symbol="AAPL"):
-    row = {
-        "schema_version": "caerus.sleeve_decision.v1",
-        "trade_date": "2026-08-19", "session_id": "session:2026-08-19:source",
-        "session_hash": "a" * 64, "sleeve_id": "caerus_lyra",
-        "outcome": "RECOMMENDATION", "target_rows": [
-            {"symbol": symbol, "target_weight": 1.0, "source_target_weight": 1.0}
+def _shadow(effective_date: str, *, symbols=SYMBOLS) -> dict:
+    weights = {symbol: 0.2 for symbol in symbols}
+    return {
+        "trade_date": effective_date,
+        "effective_trade_date": effective_date,
+        "strategy_slug": "caerus_lyra",
+        "source_variant": "h1_weekly_h6_top5",
+        "target_weights": weights,
+        "expected_turnover": 999.0,
+        "rank_table": [
+            {
+                "ticker": symbol, "momentum_score": float(10 - index),
+                "momentum_rank": float(index), "is_selected": True,
+            }
+            for index, symbol in enumerate(symbols, start=1)
         ],
-        "reason_codes": ["EVALUATION_ONLY", "NON_DECISION_GRADE_UNIVERSE", "OPPORTUNITY_AVAILABLE"],
+        "holdings": [
+            {"ticker": symbol, "target_weight": 0.2} for symbol in symbols
+        ],
     }
-    # Legacy v1 permits additional fields; the producer binds every byte.
-    row["content_hash"] = content_hash(row)
-    polaris = {
-        "schema_version": "caerus.sleeve_decision.v1",
-        "trade_date": "2026-08-19", "session_id": row["session_id"],
-        "session_hash": row["session_hash"], "sleeve_id": "caerus_polaris",
-        "outcome": "OBSERVATION", "target_rows": [], "reason_codes": ["CONTROL"],
+
+
+def _sources() -> dict:
+    session = {
+        "schema_version": "caerus.session_manifest.v1",
+        "session_id": "session:2026-08-25:source",
+        "trade_date": "2026-08-25", "run_id": "run:source",
+        "as_of": "2026-08-25T11:05:00+00:00",
+        "created_at": "2026-08-25T11:05:00+00:00",
+        "inputs": [
+            {
+                "name": "sleeve_evaluations", "path": "evaluations.json",
+                "sha256": EVALUATION_FILE_HASH, "required": True,
+                "exists": True, "as_of": "2026-08-24",
+                "freshness_status": "FRESH",
+            },
+            {
+                "name": "sleeve_source:caerus_lyra:0", "path": "lyra.json",
+                "sha256": LYRA_SOURCE_HASH, "required": False,
+                "exists": True, "as_of": "2026-08-24",
+                "freshness_status": "FRESH",
+            },
+        ],
     }
-    polaris["content_hash"] = content_hash(polaris)
-    decisions = {
-        "schema_version": "caerus.sleeve_decision_batch.v1",
-        "trade_date": "2026-08-19", "session_id": row["session_id"],
-        "session_hash": row["session_hash"], "complete_registry_coverage": True,
-        "decisions": [polaris, row],
+    session["content_hash"] = content_hash(session)
+    envelope = {
+        "schema_version": "caerus_sleeve_evaluation_v1",
+        "trade_date": "2026-08-25", "run_id": "run:source",
+        "sleeve_id": "caerus_lyra",
+        "lifecycle": {"status": "shadow", "frozen": False},
+        "evaluation": {
+            "status": "OK", "runner": "shadow_snapshot",
+            "evaluated_at": "2026-08-25T11:04:00+00:00",
+        },
+        "opportunity": {
+            "available": True, "decision_eligible": True,
+            "effective_trade_date": "2026-08-24",
+        },
+        "provenance": {
+            "source_artifacts": [{"sha256": LYRA_SOURCE_HASH}],
+        },
+        "reason_codes": ["EVALUATION_ONLY", "NON_DECISION_GRADE_UNIVERSE"],
     }
-    decisions["content_hash"] = content_hash(decisions["decisions"])
-    def envelope(sleeve_id):
-        payload = {
-            "schema_version": "caerus_sleeve_evaluation_v1",
-            "trade_date": "2026-08-19", "run_id": "run:source",
-            "sleeve_id": sleeve_id, "strategy_type": "fixture", "role": "fixture",
-            "lifecycle": {"status": "shadow", "frozen": False},
-            "evaluation": {"status": "OK", "runner": "fixture", "message": "fixture", "evaluated_at": "2026-08-19T11:00:00+00:00"},
-            "opportunity": {"available": True, "decision_eligible": True, "candidate_count": 1},
-            "eligibility": {"capital_eligible": False},
-            "reason_codes": (["EVALUATION_ONLY", "NON_DECISION_GRADE_UNIVERSE"] if sleeve_id == "caerus_lyra" else ["CONTROL"]),
-        }
-        if sleeve_id == "caerus_lyra":
-            payload["universe"] = {"snapshot_hash": FREEZE["source_sha256"]}
-            payload["provenance"] = {"source_artifacts": [{"sha256": "b" * 64}]}
-        return payload
-    evaluations = {
+    evaluation = {
         "schema_version": "caerus_all_sleeve_evaluation_v1",
-        "trade_date": "2026-08-19", "run_id": "run:source",
-        "generated_at": "2026-08-19T11:00:00+00:00",
+        "trade_date": "2026-08-25", "run_id": "run:source",
+        "generated_at": "2026-08-25T11:04:00+00:00",
         "all_non_frozen_evaluated": True,
-        "expected_non_frozen_sleeve_ids": ["caerus_polaris", "caerus_lyra"],
-        "envelopes": [envelope("caerus_polaris"), envelope("caerus_lyra")],
+        "expected_non_frozen_sleeve_ids": ["caerus_lyra"],
+        "envelopes": [envelope],
     }
-    return decisions, evaluations
-
-
-def _build(**changes):
-    decisions, evaluations = _sources(changes.pop("symbol", "AAPL"))
-    return build_generic_lyra_v2_decision_batch(
-        legacy_decision_batch=decisions, evaluation_batch=evaluations,
-        universe_freeze=FREEZE, universe_path=ROOT / "data/universe.csv",
-        session_as_of="2026-08-19T07:00:00-04:00",
-        generated_at="2026-08-19T11:01:00+00:00", **changes,
+    targets = [
+        {"symbol": symbol, "target_weight": 0.2, "source_target_weight": 0.2}
+        for symbol in SYMBOLS
+    ]
+    legacy = {
+        "schema_version": "caerus.sleeve_decision.v1",
+        "trade_date": "2026-08-25", "session_id": session["session_id"],
+        "session_hash": session["content_hash"], "sleeve_id": "caerus_lyra",
+        "outcome": "RECOMMENDATION", "target_rows": targets,
+        "reason_codes": ["EVALUATION_ONLY", "NON_DECISION_GRADE_UNIVERSE"],
+    }
+    legacy["content_hash"] = content_hash(legacy)
+    legacy_batch = {
+        "schema_version": "caerus.sleeve_decision_batch.v1",
+        "trade_date": "2026-08-25", "session_id": session["session_id"],
+        "session_hash": session["content_hash"], "decisions": [legacy],
+    }
+    legacy_batch["content_hash"] = content_hash(legacy_batch["decisions"])
+    date = dt.date(2026, 8, 24)
+    observation_dates = []
+    while len(observation_dates) < 253:
+        if date.weekday() < 5:
+            observation_dates.append(date)
+        date -= dt.timedelta(days=1)
+    observation_dates.reverse()
+    universe_symbols = read_governed_universe_symbols(
+        freeze=FREEZE, universe_path=ROOT / "data/universe.csv",
+        session_as_of="2026-08-25T11:05:00+00:00",
     )
+    price_rows = []
+    for day_index, observation_date in enumerate(observation_dates):
+        date = observation_date.isoformat()
+        for symbol_index, symbol in enumerate(universe_symbols):
+            if symbol in SYMBOLS:
+                slope = 0.0030 - SYMBOLS.index(symbol) * 0.0001
+            else:
+                slope = 0.0002 - symbol_index * 0.0000001
+            close = 100.0 * ((1.0 + slope) ** day_index)
+            price_rows.append({
+                "date": date, "ticker": symbol, "close": close,
+                "volume": 1_000_000 + symbol_index * 10_000,
+            })
+    selection = build_lyra_target_selection_evidence(
+        execution_session="2026-08-25", signal_as_of="2026-08-24",
+        captured_at="2026-08-25T11:06:00+00:00",
+        source_path="outputs/research/flow_detection_v1/price_panel.parquet",
+        source_sha256=PRICE_SOURCE_HASH,
+        universe_freeze_hash=FREEZE["content_hash"],
+        universe_source_hash=FREEZE["source_sha256"],
+        frozen_universe_symbols=universe_symbols, price_rows=price_rows,
+    )
+    market = build_lyra_market_data_snapshot(
+        trade_date="2026-08-25", data_as_of="2026-08-24",
+        captured_at="2026-08-25T11:06:00+00:00",
+        source_path="outputs/research/flow_detection_v1/price_panel.parquet",
+        source_sha256=PRICE_SOURCE_HASH, required_symbols=SYMBOLS,
+        price_rows=price_rows,
+    )
+    risk_policy = {
+        "schema_version": LYRA_RISK_POLICY_SCHEMA,
+        "policy_id": "lyra-risk-policy:test-owner-approved-v1",
+        "status": "APPROVED", "sleeve_id": "caerus_lyra",
+        "metric": "annualized_volatility", "formula_id": RISK_FORMULA,
+        "lookback_sessions": 20, "minimum_price_observations": 21,
+        "annualization_factor": 252, "approved_by": "OWNER",
+        "approved_at": "2026-08-19T12:00:00+00:00",
+        "effective_from": "2026-08-19", "owner_decision_hash": "f" * 64,
+        "execution_authority": False,
+    }
+    risk_policy["content_hash"] = content_hash(risk_policy)
+    return {
+        "source_session_manifest": session,
+        "evaluation_batch": evaluation,
+        "evaluation_file_hash": EVALUATION_FILE_HASH,
+        "legacy_decision_batch": legacy_batch,
+        "legacy_decision_file_hash": LEGACY_DECISION_FILE_HASH,
+        "lyra_source": _shadow("2026-08-24"),
+        "lyra_source_hash": LYRA_SOURCE_HASH,
+        "prior_lyra_source": _shadow("2026-08-17"),
+        "prior_lyra_source_hash": PRIOR_SOURCE_HASH,
+        "universe_freeze": FREEZE,
+        "universe_path": ROOT / "data/universe.csv",
+        "market_data_snapshot": market,
+        "target_selection_evidence": selection,
+        "forecast_risk_policy": risk_policy,
+        "session_as_of": "2026-08-25T11:05:00+00:00",
+        "generated_at": "2026-08-25T11:06:00+00:00",
+    }
 
 
-def test_prospective_exact_freeze_builds_only_lyra_v2_and_preserves_targets() -> None:
-    batch = _build()
-    decision = next(row for row in batch["decisions"] if row["sleeve_id"] == "caerus_lyra")
-    assert batch["expected_sleeve_ids"] == ["caerus_lyra", "caerus_polaris"]
-    assert decision["schema_version"] == "caerus.sleeve_decision.v2"
+def _path_sources(tmp_path: Path) -> tuple[dict, list[dict]]:
+    arguments = _sources()
+    paths = {
+        "evaluation_batch_path": tmp_path / "sleeve_evaluations.json",
+        "lyra_source_path": tmp_path / "caerus_lyra.json",
+        "prior_lyra_source_path": tmp_path / "caerus_lyra_prior.json",
+        "universe_freeze_path": tmp_path / "universe_freeze.json",
+        "forecast_risk_policy_path": tmp_path / "risk_policy.json",
+        "source_session_manifest_path": tmp_path / "session_manifest.json",
+        "legacy_decision_batch_path": tmp_path / "sleeve_decisions.json",
+        "price_panel_path": tmp_path / "price_panel.parquet",
+    }
+    paths["lyra_source_path"].write_text(json.dumps(arguments["lyra_source"]))
+    paths["prior_lyra_source_path"].write_text(json.dumps(arguments["prior_lyra_source"]))
+    lyra_hash = file_sha256(paths["lyra_source_path"])
+    evaluation = copy.deepcopy(arguments["evaluation_batch"])
+    evaluation["envelopes"][0]["provenance"]["source_artifacts"][0]["sha256"] = lyra_hash
+    paths["evaluation_batch_path"].write_text(json.dumps(evaluation))
+    session = copy.deepcopy(arguments["source_session_manifest"])
+    session["inputs"][0]["sha256"] = file_sha256(paths["evaluation_batch_path"])
+    session["inputs"][1]["sha256"] = lyra_hash
+    session["content_hash"] = content_hash(
+        {key: value for key, value in session.items() if key != "content_hash"}
+    )
+    paths["source_session_manifest_path"].write_text(json.dumps(session))
+    legacy = copy.deepcopy(arguments["legacy_decision_batch"])
+    legacy["session_id"] = session["session_id"]
+    legacy["session_hash"] = session["content_hash"]
+    legacy["decisions"][0]["session_id"] = session["session_id"]
+    legacy["decisions"][0]["session_hash"] = session["content_hash"]
+    legacy["decisions"][0]["content_hash"] = content_hash({
+        key: value for key, value in legacy["decisions"][0].items()
+        if key != "content_hash"
+    })
+    legacy["content_hash"] = content_hash(legacy["decisions"])
+    paths["legacy_decision_batch_path"].write_text(json.dumps(legacy))
+    paths["universe_freeze_path"].write_text(json.dumps(FREEZE))
+    paths["forecast_risk_policy_path"].write_text(
+        json.dumps(arguments["forecast_risk_policy"])
+    )
+    paths["price_panel_path"].write_bytes(b"explicit-price-panel-fixture")
+    paths.update({
+        "execution_session": "2026-08-25", "signal_as_of": "2026-08-24",
+        "session_as_of": "2026-08-25T11:05:00+00:00",
+        "captured_at": "2026-08-25T11:06:00+00:00",
+        "universe_path": ROOT / "data/universe.csv",
+        "output_root": tmp_path / "output",
+    })
+    rows = [
+        {"date": observation["date"], "ticker": history["symbol"],
+         "close": observation["close"], "volume": 2_000_000.0}
+        for history in arguments["target_selection_evidence"]["close_histories"]
+        for observation in history["observations"]
+    ]
+    return paths, rows
+
+
+def test_current_governed_capture_derives_all_decision_grade_evidence() -> None:
+    result = build_generic_lyra_v2_decision_batch(**_sources())
+    decision = result["decision"]
+    assert result["status"] == "READY_NO_SUBMIT"
+    assert result["execution_session"] == "2026-08-25"
+    assert result["signal_as_of"] == "2026-08-24"
+    assert result["effective_target_date"] == "2026-08-24"
+    assert result["readiness"]["status"] == "READY_FOR_EXACT_PLAN_NO_SUBMIT"
     assert decision["decision_grade"] == "READY"
-    assert decision["target_rows"] == [{"symbol": "AAPL", "target_weight": 1.0}]
-    assert "GOVERNED_UNIVERSE_FREEZE_PROSPECTIVE" in decision["reason_codes"]
-    assert "NON_DECISION_GRADE_UNIVERSE" in decision["reason_codes"]
-    assert decision["liquidity_status"] == "UNKNOWN"
-    assert all("lane" not in key for key in decision)
+    assert decision["forecast_risk"]["formula_id"] == RISK_FORMULA
+    assert decision["forecast_risk"]["lookback_sessions"] == 20
+    assert decision["capacity"]["formula_id"] == CAPACITY_FORMULA
+    assert decision["capacity"]["maximum_deployable_capital_usd"] >= 20 * 460
+    assert decision["capacity"]["liquidity_evidence"]["formula_id"] == LIQUIDITY_FORMULA
+    assert decision["liquidity_status"] == "PASS"
+    assert decision["expected_turnover"] == 0.0
+    assert not ({"EVALUATION_ONLY", "NON_DECISION_GRADE_UNIVERSE"} & set(decision["reason_codes"]))
+    assert result["submission_allowed"] is False
+    assert generic_lyra_v2_readiness_path(
+        output_root="outputs/generic_lyra_v2", readiness=result["readiness"],
+    ).name == f"readiness-{result['readiness']['content_hash']}.json"
 
 
-def test_pre_freeze_session_and_file_drift_fail_closed(tmp_path) -> None:
-    decisions, evaluations = _sources()
-    with pytest.raises(GovernedUniverseFreezeError, match="predates"):
-        build_generic_lyra_v2_decision_batch(
-            legacy_decision_batch=decisions, evaluation_batch=evaluations,
-            universe_freeze=FREEZE, universe_path=ROOT / "data/universe.csv",
-            session_as_of="2026-08-18T07:00:00-04:00",
-            generated_at="2026-08-19T11:01:00+00:00",
-        )
-    drift = tmp_path / "universe.csv"
-    drift.write_bytes((ROOT / "data/universe.csv").read_bytes() + b"FAKE,Unknown\n")
-    with pytest.raises(GovernedUniverseFreezeError, match="bytes differ"):
-        build_generic_lyra_v2_decision_batch(
-            legacy_decision_batch=decisions, evaluation_batch=evaluations,
-            universe_freeze=FREEZE, universe_path=drift,
-            session_as_of="2026-08-19T07:00:00-04:00",
-            generated_at="2026-08-19T11:01:00+00:00",
-        )
+@pytest.mark.parametrize("field", ["annualized_volatility", "formula_id", "status"])
+def test_resealed_forecast_risk_bypass_is_rejected(field: str) -> None:
+    decision = build_generic_lyra_v2_decision_batch(**_sources())["decision"]
+    changed = copy.deepcopy(decision)
+    risk = changed["forecast_risk"]
+    risk[field] = {"annualized_volatility": 0.0001, "formula_id": "PLACEHOLDER", "status": "FAIL"}[field]
+    risk["content_hash"] = content_hash({k: v for k, v in risk.items() if k != "content_hash"})
+    changed = seal_sleeve_decision(changed)
+    with pytest.raises(Exception):
+        validate_governed_lyra_v2_decision(changed)
 
 
-def test_out_of_universe_target_and_tampered_source_fail_closed() -> None:
-    with pytest.raises(GenericLyraV2ProducerError, match="outside frozen universe"):
-        _build(symbol="ZZZZ")
-    decisions, evaluations = _sources()
-    decisions["decisions"][1]["target_rows"][0]["target_weight"] = 0.5
-    with pytest.raises(Exception, match="batch hash mismatch"):
-        build_generic_lyra_v2_decision_batch(
-            legacy_decision_batch=decisions, evaluation_batch=evaluations,
-            universe_freeze=FREEZE, universe_path=ROOT / "data/universe.csv",
-            session_as_of="2026-08-19T07:00:00-04:00",
-            generated_at="2026-08-19T11:01:00+00:00",
-        )
+def test_resealed_liquidity_and_capacity_bypass_is_rejected() -> None:
+    decision = build_generic_lyra_v2_decision_batch(**_sources())["decision"]
+    changed = copy.deepcopy(decision)
+    liquidity = changed["capacity"]["liquidity_evidence"]
+    liquidity["symbol_results"][0]["mean_dollar_volume_20"] = 9_999_999_999.0
+    liquidity["content_hash"] = content_hash(
+        {key: value for key, value in liquidity.items() if key != "content_hash"}
+    )
+    changed["capacity"]["content_hash"] = content_hash(
+        {key: value for key, value in changed["capacity"].items() if key != "content_hash"}
+    )
+    changed = seal_sleeve_decision(changed)
+    with pytest.raises(Exception, match="not recomputed"):
+        validate_governed_lyra_v2_decision(changed)
+
+
+def test_legacy_relabel_and_stale_market_data_fail_closed() -> None:
+    arguments = _sources()
+    arguments["evaluation_batch"]["envelopes"][0]["reason_codes"] = []
+    with pytest.raises(GenericLyraV2ProducerError, match="blockers are not explicit"):
+        build_generic_lyra_v2_decision_batch(**arguments)
+    arguments = _sources()
+    arguments["market_data_snapshot"]["data_as_of"] = "2026-08-17"
+    arguments["market_data_snapshot"]["content_hash"] = content_hash(
+        {key: value for key, value in arguments["market_data_snapshot"].items() if key != "content_hash"}
+    )
+    with pytest.raises(Exception):
+        build_generic_lyra_v2_decision_batch(**arguments)
+
+
+def test_source_session_and_target_tampering_fail_closed() -> None:
+    arguments = _sources()
+    arguments["source_session_manifest"]["inputs"][0]["sha256"] = "f" * 64
+    arguments["source_session_manifest"]["content_hash"] = content_hash(
+        {key: value for key, value in arguments["source_session_manifest"].items() if key != "content_hash"}
+    )
+    with pytest.raises(GenericLyraV2ProducerError, match="session/evaluation"):
+        build_generic_lyra_v2_decision_batch(**arguments)
+    arguments = _sources()
+    arguments["legacy_decision_batch"]["decisions"][0]["target_rows"][0]["target_weight"] = 0.1
+    with pytest.raises(GenericLyraV2ProducerError, match="lineage differs|hash differs"):
+        build_generic_lyra_v2_decision_batch(**arguments)
+
+
+def test_explicit_path_capture_is_no_write_by_default_and_idempotent_when_enabled(
+    tmp_path: Path,
+) -> None:
+    paths, rows = _path_sources(tmp_path)
+
+    def loader(path, *, symbols, data_as_of):
+        assert Path(path) == paths["price_panel_path"]
+        assert data_as_of == "2026-08-24"
+        return [row for row in rows if row["ticker"] in set(symbols)]
+
+    dry_run = capture_from_explicit_paths(**paths, price_row_loader=loader)
+    assert dry_run["capture_result"]["status"] == "READY_NO_SUBMIT"
+    assert dry_run["persisted_paths"] == []
+    assert not paths["output_root"].exists()
+    first = capture_from_explicit_paths(
+        **paths, price_row_loader=loader, write_advisory_artifacts=True,
+    )
+    second = capture_from_explicit_paths(
+        **paths, price_row_loader=loader, write_advisory_artifacts=True,
+    )
+    assert first["persisted_paths"] == second["persisted_paths"]
+    assert len(first["persisted_paths"]) == 10
+    assert all(Path(path).is_file() for path in first["persisted_paths"])
+    assert first["broker_write_performed"] is False
+
+
+def test_unapproved_risk_policy_and_resealed_rank_fail_closed() -> None:
+    arguments = _sources()
+    arguments["forecast_risk_policy"]["status"] = "PROPOSED"
+    arguments["forecast_risk_policy"]["content_hash"] = content_hash({
+        key: value for key, value in arguments["forecast_risk_policy"].items()
+        if key != "content_hash"
+    })
+    with pytest.raises(Exception, match="risk policy semantics"):
+        build_generic_lyra_v2_decision_batch(**arguments)
+    arguments = _sources()
+    selection = arguments["target_selection_evidence"]
+    selection["ranked_candidates"][0]["momentum_score"] += 1.0
+    selection["content_hash"] = content_hash({
+        key: value for key, value in selection.items() if key != "content_hash"
+    })
+    with pytest.raises(Exception, match="not recomputed"):
+        build_generic_lyra_v2_decision_batch(**arguments)

@@ -644,6 +644,7 @@ def _execute_generic_live_v1_session(
     activation_preflight: Mapping[str, Any],
     exact_plan: Mapping[str, Any],
     lyra_decision: Mapping[str, Any] | None = None,
+    lyra_capture_result: Mapping[str, Any] | None = None,
     executed_at: str,
     submit_enabled: bool = False,
     broker: GenericLiveV1Broker | None = None,
@@ -679,8 +680,15 @@ def _execute_generic_live_v1_session(
             )
         if lyra_decision.get("content_hash") != preflight.get("lyra_decision_hash"):
             raise GenericLiveV1SubmissionError("submission Lyra decision pin differs")
+        if not isinstance(lyra_capture_result, Mapping):
+            raise GenericLiveV1SubmissionError(
+                "submission requires the exact protected Lyra v2 capture bundle"
+            )
+        if lyra_capture_result.get("content_hash") != preflight.get("lyra_capture_hash"):
+            raise GenericLiveV1SubmissionError("submission Lyra capture pin differs")
         validate_generic_live_v1_lyra_plan_chain(
-            lyra_decision=lyra_decision, exact_plan=exact_plan,
+            lyra_decision=lyra_decision, lyra_capture_result=lyra_capture_result,
+            exact_plan=exact_plan,
             effective_session=preflight["effective_session"],
             account_id_hash=preflight["account_id_hash"],
             fresh_equity_usd=float(preflight["observed_equity_usd"]),
@@ -1135,6 +1143,7 @@ def execute_generic_live_v1_session(
     activation_preflight: Mapping[str, Any],
     exact_plan: Mapping[str, Any],
     lyra_decision: Mapping[str, Any] | None = None,
+    lyra_capture_result: Mapping[str, Any] | None = None,
     executed_at: str,
     submit_enabled: bool = False,
     broker: GenericLiveV1Broker | None = None,
@@ -1151,6 +1160,7 @@ def execute_generic_live_v1_session(
             activation_preflight=activation_preflight,
             exact_plan=exact_plan,
             lyra_decision=lyra_decision,
+            lyra_capture_result=lyra_capture_result,
             executed_at=executed_at,
             submit_enabled=submit_enabled,
             broker=broker,

@@ -18,6 +18,7 @@ from Tests.test_generic_live_v1_activation import (
     EXPECTED,
     OBSERVATION,
     OWNER,
+    _capture,
     _decision,
     _plan,
     _proofs,
@@ -26,7 +27,9 @@ from Tests.test_generic_live_v1_activation import (
 
 def execute_generic_live_v1_session(**kwargs):
     if kwargs.get("submit_enabled") is True:
-        kwargs.setdefault("lyra_decision", _decision())
+        capture = _capture()
+        kwargs.setdefault("lyra_decision", capture["decision"])
+        kwargs.setdefault("lyra_capture_result", capture)
     return _execute_generic_live_v1_session(**kwargs)
 
 
@@ -34,7 +37,7 @@ class Broker:
     def __init__(
         self, *, fail: bool = False, status: str = "accepted",
         terminal_status: str = "filled", equity: str = "460.9",
-        cash: str = "460.9", buying_power: str = "460.9",
+        cash: str = "60.9", buying_power: str = "60.9",
     ):
         self.orders = {}
         self.submit_calls = 0
@@ -56,7 +59,7 @@ class Broker:
         }
 
     def get_positions(self):
-        return []
+        return [{"symbol": "OLD", "qty": "4"}]
 
     def list_orders(self, status="open", limit=100):
         return []
@@ -105,7 +108,8 @@ class Broker:
 
 
 def _ready():
-    decision = _decision()
+    capture = _capture()
+    decision = capture["decision"]
     plan = _plan(decision)
     preflight = build_generic_live_v1_activation_preflight(
         owner_decision=OWNER, live_account_observation=OBSERVATION,
@@ -116,7 +120,7 @@ def _ready():
             accounting_pipeline_green=True, reporting_pipeline_green=True,
         ),
         evaluated_at="2026-08-19T13:30:00+00:00",
-        lyra_decision=decision, exact_plan=plan,
+        lyra_decision=decision, lyra_capture_result=capture, exact_plan=plan,
     )
     return preflight, plan
 

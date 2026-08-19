@@ -53,6 +53,7 @@ readonly PREFLIGHT_PATH="${CAERUS_GENERIC_LIVE_PREFLIGHT_PATH:?missing preflight
 readonly OWNER_DECISION_PATH="${CAERUS_GENERIC_LIVE_OWNER_DECISION_PATH:?missing owner decision path}"
 readonly ACCOUNT_OBSERVATION_PATH="${CAERUS_GENERIC_LIVE_ACCOUNT_OBSERVATION_PATH:?missing account observation path}"
 readonly LYRA_DECISION_PATH="${CAERUS_GENERIC_LIVE_LYRA_DECISION_PATH:?missing Lyra decision path}"
+readonly LYRA_CAPTURE_PATH="${CAERUS_GENERIC_LIVE_LYRA_CAPTURE_PATH:?missing Lyra capture path}"
 readonly OPERATIONAL_PROOFS_PATH="${CAERUS_GENERIC_LIVE_OPERATIONAL_PROOFS_PATH:?missing operational proofs path}"
 readonly PLAN_PATH="${CAERUS_GENERIC_LIVE_PLAN_PATH:?missing exact plan path}"
 readonly SESSION_GATE_PATH="${CAERUS_GENERIC_LIVE_SESSION_GATE_PATH:?missing session gate path}"
@@ -93,6 +94,7 @@ cd "${REPO_ROOT}"
     --owner-decision "${OWNER_DECISION_PATH}" \
     --account-observation "${ACCOUNT_OBSERVATION_PATH}" \
     --lyra-decision "${LYRA_DECISION_PATH}" \
+    --lyra-capture-result "${LYRA_CAPTURE_PATH}" \
     --operational-proofs "${OPERATIONAL_PROOFS_PATH}" \
     --exact-plan "${PLAN_PATH}" \
     --executed-at "${EXECUTED_AT}" \

@@ -88,7 +88,8 @@ def _require_exact_env(preflight: dict, *, submit: bool) -> None:
 
 def _require_source_pins(
     *, owner_decision: dict, account_observation: dict,
-    lyra_decision: dict, operational_proofs: dict, plan: dict,
+    lyra_decision: dict, lyra_capture_result: dict,
+    operational_proofs: dict, plan: dict,
 ) -> None:
     operational_hash = hashlib.sha256(
         canonical_json(operational_proofs).encode("utf-8")
@@ -97,6 +98,7 @@ def _require_source_pins(
         "CAERUS_GENERIC_LIVE_OWNER_DECISION_HASH": owner_decision.get("content_hash"),
         "CAERUS_GENERIC_LIVE_ACCOUNT_OBSERVATION_HASH": account_observation.get("content_hash"),
         "CAERUS_GENERIC_LIVE_LYRA_DECISION_HASH": lyra_decision.get("content_hash"),
+        "CAERUS_GENERIC_LIVE_LYRA_CAPTURE_HASH": lyra_capture_result.get("content_hash"),
         "CAERUS_GENERIC_LIVE_OPERATIONAL_PROOFS_HASH": operational_hash,
         "CAERUS_GENERIC_LIVE_PLAN_HASH": plan.get("content_hash"),
     }
@@ -114,6 +116,7 @@ def main() -> int:
     parser.add_argument("--owner-decision", type=Path)
     parser.add_argument("--account-observation", type=Path)
     parser.add_argument("--lyra-decision", type=Path)
+    parser.add_argument("--lyra-capture-result", type=Path)
     parser.add_argument("--operational-proofs", type=Path)
     parser.add_argument("--exact-plan", type=Path, required=True)
     parser.add_argument("--executed-at", required=True)
@@ -127,6 +130,7 @@ def main() -> int:
     owner_decision: dict = {}
     account_observation: dict = {}
     lyra_decision: dict = {}
+    lyra_capture_result: dict = {}
     operational_proofs: dict = {}
     safe_rearm_path: Path | None = None
     try:
@@ -151,6 +155,7 @@ def main() -> int:
             "owner decision": args.owner_decision,
             "account observation": args.account_observation,
             "Lyra decision": args.lyra_decision,
+            "Lyra capture result": args.lyra_capture_result,
             "operational proofs": args.operational_proofs,
         }
         missing_sources = sorted(label for label, path in source_paths.items() if path is None)
@@ -164,6 +169,9 @@ def main() -> int:
         owner_decision = secure_read_json(args.owner_decision, allowed_roots=read_roots)
         account_observation = secure_read_json(args.account_observation, allowed_roots=read_roots)
         lyra_decision = secure_read_json(args.lyra_decision, allowed_roots=read_roots)
+        lyra_capture_result = secure_read_json(
+            args.lyra_capture_result, allowed_roots=read_roots
+        )
         operational_proofs = secure_read_json(args.operational_proofs, allowed_roots=read_roots)
         require_generic_live_v1_owner_current_at_execution(
             owner_decision=owner_decision, executed_at=args.executed_at,
@@ -172,6 +180,7 @@ def main() -> int:
             owner_decision=owner_decision,
             account_observation=account_observation,
             lyra_decision=lyra_decision,
+            lyra_capture_result=lyra_capture_result,
             operational_proofs=operational_proofs,
             plan=plan,
         )
@@ -181,6 +190,7 @@ def main() -> int:
             live_account_observation=account_observation,
             operational_proofs=operational_proofs,
             lyra_decision=lyra_decision,
+            lyra_capture_result=lyra_capture_result,
             exact_plan=plan,
         )
         _require_exact_env(preflight, submit=args.submit_exact_session)
@@ -188,6 +198,7 @@ def main() -> int:
         result = execute_generic_live_v1_session(
             activation_preflight=preflight, exact_plan=plan,
             lyra_decision=lyra_decision,
+            lyra_capture_result=lyra_capture_result,
             executed_at=args.executed_at, submit_enabled=args.submit_exact_session,
             broker=broker, wal_directory=args.wal_directory,
             rearm_state_path=args.session_gate_path,

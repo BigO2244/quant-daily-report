@@ -22,11 +22,22 @@ from core.generic_live_v1_capital import (
     GenericLiveV1CapitalError,
     build_generic_live_v1_capital_proof,
 )
+from core.generic_lyra_v2_producer import (
+    validate_generic_lyra_v2_capture_result,
+    validate_governed_lyra_v2_decision,
+)
+from core.lyra_governed_evidence import (
+    LyraGovernedEvidenceError,
+    validate_lyra_capacity_evidence,
+    validate_lyra_forecast_risk_evidence,
+    validate_lyra_liquidity_evidence,
+)
 from core.owner_decision import OwnerDecision, parse_owner_decision
 from core.sleeve_decision import validate_sleeve_decision
 
 
-GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA = "caerus.generic_live_v1_activation_preflight.v1"
+GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA = "caerus.generic_live_v1_activation_preflight.v2"
+LEGACY_GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA = "caerus.generic_live_v1_activation_preflight.v1"
 GENERIC_LIVE_V1_ADAPTER = "CAERUS_GENERIC_LANE_V4"
 GENERIC_LIVE_V1_LANE_ID = "generic-live-v1"
 GENERIC_LIVE_V1_SLEEVE_ID = "caerus_lyra"
@@ -55,7 +66,7 @@ _FIELDS = frozenset(
         "schema_version", "preflight_id", "evaluated_at", "status",
         "reason_codes", "effective_session", "owner_decision_id",
         "owner_decision_hash", "account_observation_hash", "account_id_hash",
-        "lyra_decision_id", "lyra_decision_hash", "exact_plan_id",
+        "lyra_decision_id", "lyra_decision_hash", "lyra_capture_hash", "exact_plan_id",
         "exact_plan_hash", "deployed_sha", "expected_deployed_sha",
         "gate_results", "capital_ceiling_usd", "observed_equity_usd",
         "effective_capital_ceiling_usd", "minimum_trade_usd",
@@ -94,6 +105,13 @@ _DECISION_BLOCKERS = frozenset(
         "LYRA_V2_DECISION_NOT_READY_RECOMMENDATION",
         "LYRA_V2_DECISION_LIQUIDITY_NOT_APPROVED",
         "LYRA_V2_DECISION_HISTORICAL_EVIDENCE_BLOCKER_UNRESOLVED",
+        "LYRA_V2_DECISION_GOVERNED_EVIDENCE_INVALID",
+        "LYRA_V2_DECISION_FORECAST_RISK_INVALID",
+        "LYRA_V2_DECISION_CAPACITY_INVALID",
+        "LYRA_V2_DECISION_LIQUIDITY_EVIDENCE_INVALID",
+        "LYRA_V2_CAPTURE_MISSING",
+        "LYRA_V2_CAPTURE_INVALID",
+        "LYRA_V2_CAPTURE_DECISION_MISMATCH",
     }
 )
 _PLAN_BLOCKERS = frozenset(
@@ -203,7 +221,8 @@ def _owner_terms(owner: OwnerDecision) -> Mapping[str, Any]:
 
 
 def _valid_lyra_decision(
-    decision: Mapping[str, Any] | None, *, session: str
+    decision: Mapping[str, Any] | None, *, capture_result: Mapping[str, Any] | None,
+    session: str,
 ) -> tuple[bool, list[str]]:
     if decision is None:
         return False, ["LYRA_V2_DECISION_MISSING"]
@@ -211,13 +230,44 @@ def _valid_lyra_decision(
     if failures:
         return False, ["LYRA_V2_DECISION_INVALID"]
     blockers: list[str] = []
+    if capture_result is None:
+        blockers.append("LYRA_V2_CAPTURE_MISSING")
+    else:
+        try:
+            capture = validate_generic_lyra_v2_capture_result(capture_result)
+        except (ValueError, TypeError):
+            blockers.append("LYRA_V2_CAPTURE_INVALID")
+        else:
+            if capture["decision"] != decision:
+                blockers.append("LYRA_V2_CAPTURE_DECISION_MISMATCH")
+    try:
+        validate_lyra_forecast_risk_evidence(decision.get("forecast_risk"))
+    except (LyraGovernedEvidenceError, TypeError, ValueError):
+        blockers.append("LYRA_V2_DECISION_FORECAST_RISK_INVALID")
+    raw_capacity = decision.get("capacity")
+    raw_liquidity = (
+        raw_capacity.get("liquidity_evidence")
+        if isinstance(raw_capacity, Mapping) else None
+    )
+    try:
+        validate_lyra_liquidity_evidence(raw_liquidity)
+    except (LyraGovernedEvidenceError, TypeError, ValueError):
+        blockers.append("LYRA_V2_DECISION_LIQUIDITY_EVIDENCE_INVALID")
+    try:
+        validate_lyra_capacity_evidence(raw_capacity)
+    except (LyraGovernedEvidenceError, TypeError, ValueError):
+        blockers.append("LYRA_V2_DECISION_CAPACITY_INVALID")
+    try:
+        validate_governed_lyra_v2_decision(decision)
+    except (ValueError, TypeError):
+        blockers.append("LYRA_V2_DECISION_GOVERNED_EVIDENCE_INVALID")
     if decision.get("sleeve_id") != GENERIC_LIVE_V1_SLEEVE_ID:
         blockers.append("LYRA_V2_DECISION_WRONG_SLEEVE")
     if decision.get("trade_date") != session:
         blockers.append("LYRA_V2_DECISION_WRONG_SESSION")
     if decision.get("outcome") != "RECOMMENDATION" or decision.get("decision_grade") != "READY":
         blockers.append("LYRA_V2_DECISION_NOT_READY_RECOMMENDATION")
-    if decision.get("liquidity_status") not in {"PASS", "CONSTRAINED"}:
+    if decision.get("liquidity_status") != "PASS":
         blockers.append("LYRA_V2_DECISION_LIQUIDITY_NOT_APPROVED")
     reasons = set(decision.get("reason_codes") or [])
     if reasons & {"NON_DECISION_GRADE_UNIVERSE", "EVALUATION_ONLY"}:
@@ -329,6 +379,7 @@ def build_generic_live_v1_activation_preflight(
     operational_proofs: Mapping[str, Any],
     evaluated_at: str,
     lyra_decision: Mapping[str, Any] | None = None,
+    lyra_capture_result: Mapping[str, Any] | None = None,
     exact_plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build immutable session evidence; never mutate a gate or submit an order."""
@@ -352,7 +403,8 @@ def build_generic_live_v1_activation_preflight(
         raise GenericLiveV1ActivationError("open_order_count must be a non-negative integer")
 
     decision_green, decision_blockers = _valid_lyra_decision(
-        lyra_decision, session=str(owner.effective_session)
+        lyra_decision, capture_result=lyra_capture_result,
+        session=str(owner.effective_session)
     )
     effective_capital = min(460.0, float(observation["equity"]))
     plan_green, plan_blockers = _valid_plan(
@@ -400,6 +452,7 @@ def build_generic_live_v1_activation_preflight(
         "account_id_hash": observation["account_id_hash"],
         "lyra_decision_id": lyra_decision.get("decision_id") if decision_green and lyra_decision else None,
         "lyra_decision_hash": lyra_decision.get("content_hash") if decision_green and lyra_decision else None,
+        "lyra_capture_hash": lyra_capture_result.get("content_hash") if decision_green and lyra_capture_result else None,
         "exact_plan_id": exact_plan.get("plan_id") if plan_green and exact_plan else None,
         "exact_plan_hash": exact_plan.get("content_hash") if plan_green and exact_plan else None,
         "deployed_sha": deployed_sha,
@@ -423,7 +476,10 @@ def build_generic_live_v1_activation_preflight(
         "execution_authority": False,
         "activation_authority": False,
         "approval_authority": False,
-        "source_hashes": sorted(set([owner.content_hash, observation["content_hash"], *source_hashes])),
+        "source_hashes": sorted(set([
+            owner.content_hash, observation["content_hash"], *source_hashes,
+            *([lyra_capture_result["content_hash"]] if decision_green and lyra_capture_result else []),
+        ])),
     }
     seed = _hash(body)
     body["preflight_id"] = f"generic-live-v1-preflight:{owner.effective_session}:{seed[:24]}"
@@ -432,10 +488,23 @@ def build_generic_live_v1_activation_preflight(
 
 
 def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) -> dict[str, Any]:
-    if not isinstance(payload, Mapping) or set(payload) != _FIELDS:
+    legacy_fields = _FIELDS - {"lyra_capture_hash"}
+    is_legacy = (
+        isinstance(payload, Mapping)
+        and payload.get("schema_version") == LEGACY_GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA
+        and set(payload) == legacy_fields
+    )
+    if not isinstance(payload, Mapping) or (set(payload) != _FIELDS and not is_legacy):
         raise GenericLiveV1ActivationError("activation preflight fields are invalid")
-    if payload.get("schema_version") != GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA:
+    if payload.get("schema_version") not in {
+        GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA,
+        LEGACY_GENERIC_LIVE_V1_ACTIVATION_PREFLIGHT_SCHEMA,
+    }:
         raise GenericLiveV1ActivationError("unsupported activation preflight schema")
+    if is_legacy and payload.get("status") != "BLOCKED":
+        raise GenericLiveV1ActivationError(
+            "legacy preflight cannot authorize activation without a capture binding"
+        )
     if payload.get("status") not in {"BLOCKED", "READY_TO_DISARM_FOR_SESSION"}:
         raise GenericLiveV1ActivationError("activation preflight status is invalid")
     reasons = payload.get("reason_codes")
@@ -477,13 +546,18 @@ def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) ->
     if payload["status"] == "READY_TO_DISARM_FOR_SESSION":
         if not all(gates.values()) or reasons != ["ALL_OWNER_APPROVED_LIVE_V1_GATES_GREEN"]:
             raise GenericLiveV1ActivationError("ready status requires every gate green")
-        if not payload["lyra_decision_hash"] or not payload["exact_plan_hash"]:
-            raise GenericLiveV1ActivationError("ready status requires decision and plan bindings")
+        if (
+            not payload["lyra_decision_hash"] or not payload["lyra_capture_hash"]
+            or not payload["exact_plan_hash"]
+        ):
+            raise GenericLiveV1ActivationError(
+                "ready status requires capture, decision, and plan bindings"
+            )
     elif all(gates.values()):
         raise GenericLiveV1ActivationError("blocked status requires at least one failed gate")
     for field in ("owner_decision_hash", "account_observation_hash", "account_id_hash", "content_hash"):
         _sha(payload.get(field), label=field)
-    for field in ("lyra_decision_hash", "exact_plan_hash"):
+    for field in ("lyra_decision_hash", "lyra_capture_hash", "exact_plan_hash"):
         if payload.get(field) is not None:
             _sha(payload[field], label=field)
     _git_sha(payload.get("deployed_sha"), label="deployed_sha")
@@ -517,7 +591,8 @@ def validate_generic_live_v1_activation_preflight(payload: Mapping[str, Any]) ->
 def recompute_generic_live_v1_activation_preflight(
     *, expected_preflight: Mapping[str, Any], owner_decision: Mapping[str, Any],
     live_account_observation: Mapping[str, Any], operational_proofs: Mapping[str, Any],
-    lyra_decision: Mapping[str, Any], exact_plan: Mapping[str, Any],
+    lyra_decision: Mapping[str, Any], lyra_capture_result: Mapping[str, Any],
+    exact_plan: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Rebuild a preflight from exact protected sources and require byte equality."""
 
@@ -528,6 +603,7 @@ def recompute_generic_live_v1_activation_preflight(
         operational_proofs=operational_proofs,
         evaluated_at=expected["evaluated_at"],
         lyra_decision=lyra_decision,
+        lyra_capture_result=lyra_capture_result,
         exact_plan=exact_plan,
     )
     if rebuilt != expected or canonical_json(rebuilt) != canonical_json(expected):
@@ -552,14 +628,15 @@ def require_generic_live_v1_owner_current_at_execution(
 
 
 def validate_generic_live_v1_lyra_plan_chain(
-    *, lyra_decision: Mapping[str, Any], exact_plan: Mapping[str, Any],
+    *, lyra_decision: Mapping[str, Any], lyra_capture_result: Mapping[str, Any],
+    exact_plan: Mapping[str, Any],
     effective_session: str, account_id_hash: str,
     fresh_equity_usd: float, fresh_cash_usd: float,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Re-prove the full Lyra decision, target, contribution, and plan chain."""
 
     decision_green, decision_blockers = _valid_lyra_decision(
-        lyra_decision, session=effective_session
+        lyra_decision, capture_result=lyra_capture_result, session=effective_session
     )
     plan_green, plan_blockers = _valid_plan(
         exact_plan,

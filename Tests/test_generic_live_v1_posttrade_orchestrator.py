@@ -241,7 +241,9 @@ def _session_fixture(tmp_path, *, outcome="FILLED"):
 
 
 def _no_trade_fixture(tmp_path):
-    decision = _decision()
+    from Tests.test_generic_live_v1_activation import _capture
+    capture = _capture()
+    decision = capture["decision"]
     plan = _plan(decision, already_at_target=True)
     assert not plan["buy_orders"] and not plan["sell_orders"]
     observation = copy.deepcopy(OBSERVATION)
@@ -259,7 +261,7 @@ def _no_trade_fixture(tmp_path):
             accounting_pipeline_green=True, reporting_pipeline_green=True,
         ),
         evaluated_at="2026-08-19T13:30:00+00:00",
-        lyra_decision=decision, exact_plan=plan,
+        lyra_decision=decision, lyra_capture_result=capture, exact_plan=plan,
     )
 
     class HoldingBroker(Broker):
@@ -267,7 +269,10 @@ def _no_trade_fixture(tmp_path):
             super().__init__(cash="60.9", buying_power="60.9")
 
         def get_positions(self):
-            return [{"symbol": "AAPL", "qty": "4"}]
+            return [
+                {"symbol": row["symbol"], "qty": str(row["quantity"])}
+                for row in plan["starting_positions"]
+            ]
 
     gate = tmp_path / "gate.json"
     _disarm(gate, preflight, plan)
@@ -284,9 +289,10 @@ def _no_trade_fixture(tmp_path):
         "as_of": "2026-08-19T20:00:00+00:00", **_scope(plan),
         "cash": 60.9, "equity": 460.9,
         "positions": [{
-            "symbol": "AAPL", "quantity": 4.0, "mark": 100.0,
-            "market_value": 400.0, "source_hash": SOURCE,
-        }],
+            "symbol": row["symbol"], "quantity": row["quantity"],
+            "mark": 20.0, "market_value": row["quantity"] * 20.0,
+            "source_hash": SOURCE,
+        } for row in plan["starting_positions"]],
         "source_hash": SOURCE,
     })
     lifecycle = seal_generic_live_v1_order_lifecycle(

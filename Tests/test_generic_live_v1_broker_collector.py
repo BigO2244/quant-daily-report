@@ -54,22 +54,37 @@ class ReadBroker:
 
     def get_account(self):
         gross = self.filled_quantity * float(self.order["enforcement_price"])
-        cash = float(self.plan["starting_cash"]) - gross
+        direction = -1.0 if self.order["side"] == "BUY" else 1.0
+        cash = float(self.plan["starting_cash"]) + direction * gross
+        positions = self._positions()
+        marks = {row["symbol"]: float(row["price"]) for row in self.plan["price_marks"]}
         return {
             "id": self.raw_account_id,
             "id_hash": self.plan["account_id_hash"], "status": "ACTIVE",
             "trading_blocked": False, "account_blocked": False,
-            "cash": str(cash), "equity": str(cash + self.filled_quantity * 100.0),
+            "cash": str(cash),
+            "equity": str(cash + sum(quantity * marks[symbol] for symbol, quantity in positions.items())),
         }
 
+    def _positions(self):
+        positions = {
+            row["symbol"]: float(row["quantity"])
+            for row in self.plan["starting_positions"]
+        }
+        direction = 1.0 if self.order["side"] == "BUY" else -1.0
+        positions[self.order["symbol"]] = (
+            positions.get(self.order["symbol"], 0.0)
+            + direction * self.filled_quantity
+        )
+        return {symbol: quantity for symbol, quantity in positions.items() if quantity > 1e-8}
+
     def get_positions(self):
-        if not self.filled_quantity:
-            return []
+        marks = {row["symbol"]: float(row["price"]) for row in self.plan["price_marks"]}
         return [{
-            "symbol": self.order["symbol"], "qty": str(self.filled_quantity),
-            "current_price": "100",
-            "market_value": str(self.filled_quantity * 100.0),
-        }]
+            "symbol": symbol, "qty": str(quantity),
+            "current_price": str(marks[symbol]),
+            "market_value": str(quantity * marks[symbol]),
+        } for symbol, quantity in sorted(self._positions().items())]
 
 
 def _collector_arguments(tmp_path, *, outcome="FILLED"):
