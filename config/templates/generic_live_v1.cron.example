@@ -1,5 +1,5 @@
-# Install only after a READY_TO_DISARM_FOR_SESSION artifact exists and the
-# generic source commit is the active, attested deployment. The Python runner
-# defaults to no-submit; the explicit submit flag belongs only in the separately
-# activated exact-session entry.
-36 9 * * 1-5 $HOME/quant-daily-report/scripts/cron_generic_live_v1.sh >> $HOME/quant-daily-report/logs/cron_generic_live_v1.log 2>&1
+# Render and install one exact, date-bound line with
+# scripts/manage_generic_live_v1_cron.py. Never install a weekday-recurring
+# generic Live entry. The posttrade observation schedule remains disabled.
+36 9 DD MM * /home/brettolson/quant-daily-report/scripts/cron_generic_live_v1.sh --effective-session YYYY-MM-DD >> /home/brettolson/quant-daily-report/logs/cron_generic_live_v1.log 2>&1 # CAERUS_GENERIC_LIVE_V1_SESSION=YYYY-MM-DD
+# POSTTRADE_DISABLED_BY_DEFAULT CAERUS_GENERIC_LIVE_POSTTRADE_OBSERVATION_ENABLED=0

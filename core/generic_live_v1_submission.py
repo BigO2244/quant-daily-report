@@ -16,6 +16,7 @@ import json
 import math
 import os
 import fcntl
+import stat
 import time
 from pathlib import Path
 from typing import Any, Mapping, Protocol
@@ -28,6 +29,7 @@ from core.lane_performance import validate_lane_performance
 from core.lane_reconciliation import validate_lane_reconciliation
 from core.lane_oms import build_lane_oms_intents
 from core.lane_truth_status import validate_dashboard_performance_surfaces
+from core.generic_live_v1_ops import reject_sensitive_payload
 
 
 GENERIC_LIVE_V1_SUBMISSION_RESULT_SCHEMA = "caerus.generic_live_v1_submission_result.v1"
@@ -141,7 +143,13 @@ def _validate_owner_execution_policy(plan: Mapping[str, Any]) -> None:
 
 
 def _write_exclusive(path: Path, payload: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_absolute() or path.is_symlink() or path.parent.is_symlink():
+        raise GenericLiveV1SubmissionError("immutable artifact path must be absolute and non-symlink")
+    reject_sensitive_payload(payload)
+    if not path.parent.exists():
+        path.parent.mkdir(parents=False, exist_ok=False, mode=0o700)
+    if stat.S_IMODE(os.lstat(path.parent).st_mode) != 0o700:
+        raise GenericLiveV1SubmissionError("immutable artifact directory must have mode 0700")
     encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode()
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -165,7 +173,13 @@ def _write_exclusive(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 def _atomic_rearm(path: Path, payload: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_absolute() or path.is_symlink() or path.parent.is_symlink():
+        raise GenericLiveV1SubmissionError("rearm state path must be absolute and non-symlink")
+    reject_sensitive_payload(payload)
+    if not path.parent.exists():
+        path.parent.mkdir(parents=False, exist_ok=False, mode=0o700)
+    if stat.S_IMODE(os.lstat(path.parent).st_mode) != 0o700:
+        raise GenericLiveV1SubmissionError("rearm state directory must have mode 0700")
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode()
     try:
@@ -190,6 +204,13 @@ def _atomic_rearm(path: Path, payload: Mapping[str, Any]) -> None:
 def _require_session_disarm(
     path: Path, *, preflight_hash: str, plan_hash: str, effective_session: str
 ) -> None:
+    if not path.is_absolute() or path.is_symlink():
+        raise GenericLiveV1SubmissionError("generic session disarm path must be absolute and non-symlink")
+    try:
+        if stat.S_IMODE(os.lstat(path).st_mode) != 0o600:
+            raise GenericLiveV1SubmissionError("generic session disarm state must have mode 0600")
+    except FileNotFoundError:
+        pass
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -255,6 +276,63 @@ def rearm_generic_live_v1_session(
     return payload
 
 
+def ensure_generic_live_v1_rearmed_after_failure(
+    *, state_path: Path | str, preflight_hash: str | None,
+    plan_hash: str | None, rearmed_at: str,
+) -> dict[str, Any]:
+    """Best-effort emergency rearm for unreadable or pre-validation inputs.
+
+    If a typed ARMED state already exists it is preserved, including its more
+    specific trigger.  Missing lineage is represented by the all-zero digest;
+    that sentinel can never match a submission preflight or plan.
+    """
+
+    path = Path(state_path)
+    try:
+        current = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        current = {}
+    expected_fields = {
+        "schema_version", "status", "trigger", "rearmed_at", "preflight_hash",
+        "plan_hash", "legacy_executor_enabled", "generic_submission_enabled",
+        "paper_cutover_enabled", "content_hash",
+    }
+    if (
+        isinstance(current, Mapping)
+        and set(current) == expected_fields
+        and current.get("schema_version") == GENERIC_LIVE_V1_REARM_SCHEMA
+        and current.get("status") == "ARMED"
+        and current.get("legacy_executor_enabled") is False
+        and current.get("generic_submission_enabled") is False
+        and current.get("paper_cutover_enabled") is False
+    ):
+        try:
+            if current.get("content_hash") == _hash(current):
+                return copy.deepcopy(dict(current))
+        except Exception:
+            pass
+    zero = "0" * 64
+    def valid_hash(value: Any) -> bool:
+        return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+    for key, supplied in (("preflight_hash", preflight_hash), ("plan_hash", plan_hash)):
+        if valid_hash(supplied):
+            continue
+        recovered = current.get(key) if isinstance(current, Mapping) else None
+        if valid_hash(recovered):
+            if key == "preflight_hash":
+                preflight_hash = recovered
+            else:
+                plan_hash = recovered
+    return rearm_generic_live_v1_session(
+        state_path=path,
+        preflight_hash=preflight_hash if valid_hash(preflight_hash) else zero,
+        plan_hash=plan_hash if valid_hash(plan_hash) else zero,
+        rearmed_at=rearmed_at,
+        trigger="PREFLIGHT_BREAK",
+    )
+
+
 def _safe_broker_order(order: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "broker_order_id": str(order.get("id") or ""),
@@ -267,8 +345,16 @@ def _safe_broker_order(order: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _acquire_session_lock(path: Path) -> int:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_absolute() or path.is_symlink() or path.parent.is_symlink():
+        raise GenericLiveV1SubmissionError("session lock path must be absolute and non-symlink")
+    if not path.parent.exists():
+        path.parent.mkdir(parents=False, exist_ok=False, mode=0o700)
+    if stat.S_IMODE(os.lstat(path.parent).st_mode) != 0o700:
+        raise GenericLiveV1SubmissionError("session lock directory must have mode 0700")
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    if stat.S_IMODE(os.fstat(descriptor).st_mode) != 0o600:
+        os.close(descriptor)
+        raise GenericLiveV1SubmissionError("session lock file must have mode 0600")
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:
@@ -366,7 +452,7 @@ def _validate_existing_receipt(
     return copy.deepcopy(dict(payload))
 
 
-def execute_generic_live_v1_session(
+def _execute_generic_live_v1_session(
     *,
     activation_preflight: Mapping[str, Any],
     exact_plan: Mapping[str, Any],
@@ -722,6 +808,48 @@ def seal_generic_live_v1_order_lifecycle(
     body["lifecycle_id"] = f"generic-live-v1-order:{submission_result['effective_session']}:{seed[:24]}"
     body["content_hash"] = _hash(body)
     return _validate_order_lifecycle(body, submission_result=submission_result)
+def execute_generic_live_v1_session(
+    *,
+    activation_preflight: Mapping[str, Any],
+    exact_plan: Mapping[str, Any],
+    executed_at: str,
+    submit_enabled: bool = False,
+    broker: GenericLiveV1Broker | None = None,
+    wal_directory: Path | str | None = None,
+    rearm_state_path: Path | str | None = None,
+    result_path: Path | str | None = None,
+    poll_attempts: int = 3,
+    poll_interval_seconds: float = 1.0,
+) -> dict[str, Any]:
+    """Run the session and guarantee an emergency rearm on submit failures."""
+
+    try:
+        return _execute_generic_live_v1_session(
+            activation_preflight=activation_preflight,
+            exact_plan=exact_plan,
+            executed_at=executed_at,
+            submit_enabled=submit_enabled,
+            broker=broker,
+            wal_directory=wal_directory,
+            rearm_state_path=rearm_state_path,
+            result_path=result_path,
+            poll_attempts=poll_attempts,
+            poll_interval_seconds=poll_interval_seconds,
+        )
+    except BaseException:
+        if submit_enabled is True and rearm_state_path is not None:
+            try:
+                ensure_generic_live_v1_rearmed_after_failure(
+                    state_path=rearm_state_path,
+                    preflight_hash=(activation_preflight.get("content_hash") if isinstance(activation_preflight, Mapping) else None),
+                    plan_hash=(exact_plan.get("content_hash") if isinstance(exact_plan, Mapping) else None),
+                    rearmed_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+                )
+            except BaseException as rearm_error:
+                raise GenericLiveV1SubmissionError(
+                    "generic Live v1 failed and emergency rearm persistence also failed"
+                ) from rearm_error
+        raise
 
 
 def _validate_order_lifecycle(
@@ -988,5 +1116,6 @@ __all__ = [
     "GENERIC_LIVE_V1_ORDER_LIFECYCLE_SCHEMA",
     "GENERIC_LIVE_V1_SUBMISSION_RESULT_SCHEMA", "GenericLiveV1SubmissionError",
     "execute_generic_live_v1_session", "finalize_generic_live_v1_posttrade",
-    "rearm_generic_live_v1_session", "seal_generic_live_v1_order_lifecycle",
+    "ensure_generic_live_v1_rearmed_after_failure", "rearm_generic_live_v1_session",
+    "seal_generic_live_v1_order_lifecycle",
 ]
