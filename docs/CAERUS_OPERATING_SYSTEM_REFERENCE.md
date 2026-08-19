@@ -187,22 +187,30 @@ active-cutover gates: active account pin, capital ceiling, and max-orders
 configuration; active generic checkout and schedule; and owner, submission,
 and schedule approvals. The kill switch remains armed.
 
-The owner subsequently approved the exact Lyra-only Live v1 policy, and its
-generic source is now deployed inertly in the active checkout. The authoritative
-deployment record is
-[`generic_live_v1_active_source_deployment_2026-08-19.json`](evidence/generic_live_v1_active_source_deployment_2026-08-19.json),
-content hash `4f704b374bbc1d020952131a3893b90b385836808851f53e05af6e1fc9fcccef`.
-Active `main` and its upstream are clean at `7d6caf99...`; 173 deploy tests and
-six operational checks passed. This is source deployment only: generic config
-is absent, generic cron count is zero, the legacy kill switch remains armed,
-legacy environment and executor hashes are unchanged, PAPER is unchanged, and
-no broker call or write occurred. Activation and submission remain `NO_GO` on
-seven named P0s: no factual current-session Lyra v2-to-v4 chain; no runtime
-preflight recomputation from exact source artifacts; incomplete dynamic
-worst-case gross/cash enforcement; no production causal posttrade closure;
-breaks do not yet automatically roll back cron/config; pre-bootstrap failures
-can bypass rearm; and unresolved/asynchronous order states lack durable typed
-terminal evidence. Source presence must never be read as trading authority.
+The owner subsequently approved the exact Lyra-only Live v1 policy. The generic
+source is now deployed and the reviewed disabled operating shell is installed.
+The original source-only deployment remains sealed at
+[`generic_live_v1_active_source_deployment_2026-08-19.json`](evidence/generic_live_v1_active_source_deployment_2026-08-19.json).
+The current installed state is sealed separately at
+[`generic_live_v1_disabled_installation_2026-08-19.json`](evidence/generic_live_v1_disabled_installation_2026-08-19.json),
+content hash `bd056ac57670f31016adea140d9ed8951f832bb6ebb030d6028f47c91714aaca`.
+Active `main` and its upstream are clean at
+`2d12a3c86e27c175319b226e9ff745f197da71a8`; deploy validation passed
+138 plus 35 tests and six operational checks. Independent review closed P0-2
+through P0-7. The exact account-hash-pinned configuration is mode `0600`, has
+the $460 ceiling, $100 minimum trade, one-order maximum, and effective session,
+but submission approval, scheduling, and posttrade observation are all disabled.
+The generic session gate and legacy kill switch remain armed. One date-bound
+cron entry is installed and inert; its manual launch exits before the broker
+boundary. Legacy environment and executor hashes and all PAPER hashes remain
+unchanged, and no broker call, broker write, or order submission occurred.
+
+Activation and submission remain `NO_GO` on the sole remaining P0:
+`NO_EXECUTION_READY_FACTUAL_LYRA_CHAIN`. A fresh governed session must bind its
+data and universe, produce factual Lyra v2 risk, capacity, and liquidity fields,
+and compile an exact Lyra-only v4 plan before any schedule, observation, kill
+switch, or submission setting may be enabled. Installed source or cron presence
+must never be read as trading authority.
 
 A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),

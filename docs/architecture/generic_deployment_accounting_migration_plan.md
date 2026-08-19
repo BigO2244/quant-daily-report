@@ -1355,27 +1355,35 @@ Shadow observation, and no-write rehearsals. Generic PAPER remains unapproved.
 Any change to the Lyra-only $460 Live terms, or any PAPER proposal, requires a
 new owner decision.
 
-The active-VM source-only deployment is sealed at
-[`generic_live_v1_active_source_deployment_2026-08-19.json`](../evidence/generic_live_v1_active_source_deployment_2026-08-19.json),
+The initial active-VM source-only deployment remains sealed at
+[`generic_live_v1_active_source_deployment_2026-08-19.json`](../evidence/generic_live_v1_active_source_deployment_2026-08-19.json).
+The completed implementation review and disabled installation are sealed at
+[`generic_live_v1_disabled_installation_2026-08-19.json`](../evidence/generic_live_v1_disabled_installation_2026-08-19.json),
 content hash
-`4f704b374bbc1d020952131a3893b90b385836808851f53e05af6e1fc9fcccef`.
-Active `main` and its upstream are clean at
-`7d6caf99ad263a7d86efc67940cf511459d21f0b`; deploy validation passed 138 plus
-35 tests and operational validation passed 6 of 6. The deployment changed only
-the active source checkout. Generic config is absent, generic cron count is
-zero, the crontab and legacy environment hashes are unchanged, the kill switch
-is armed, PAPER is unchanged, and no broker call or write occurred.
+`bd056ac57670f31016adea140d9ed8951f832bb6ebb030d6028f47c91714aaca`.
+Active `main`, upstream, and the deployment attestation bind exact SHA
+`2d12a3c86e27c175319b226e9ff745f197da71a8`; deploy validation passed 138 plus
+35 tests and operational validation passed 6 of 6. Independent review closed
+P0-2 through P0-7, including source-artifact preflight recomputation, dynamic
+worst-case gross/cash proof, production causal posttrade closure, full named
+rollback, pre-bootstrap rearm, and durable unresolved-order evidence.
 
-This is `DISABLED_SOURCE_DEPLOYMENT_CONDITIONAL_GO`, but activation/submission
-is `NO_GO`. Seven P0s remain: `NO_EXECUTION_READY_FACTUAL_LYRA_CHAIN`,
-`READY_PREFLIGHT_NOT_RECOMPUTED_FROM_BOUND_SOURCE_ARTIFACTS`,
-`WORST_CASE_FILL_GROSS_AND_CASH_LIMITS_NOT_PROVEN`,
-`PRODUCTION_POSTTRADE_CAUSAL_PIPELINE_NOT_CLOSED`,
-`NAMED_BREAKS_DO_NOT_AUTOMATICALLY_ROLL_BACK_CRON_AND_CONFIG`,
-`PRE_BOOTSTRAP_FAILURES_CAN_BYPASS_REARM`, and
-`UNRESOLVED_OR_ASYNCHRONOUS_ORDER_STATES_LACK_DURABLE_TERMINAL_EVIDENCE`.
-No schedule, config, disarm, credential copy, or order submission is permitted
-until all seven are closed with exact current-session evidence.
+The installed state is `DISABLED_INERT_INSTALLATION`: account pin, $460 cap,
+$100 minimum trade, one-order maximum, and effective session are present in a
+protected `0600` config, while submit approval, execution schedule, and
+posttrade observation remain disabled. The generic session gate and legacy
+kill switch remain armed. The single exact date-bound cron exits before broker
+construction; a manual inert launch proved no crontab, legacy environment, or
+PAPER byte change. No credential was copied, and no broker call, broker write,
+or order submission occurred.
+
+Activation/submission remains `NO_GO` only on
+`NO_EXECUTION_READY_FACTUAL_LYRA_CHAIN`. A fresh immutable governed session
+snapshot must bind the universe and data hashes; its Lyra v2 must contain
+factual risk, capacity, and liquidity evidence; and an exact Lyra-only v4 plan
+must bind that decision and fresh account state. Until those artifacts exist
+and an all-green preflight is rebuilt from them, no schedule, observation,
+kill-switch, or submission flag may be enabled.
 
 The adaptive policy choice is now concrete rather than implicit. Candidate
 hash `0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`
