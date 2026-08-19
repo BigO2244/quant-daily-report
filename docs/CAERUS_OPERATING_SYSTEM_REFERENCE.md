@@ -142,8 +142,14 @@ reproducible, but it is labeled `SYNTHETIC_REPLAY` and must never be presented
 as historical broker evidence, factual parity, return evidence, or a target.
 The corresponding adaptive-Shadow readiness manifest is
 [`adaptive_shadow_evidence_readiness_20260818.json`](baselines/adaptive_shadow_evidence_readiness_20260818.json).
-It is also `BLOCKED`: no preregistered policy, causal signal set, decision batch,
-or deployment-policy hash has been selected for a factual observation.
+That historical capture was `BLOCKED` before an owner policy decision. The
+owner has now approved candidate hash `0ee486...` for Shadow observation only
+in
+[`adaptive_shadow_v1_owner_approval_20260818.json`](governance/decision_records/adaptive_shadow_v1_owner_approval_20260818.json).
+The enabled readiness result at
+[`adaptive_shadow_v1_activation_readiness_20260818.json`](baselines/adaptive_shadow_v1_activation_readiness_20260818.json)
+still fails closed to static Polaris because deployment membership, decision
+v2, causal signals, readiness history, and constraint evidence are absent.
 
 The local working tree contains candidate registry edits that are incompatible
 with committed Orion-bound legacy execution tests. It is not a deployable
@@ -188,7 +194,10 @@ A concrete conservative adaptive policy is proposed at
 [`adaptive_shadow_v1_policy_candidate.json`](governance/proposals/adaptive_shadow_v1_policy_candidate.json),
 with its owner brief at
 [`ADAPTIVE_SHADOW_V1_DECISION_BRIEF.md`](governance/proposals/ADAPTIVE_SHADOW_V1_DECISION_BRIEF.md).
-It remains `PENDING_OWNER_APPROVAL` and Shadow-only.
+The exact candidate hash is approved for Shadow observation only. Its separate
+activation readiness remains blocked with static Polaris as the modeled
+control. No Paper/Live, execution, promotion, or automatic recovery authority
+was granted.
 
 ## Canonical source hierarchy
 

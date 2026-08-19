@@ -1224,14 +1224,14 @@ implementation is complete and tested:
 | Frozen Orion comparison | `caerus.orion_legacy_paper_fixture.v1` plus local capture status and VM provenance | Factual 2026-08-18 input is `READY`: one same-session Orion decision, broker state, allocation/target, exact plan, and intended-order chain is sealed; it grants no current authority |
 | Orion structural replay | `caerus.orion_legacy_synthetic_replay.v1` | Deterministic committed pure-plan fixture is `REPRODUCIBLE` but remains secondary/non-factual; artifact forbids target substitution, return claims, cutover, execution, and activation |
 | Generic dual compute | `caerus.generic_parity_candidate.v1`, `caerus.dual_compute_parity.v1`, and `caerus.lane_whole_share_realization.v1` | Initial factual replay preserved a `REVIEW_REQUIRED` flooring mismatch; the separate governed cash-aware replay now proves `EXACT_PARITY` for both target and order vectors without changing target/Risk authority |
-| Adaptive allocation | `caerus.adaptive_shadow_policy.v1`, causal signal contract, deterministic bounded score-tilt evidence, and off-by-default runner | Contract is strictly Shadow/research-only and produces no portfolio target; readiness is sealed `BLOCKED` because policy/signals/decision/deployment inputs are absent |
+| Adaptive allocation | Owner-bound Adaptive Shadow v1 candidate, strict activation/readiness contract, and stdout-only off-by-default runner | Candidate hash `0ee486...` is approved for Shadow observation only; enabled readiness fails closed to static Polaris because deployment membership, decision-v2, causal signal, history, and constraint evidence remain absent |
 | Paper/Live environment binding | `caerus.lane_environment_binding.v1` | Both kinds require the same `CAERUS_GENERIC_LANE_V4` adapter/capabilities; generic PAPER remains `NOT_YET_CUT_OVER` and submission is disabled |
 | Live read-only inventory | `caerus.live_cutover_read_only_inventory.v1` | Registry Live flag is false; legacy cron and executor structural stops are present; the local Live environment file is absent; legacy Live is disabled |
 | Generic Live preflight | `caerus.generic_live_cutover_preflight.v1` plus disarmed deployment/rollback/preflight templates | Requires v4 plan, owner ceiling/session/rollback, engaged kill switch, account/SHA/open-order/leverage/shorting/cap gates, no-write OMS, PASS reconciliation, and no-write accounting; current inventory blocks it |
 | Generic scheduler boundary | `caerus.generic_lane_scheduler_dry_run.v1` and explicit-input CLI | Defaults `DISABLED_NO_ACTION`; enabled rehearsal remains no-submit, blocks generic PAPER, requires a READY Live preflight, and cannot import the legacy executor |
 | Deployed VM inventory | `caerus.vm_generic_live_preflight.v1` | Read-only evidence is `READY_TO_STAGE` and `cutover_status=BLOCKED`; deployed SHA is clean/aligned, legacy Live remains disabled, generic files/schedule are absent, and no secret or account ID was persisted |
 | Isolated VM observation staging | `caerus.generic_live_no_submit_staging_deployment.v1` | Branch/commit pushed and cloned only under isolated staging; 41 tests pass, default is `DISABLED_NO_ACTION`, active checkout/config/cron/kill switch/broker are unchanged |
-| Adaptive owner candidate | `caerus.adaptive_shadow_owner_policy_candidate.v1` | Hash-bound conservative eligible rule, 50/50 initial Polaris/Lyra model, 40–60% bounds, risk/cost/overlap/liquidity constraints, static-Polaris fallback, and 20-session review gate await owner approval |
+| Adaptive owner candidate | `caerus.adaptive_shadow_owner_policy_candidate.v1` plus `caerus.adaptive_shadow_owner_decision.v1` | Exact candidate is owner-approved for gated Shadow observation only; 50/50 initial Polaris/Lyra, 40–60% bounds, risk/cost/overlap/liquidity constraints, static-Polaris fallback, and 20-session review gate remain unchanged |
 | Scheduled factual observation | `caerus.scheduled_v2_factual_pipeline_result.v1` | Emits strict v2 decisions and source-bound Paper/Live accounting, reporting, valuation, performance, history, and execution-rehearsal descriptors; defaults no-write and has no schedule, history, execution, or activation authority |
 | Paper/Live structural rehearsal | `caerus.generic_paper_live_no_write_rehearsal.v1` | Both lanes use `core.lane_execution_dry_run:caerus.lane_execution_dry_run.v1`, validate no-write, and bind exact source artifact/receipt hashes; this is structural rather than broker-factual evidence |
 | Disabled Live candidate | `caerus.generic_live_candidate_config.v1` and candidate preflight | Read-only Live equity/cash is $460.90; candidate is account-hash pinned and capped at $460 with stricter legacy limits. Parity passes, but eight active-cutover gates keep preflight blocked |
@@ -1357,9 +1357,11 @@ selects only registry/deployment-approved Shadow sleeves that pass 60-session,
 20-consecutive-green, freshness, capacity, liquidity, and causal-v2 gates. The
 expected initial set is Polaris and Lyra; Orion and the benchmark are excluded.
 The model begins 50/50, stays within 40–60% per sleeve, limits one-way session
-turnover to 10%, and fails back to the static Polaris Shadow baseline. It grants
-no authority until the owner approves this research policy, and any later Paper
-proposal requires another decision.
+turnover to 10%, and fails back to the static Polaris Shadow baseline. The
+owner approved this exact hash for Shadow observation only on 2026-08-18. The
+first enabled readiness capture is `BLOCKED_STATIC_POLARIS_FALLBACK` because
+six governed input groups are absent. No adaptive evidence was emitted, and
+any later Paper or Live proposal requires another owner decision.
 
 ### Validation and dirty-worktree isolation
 

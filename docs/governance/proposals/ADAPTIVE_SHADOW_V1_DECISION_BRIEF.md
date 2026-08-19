@@ -1,11 +1,14 @@
 # Adaptive Shadow v1 — owner decision brief
 
-Status: `PENDING_OWNER_APPROVAL`. This proposal is Shadow-only and cannot
-produce an executable target or change Paper, Live, promotion, or capital.
+Status: `APPROVED_FOR_SHADOW_OBSERVATION_ONLY` on 2026-08-18. The immutable
+proposal itself retains its original `PENDING_OWNER_APPROVAL` label; the
+separate owner decision record binds its exact hash without rewriting history.
+The approval cannot produce an executable target or change Paper, Live,
+promotion, or capital.
 
-## Recommendation
+## Approved decision
 
-Approve a conservative 20-session Shadow observation beginning only after both
+The approved conservative 20-session Shadow observation begins only after both
 Polaris and Lyra have at least 60 valid causal sessions, 20 consecutive green
 lineage sessions, fresh signals, and green capacity/liquidity gates. Orion is
 excluded because the owner restricted it to the frozen legacy comparison role;
@@ -40,3 +43,19 @@ The exact machine candidate is
 `adaptive_shadow_v1_policy_candidate.json`. Its content hash is recorded inside
 that artifact as
 `0ee486a14972fe1c3a16c19d5f275c7dafc6d1c06405bc4790d088d85749d46e`.
+
+The binding owner record is
+`../decision_records/adaptive_shadow_v1_owner_approval_20260818.json`, content
+hash `c37d401904400dc9b6a07e6a9e632ffe73433f5fa2148f83637d0f4d2e32a84c`.
+
+## Current activation readiness
+
+The Shadow observation enable was exercised through the stdout-only runner.
+It failed closed to the static Polaris modeled control because the repository
+does not contain a governed Shadow deployment-membership artifact, a complete
+Polaris+Lyra decision-v2 batch, causal signals for both sleeves, the required
+60-valid/20-consecutive-green history proof, or complete
+capacity/liquidity/overlap evidence. The sealed result is
+`../../baselines/adaptive_shadow_v1_activation_readiness_20260818.json` with
+status `BLOCKED_STATIC_POLARIS_FALLBACK`. No adaptive performance evidence was
+emitted and automatic recovery is forbidden.

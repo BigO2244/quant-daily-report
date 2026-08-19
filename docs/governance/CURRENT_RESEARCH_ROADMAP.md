@@ -2,9 +2,9 @@
 
 Status: Canonical
 Owner: Caerus Research Program
-Last Updated: 2026-08-14 (owner-approved immutable session, complete sleeve
-decision fan-out, configured portfolio allocator, causal PAPER ownership,
-single-as-of valuation, and strict end-of-day audit; live remains blocked.)
+Last Updated: 2026-08-18 (Adaptive Shadow v1 candidate hash `0ee486...`
+approved for gated Shadow observation only; first enabled readiness fails
+closed to static Polaris; PAPER and Live authority are unchanged.)
 Governance Label: PORTFOLIO_OPERATING_MODEL_MIGRATION
 Execution Impact: PAPER_ONLY (no live credentials, approvals, or capital enabled)
 
@@ -93,6 +93,13 @@ editing code or specs.
 - **Historical research control:** Caerus Polaris (`caerus_polaris`), retained in
   daily shadow comparison and research reporting but without PAPER authority.
 - **Shadow tracking:** Polaris, Orion, Lyra, Polaris_Alpha, Orion_Alpha. SPY = benchmark.
+- **Adaptive Shadow v1:** Exact candidate hash `0ee486...` is owner-approved
+  for observation only across Polaris and Lyra, subject to every 60-session,
+  20-consecutive-green, freshness, lineage, capacity, liquidity, overlap, and
+  concentration gate. The first enabled readiness result is blocked on missing
+  governed inputs and holds the static Polaris modeled control. It emits no
+  adaptive performance evidence and grants no Paper, Live, promotion,
+  execution, or automatic-recovery authority.
 - **Live posture:** blocked. Orion's PAPER authority does not approve FR-104 live
   submission and does not change credentials, endpoint pins, or kill-switches.
 - **Concentration alpha shadows:** Polaris_Alpha (`caerus_polaris_alpha`) and
