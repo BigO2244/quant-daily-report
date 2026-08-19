@@ -28,6 +28,7 @@ def _inputs(tmp_path) -> dict:
     }
     reconciliation = {
         "content_hash": H["reconciliation"],
+        "status": "PASS",
         "reconciled_fills": [{"fill_id": "fill:1"}],
     }
     journal = [{
@@ -52,7 +53,8 @@ def _inputs(tmp_path) -> dict:
     daily = {
         "lane_id": "generic-live-v1", "lane_kind": "LIVE",
         "account_id_hash": H["account"], "deployment_version": "live-v1",
-        "as_of": valuation["as_of"], "source_hashes": [H["performance"]],
+        "as_of": valuation["as_of"], "status": "PASS",
+        "source_hashes": [H["performance"]],
         "content_hash": H["daily"],
     }
     aggregate = {
@@ -63,7 +65,8 @@ def _inputs(tmp_path) -> dict:
     dashboard = {
         "as_of": valuation["as_of"], "source_audit_hashes": [H["daily"]],
         "performance_surfaces": [{
-            "lane_id": "generic-live-v1", "source_hashes": [H["performance"]],
+            "lane_id": "generic-live-v1", "claim_status": "AVAILABLE",
+            "source_hashes": [H["performance"]],
         }],
         "content_hash": H["dashboard"],
     }

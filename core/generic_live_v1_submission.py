@@ -99,6 +99,14 @@ def _validate_submission_result(payload: Mapping[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(dict(payload))
 
 
+def validate_generic_live_v1_submission_result(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Public strict validator for persisted submission results."""
+
+    return _validate_submission_result(payload)
+
+
 def _timestamp(value: str) -> tuple[str, dt.datetime]:
     try:
         parsed = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
@@ -1300,10 +1308,19 @@ def _validate_order_lifecycle(
     return copy.deepcopy(dict(payload))
 
 
+def validate_generic_live_v1_order_lifecycle(
+    payload: Mapping[str, Any], *, submission_result: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Public strict validator for submission-bound order lifecycle evidence."""
+
+    checked_submission = _validate_submission_result(submission_result)
+    return _validate_order_lifecycle(payload, submission_result=checked_submission)
+
+
 def finalize_generic_live_v1_posttrade(
     *, submission_result: Mapping[str, Any], exact_plan: Mapping[str, Any],
     order_lifecycle: Mapping[str, Any], reconciliation: Mapping[str, Any],
-    journal_entries: list[Mapping[str, Any]], performance: Mapping[str, Any],
+    journal_entries: list[Mapping[str, Any]], performance: Mapping[str, Any] | None,
     dashboard_projection: Mapping[str, Any], finalized_at: str,
     rearm_state_path: Path | str, result_path: Path | str,
     rollback_handler: Callable[[str], Mapping[str, Any]],
@@ -1424,18 +1441,33 @@ def finalize_generic_live_v1_posttrade(
         rollback_break("ACCOUNTING_BREAK")
         raise
     try:
-        perf = validate_lane_performance(performance)
         dashboard = validate_dashboard_performance_surfaces(dashboard_projection)
-        if (
-            perf["lane_id"] != "generic-live-v1"
-            or perf["account_id_hash"] != submission_result["account_id_hash"]
-            or perf["lane_kind"] != "LIVE"
-            or not any(
-                row["lane_id"] == "generic-live-v1"
-                for row in dashboard["performance_surfaces"]
-            )
-        ):
-            raise GenericLiveV1SubmissionError("performance/dashboard scope differs")
+        live_surfaces = [
+            row for row in dashboard["performance_surfaces"]
+            if row["lane_id"] == "generic-live-v1"
+        ]
+        if not live_surfaces:
+            raise GenericLiveV1SubmissionError("dashboard omits generic Live surface")
+        if order_green:
+            if performance is None:
+                raise GenericLiveV1SubmissionError("green order lacks factual performance")
+            perf = validate_lane_performance(performance)
+            if (
+                perf["lane_id"] != "generic-live-v1"
+                or perf["account_id_hash"] != submission_result["account_id_hash"]
+                or perf["lane_kind"] != "LIVE"
+                or any(row["claim_status"] != "AVAILABLE" for row in live_surfaces)
+            ):
+                raise GenericLiveV1SubmissionError("performance/dashboard scope differs")
+        else:
+            perf = None
+            if performance is not None or any(
+                row["claim_status"] != "SUPPRESSED" or not row["blocker_codes"]
+                for row in live_surfaces
+            ):
+                raise GenericLiveV1SubmissionError(
+                    "order break must publish only blocked/suppressed truth"
+                )
     except Exception:
         rollback_break("REPORTING_BREAK")
         raise
@@ -1451,7 +1483,8 @@ def finalize_generic_live_v1_posttrade(
         rearm = {"content_hash": rollback["rearm_hash"]}
     evidence_hashes = sorted([
         order["content_hash"], reconciled["content_hash"],
-        *[row["record_hash"] for row in journal], perf["content_hash"], dashboard["content_hash"],
+        *[row["record_hash"] for row in journal],
+        *([] if perf is None else [perf["content_hash"]]), dashboard["content_hash"],
     ])
     body = {
         "schema_version": GENERIC_LIVE_V1_POSTTRADE_RESULT_SCHEMA,
@@ -1480,4 +1513,6 @@ __all__ = [
     "execute_generic_live_v1_session", "finalize_generic_live_v1_posttrade",
     "ensure_generic_live_v1_rearmed_after_failure", "rearm_generic_live_v1_session",
     "seal_generic_live_v1_order_lifecycle",
+    "validate_generic_live_v1_order_lifecycle",
+    "validate_generic_live_v1_submission_result",
 ]

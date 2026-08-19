@@ -56,8 +56,12 @@ def build_lane_factual_reporting_inputs(
         state = validate_ending_lane_state(ending_state)
     except Exception as exc:
         raise LaneFactualReportingInputsError(f"reconciliation evidence is invalid: {exc}") from exc
-    if recon["status"] != "PASS" or recon["accounting_ready"] is not True:
-        raise LaneFactualReportingInputsError("factual reporting requires accounting-ready PASS reconciliation")
+    if recon["status"] != "PASS":
+        raise LaneFactualReportingInputsError("factual reporting requires PASS reconciliation")
+    if bool(recon["reconciled_fills"]) is not bool(recon["accounting_ready"]):
+        raise LaneFactualReportingInputsError(
+            "PASS reconciliation accounting readiness differs from fill economics"
+        )
     if recon["source_hashes"]["ending_state"] != state["content_hash"]:
         raise LaneFactualReportingInputsError("reconciliation does not bind supplied ending state")
     scope_fields = ("trade_date", "account_id_hash", "lane_id", "lane_kind", "deployment_version", "plan_id")

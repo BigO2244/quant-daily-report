@@ -80,7 +80,7 @@ def _decision() -> dict:
     return seal_sleeve_decision(body)
 
 
-def _plan(decision: dict) -> dict:
+def _plan(decision: dict, *, already_at_target: bool = False) -> dict:
     batch = build_sleeve_decision_batch(
         decisions=[decision], generated_at="2026-08-19T13:29:00+00:00"
     )
@@ -130,13 +130,23 @@ def _plan(decision: dict) -> dict:
         lane_allocation=allocation, decision_batch=batch,
         sealed_at="2026-08-19T13:29:20+00:00",
     )
+    positions = []
+    cash = 460.9
+    if already_at_target:
+        contribution = copy.deepcopy(target["target_rows"][0]["sleeve_contributions"][0])
+        contribution["quantity"] = 4.0
+        positions = [{
+            "symbol": "AAPL", "quantity": 4.0,
+            "sleeve_contributions": [contribution],
+        }]
+        cash = 60.9
     snapshot = {
         "schema_version": BROKER_SNAPSHOT_SCHEMA,
         "snapshot_id": "broker-snapshot:generic-live-v1:2026-08-19:fixture",
         "trade_date": "2026-08-19", "captured_at": "2026-08-19T13:29:30+00:00",
         "account_id_hash": OBSERVATION["account_id_hash"],
         "broker_environment": "alpaca_live", "currency": "USD",
-        "equity": 460.9, "cash": 460.9, "positions": [],
+        "equity": 460.9, "cash": cash, "positions": positions,
         "price_marks": [{"symbol": "AAPL", "price": 100.0, "as_of": "2026-08-19T13:29:30+00:00"}],
     }
     snapshot["content_hash"] = artifact_content_hash(snapshot)
