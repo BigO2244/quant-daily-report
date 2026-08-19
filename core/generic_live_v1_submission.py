@@ -464,6 +464,16 @@ def _validate_existing_receipt(
         raise GenericLiveV1SubmissionError("existing broker receipt hash/intent differs")
     if payload.get("mutation_context_hash") != mutation_context_hash:
         raise GenericLiveV1SubmissionError("existing broker receipt mutation context differs")
+    cancellation_hash = payload.get("cancellation_context_hash")
+    if (
+        (cancellation_hash is not None and (
+            not isinstance(cancellation_hash, str)
+            or len(cancellation_hash) != 64
+            or any(character not in "0123456789abcdef" for character in cancellation_hash)
+        ))
+        or (payload.get("cancel_performed") is True) is not (cancellation_hash is not None)
+    ):
+        raise GenericLiveV1SubmissionError("existing broker receipt cancellation lineage differs")
     recorded = payload.get("broker_order")
     if not isinstance(recorded, Mapping) or recorded.get("broker_client_order_id") != client_id:
         raise GenericLiveV1SubmissionError("existing broker receipt client id differs")
@@ -548,6 +558,7 @@ def _execute_generic_live_v1_session(
             "client_order_id": orders[0]["client_order_id"] if orders else None,
             "intent_hash": None,
             "mutation_context_hash": None,
+            "cancellation_context_hash": None,
             "receipt_hash": None,
             "broker_order": None,
             "broker_lookup_performed": False,
@@ -589,6 +600,7 @@ def _execute_generic_live_v1_session(
             broker_order = None
             intent_hash = None
             mutation_context_hash = None
+            cancellation_context_hash = None
             receipt_hash = None
             client_id = None
             lookup = False
@@ -653,10 +665,12 @@ def _execute_generic_live_v1_session(
                     side=order["side"], quantity=quantity,
                 )
             cancel_performed = False
+            cancellation_context_hash = None
             if broker_status in open_statuses or broker_status == "partially_filled":
                 cancel_context = _cancellation_context(
                     submission_context=context, broker_order_id=broker_order_id
                 )
+                cancellation_context_hash = cancel_context["content_hash"]
                 broker.cancel_generic_live_v4_order(
                     broker_order_id=broker_order_id, mutation_context=cancel_context,
                     _generic_live_v4_capability=_GENERIC_LIVE_V4_CAPABILITY,
@@ -688,8 +702,10 @@ def _execute_generic_live_v1_session(
                 "recorded_at": executed_raw,
                 "intent_hash": intent_hash,
                 "mutation_context_hash": mutation_context_hash,
+                "cancellation_context_hash": cancellation_context_hash,
                 "broker_order": broker_order,
                 "submission_performed": submitted,
+                "cancel_performed": cancel_performed,
             }
             receipt["content_hash"] = _hash(receipt)
             receipt_hash = receipt["content_hash"]
@@ -703,6 +719,7 @@ def _execute_generic_live_v1_session(
                     mutation_context_hash=mutation_context_hash,
                 )
                 receipt_hash = receipt["content_hash"]
+                cancellation_context_hash = receipt["cancellation_context_hash"]
             terminal_rearm = _rearm(
                 preflight_hash=preflight["content_hash"], plan_hash=exact_plan["content_hash"],
                 executed_at=executed_raw,
@@ -732,6 +749,7 @@ def _execute_generic_live_v1_session(
         "client_order_id": client_id,
         "intent_hash": intent_hash,
         "mutation_context_hash": mutation_context_hash,
+        "cancellation_context_hash": cancellation_context_hash,
         "receipt_hash": receipt_hash,
         "broker_order": broker_order,
         "broker_lookup_performed": lookup,
@@ -820,6 +838,7 @@ def seal_generic_live_v1_order_lifecycle(
         "broker_order_evidence_hash": broker_order_evidence_hash,
         "receipt_hash": submission_result.get("receipt_hash"),
         "mutation_context_hash": submission_result.get("mutation_context_hash"),
+        "cancellation_context_hash": submission_result.get("cancellation_context_hash"),
         "symbol": symbol,
         "side": side,
         "planned_quantity": planned_quantity,
@@ -882,7 +901,8 @@ def _validate_order_lifecycle(
         "schema_version", "lifecycle_id", "status", "observed_at",
         "submission_result_hash", "preflight_hash", "plan_hash",
         "account_id_hash", "lane_id", "exact_order_id", "client_order_id",
-        "broker_order_id", "receipt_hash", "mutation_context_hash", "symbol",
+        "broker_order_id", "receipt_hash", "mutation_context_hash",
+        "cancellation_context_hash", "symbol",
         "broker_order_evidence_hash",
         "side", "planned_quantity", "filled_quantity",
         "broker_fill_evidence_hashes", "cancel_performed", "content_hash",
@@ -936,7 +956,7 @@ def _validate_order_lifecycle(
             for field in (
                 "exact_order_id", "client_order_id", "broker_order_id",
                 "broker_order_evidence_hash", "receipt_hash",
-                "mutation_context_hash", "symbol", "side",
+                "mutation_context_hash", "cancellation_context_hash", "symbol", "side",
             )
         ) or float(payload.get("filled_quantity") or 0.0) != 0.0:
             raise GenericLiveV1SubmissionError("NO_TRADE lifecycle cannot carry an order/fill")
@@ -952,6 +972,7 @@ def _validate_order_lifecycle(
             "broker_order_id": broker.get("broker_order_id") if isinstance(broker, Mapping) else None,
             "receipt_hash": submission_result.get("receipt_hash"),
             "mutation_context_hash": submission_result.get("mutation_context_hash"),
+            "cancellation_context_hash": submission_result.get("cancellation_context_hash"),
             "symbol": broker.get("symbol") if isinstance(broker, Mapping) else None,
             "side": broker.get("side") if isinstance(broker, Mapping) else None,
             "planned_quantity": float(broker.get("quantity") or 0.0) if isinstance(broker, Mapping) else 0.0,
@@ -960,6 +981,15 @@ def _validate_order_lifecycle(
         }
         if any(payload.get(field) != value for field, value in expected.items()):
             raise GenericLiveV1SubmissionError("order lifecycle exact submission lineage differs")
+        cancellation_hash = payload.get("cancellation_context_hash")
+        if cancellation_hash is not None and (
+            not isinstance(cancellation_hash, str)
+            or len(cancellation_hash) != 64
+            or any(character not in "0123456789abcdef" for character in cancellation_hash)
+        ):
+            raise GenericLiveV1SubmissionError("order lifecycle cancellation context hash is invalid")
+        if payload["cancel_performed"] is True and cancellation_hash is None:
+            raise GenericLiveV1SubmissionError("performed cancellation lacks signed context lineage")
         broker_status = str(broker.get("broker_status") or "").lower()
         allowed_by_status = {
             "FILLED": {"filled"},

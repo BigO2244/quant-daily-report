@@ -276,6 +276,11 @@ def test_partial_or_still_open_order_is_canceled_and_never_treated_as_green(
     assert _GENERIC_LIVE_V4_CAPABILITY.verify(
         context["content_hash"], context["capability_signature"]
     )
+    assert result["cancellation_context_hash"] == context["content_hash"]
+    receipts = list((tmp_path / "wal").glob("receipt-*.json"))
+    persisted = json.loads(receipts[0].read_text())
+    assert persisted["cancellation_context_hash"] == context["content_hash"]
+    assert persisted["cancel_performed"] is True
     assert json.loads((tmp_path / "rearm.json").read_text())["trigger"] == "ORDER_BREAK"
 
 
@@ -372,6 +377,7 @@ def test_order_lifecycle_builder_binds_partial_fill_hashes(tmp_path) -> None:
     assert lifecycle["status"] == "PARTIAL_CANCELED"
     assert lifecycle["exact_order_id"] == result["exact_order_id"]
     assert lifecycle["broker_fill_evidence_hashes"] == [fill_hash]
+    assert lifecycle["cancellation_context_hash"] == result["cancellation_context_hash"]
 
 
 @pytest.mark.parametrize("stage", ["order", "reconciliation", "accounting", "reporting"])
