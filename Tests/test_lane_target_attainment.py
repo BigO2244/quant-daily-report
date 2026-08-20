@@ -128,6 +128,96 @@ def test_exact_nearest_feasible_quantity_is_clean_outside_fixed_weight_band() ->
     assert payload["achieved_cash_weight"] == 0.026
 
 
+def test_authorized_no_trade_passes_only_with_exact_nearest_feasible_proof() -> None:
+    package_hash = "approved-package-hash"
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.05,
+        "minimum_cash_weight": 0.025,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    plan = {
+        "cash_target_weight": 0.05,
+        "target_attainment_policy": policy,
+        "target_portfolio": [
+            {"symbol": "AAA", "target_weight": 0.475},
+            {"symbol": "BBB", "target_weight": 0.475},
+        ],
+        "approved_execution_package": {
+            "content_hash": package_hash,
+            "approved_cash_weight": 0.05,
+            "approved_target_rows": [
+                {"symbol": "AAA", "target_weight": 0.475},
+                {"symbol": "BBB", "target_weight": 0.475},
+            ],
+            "constraints": {"target_attainment_policy": policy},
+        },
+        "exact_execution_plan": {"portfolio_nav": 1000.0},
+    }
+    proof = seal_whole_share_proof(
+        {
+            "schema_version": "caerus.whole_share_feasibility.v1",
+            "status": "PASS",
+            "approved_execution_package_hash": package_hash,
+            "equity_basis": 1000.0,
+            "allocation": [
+                {"symbol": "AAA", "target_quantity": 1},
+                {"symbol": "BBB", "target_quantity": 1},
+            ],
+        }
+    )
+    snapshot = {
+        "account": {"equity": "1000", "cash": "26"},
+        "positions": [
+            {"symbol": "AAA", "qty": "1", "market_value": "600"},
+            {"symbol": "BBB", "qty": "1", "market_value": "374"},
+        ],
+    }
+
+    payload = build_lane_target_attainment(
+        plan=plan,
+        post_snapshot=snapshot,
+        reconciliation={"status": "NOT_APPLICABLE_NO_TRADE"},
+        run_id="paper-authorized-no-trade",
+        trade_date="2026-08-20",
+        mode="paper",
+        dry_run=False,
+        feasibility_evidence=proof,
+    )
+
+    assert payload["status"] == "OK_NEAREST_FEASIBLE"
+    assert payload["reason_code"] == (
+        "authorized_no_trade_matches_proven_nearest_feasible_allocation"
+    )
+    assert payload["nearest_feasible_verified"] is True
+
+    mismatched = build_lane_target_attainment(
+        plan=plan,
+        post_snapshot={
+            **snapshot,
+            "positions": [
+                {"symbol": "AAA", "qty": "2", "market_value": "600"},
+                {"symbol": "BBB", "qty": "1", "market_value": "374"},
+            ],
+        },
+        reconciliation={"status": "NOT_APPLICABLE_NO_TRADE"},
+        run_id="paper-authorized-no-trade-mismatch",
+        trade_date="2026-08-20",
+        mode="paper",
+        dry_run=False,
+        feasibility_evidence=proof,
+    )
+
+    assert mismatched["status"] == "FAIL_EXECUTION_INCOMPLETE"
+    assert mismatched["nearest_feasible_verified"] is False
+
+
 def test_governed_policy_fails_closed_without_complete_quantity_proof() -> None:
     package_hash = "approved-package-hash"
     policy = {

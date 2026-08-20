@@ -267,21 +267,25 @@ def build_lane_target_attainment(
         and cash_floor is not None
         and actual_cash + 1e-12 >= cash_floor
     )
+    authorized_no_trade = recon_status == "NOT_APPLICABLE_NO_TRADE"
     if dry_run:
         status = "DRY_RUN_NOT_APPLICABLE"
         reason = "dry_run_has_no_posttrade_target_attainment"
     elif equity is None or cash is None:
         status = "UNKNOWN_INSUFFICIENT_BROKER_SNAPSHOT"
         reason = "posttrade_equity_or_cash_missing"
-    elif recon_status != "CLEAN":
-        status = "FAIL_EXECUTION_INCOMPLETE"
-        reason = f"reconciliation_{recon_status.lower() or 'unknown'}"
     elif policy_error:
         status = "FAIL_POLICY_INVALID"
         reason = f"target_attainment_policy_invalid:{policy_error}"
     elif normalized_policy is not None and not proof_valid:
         status = "FAIL_FEASIBILITY_PROOF_INVALID"
         reason = "governed_whole_share_feasibility_proof_missing_or_incomplete"
+    elif authorized_no_trade and nearest_feasible_verified:
+        status = "OK_NEAREST_FEASIBLE"
+        reason = "authorized_no_trade_matches_proven_nearest_feasible_allocation"
+    elif recon_status != "CLEAN":
+        status = "FAIL_EXECUTION_INCOMPLETE"
+        reason = f"reconciliation_{recon_status.lower() or 'unknown'}"
     elif normalized_policy is not None and not nearest_feasible_verified:
         status = "FAIL_NEAREST_FEASIBLE_MISMATCH"
         reason = "posttrade_does_not_exactly_match_proven_whole_share_allocation"

@@ -4191,6 +4191,78 @@ def test_closed_session_final_bar_can_authorize_natural_no_trade(tmp_path: Path)
     )["status"] == "OK"
 
 
+def test_governed_no_trade_attains_proven_whole_share_target(tmp_path: Path):
+    from core.whole_share_feasibility import seal_whole_share_proof
+
+    package_hash = "approved-package-hash"
+    policy = {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "WHOLE_SHARES",
+        "target_cash_weight": 0.90,
+        "minimum_cash_weight": 0.85,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": True,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-11",
+    }
+    proof = seal_whole_share_proof(
+        {
+            "schema_version": "caerus.whole_share_feasibility.v1",
+            "status": "PASS",
+            "approved_execution_package_hash": package_hash,
+            "equity_basis": 1000.0,
+            "allocation": [{"symbol": "OLD", "target_quantity": 1}],
+        }
+    )
+    exact_payload = _plan(no_trade=True).to_dict()
+    exact = _rebuild_exact(
+        exact_payload,
+        risk_state={
+            **dict(exact_payload["risk_state"]),
+            "trade_meta": {"whole_share_feasibility": proof},
+        },
+    )
+    handoff = _handoff(exact)
+    handoff["target_attainment_policy"] = policy
+    handoff["approved_execution_package"] = {
+        "content_hash": package_hash,
+        "approved_cash_weight": 0.90,
+        "approved_target_rows": [
+            {"symbol": "OLD", "target_weight": 0.10},
+        ],
+        "constraints": {"target_attainment_policy": policy},
+    }
+    broker = TrackingPaperBroker()
+
+    result = run_live_pilot(
+        plan=handoff,
+        broker=broker,
+        env={**_execution_env(tmp_path), "CAERUS_REQUIRE_EXACT_EXECUTION_PLAN": "1"},
+        run_id="governed-nearest-feasible-no-trade",
+        output_root=tmp_path / "outputs" / "paper_lane",
+    )
+    run_root = Path(result["run_root"])
+    attainment = json.loads(
+        (
+            run_root
+            / "audit"
+            / "execution_target_attainment_2026-08-12.json"
+        ).read_text()
+    )
+
+    assert broker.submit_calls == 0
+    assert result["terminal_status"] == "AUTHORIZED_NO_TRADE"
+    assert result["terminal_outcome"] == "AUTHORIZED_NO_TRADE"
+    assert result["execution_target_attainment_status"] == "OK_NEAREST_FEASIBLE"
+    assert attainment["nearest_feasible_verified"] is True
+    assert attainment["reconciliation_status"] == "NOT_APPLICABLE_NO_TRADE"
+    assert json.loads(
+        (run_root / "audit" / "execution_integrity.json").read_text()
+    )["status"] == "OK"
+
+
 def test_authorizer_rejects_unrelated_open_order_before_market_pricing(
     tmp_path: Path,
 ):
