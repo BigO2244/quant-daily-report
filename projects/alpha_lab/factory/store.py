@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
 from .canonical import (
     canonical_hash,
@@ -106,7 +106,8 @@ class AppendOnlyJSONLEventStore:
         event_type: str,
         occurred_at: datetime,
         recorded_at: datetime,
-        payload: Mapping[str, Any]
+        payload: Mapping[str, Any],
+        validate_existing: Optional[Callable[[List[EventRecord]], None]] = None,
     ) -> EventRecord:
         require_non_empty(event_id, "event_id")
         require_non_empty(event_type, "event_type")
@@ -120,6 +121,8 @@ class AppendOnlyJSONLEventStore:
             with os.fdopen(descriptor, "r+", encoding="utf-8", closefd=True) as stream:
                 fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
                 records = self._read_stream(stream)
+                if validate_existing is not None:
+                    validate_existing(records)
                 if any(record.event_id == event_id for record in records):
                     raise EventStoreIntegrityError("duplicate event_id: {}".format(event_id))
                 previous_hash = records[-1].event_hash if records else None

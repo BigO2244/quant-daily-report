@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
+import sys
+import types
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,10 +12,12 @@ import pytest
 
 from projects.alpha_lab.control_plane.cli import main as control_plane_main
 from projects.alpha_lab.control_plane.evaluator import (
+    EvaluationPhase,
     EvaluatorSpec,
     TechniqueFamily,
     inspect_evaluator_boundary,
     load_spec,
+    run_evaluator,
 )
 from projects.alpha_lab.control_plane.lifecycle import assess_candidate, build_cio_queue
 from projects.alpha_lab.control_plane.models import (
@@ -24,25 +29,53 @@ from projects.alpha_lab.control_plane.models import (
     OwnerDecision,
     QueueItemType,
     ResearchVerdict,
+    REQUIRED_RESEARCH_GATES_V2,
     ShadowStatus,
 )
 from projects.alpha_lab.evaluators.price_families import _summarize_rows
 from projects.alpha_lab.evaluators.regime_diagnostics import (
     summarize_regime_observations,
 )
-from projects.alpha_lab.factory import ContractValidationError, ResearchBoundaryError, canonical_hash
+from projects.alpha_lab.factory import (
+    ContractValidationError,
+    ExpectedDirection,
+    GlobalResearchLedger,
+    HypothesisFamily,
+    InferenceTrack,
+    MultipleTestingMethod,
+    ResearchBoundaryError,
+    ResearchExperiment,
+    ResearchPhase,
+    ResearchRun,
+    ResearchRunClass,
+    ResearchWave,
+    canonical_hash,
+    deterministic_attempt_id,
+    deterministic_trial_id,
+)
 
 
 NOW = datetime(2026, 7, 20, 16, 0, tzinfo=timezone.utc)
 HASH = "a" * 64
-RESEARCH_GATES = {
-    "point_in_time_integrity": True,
-    "deterministic_replay": True,
-    "benchmark_and_factor_model": True,
-    "holdout_integrity": True,
-    "costs_and_capacity": True,
-    "independent_review": True,
+RESEARCH_GATES = {name: True for name in REQUIRED_RESEARCH_GATES_V2}
+RESEARCH_PROJECTION = {
+    "event_chain_head": HASH,
+    "families": [
+        {
+            "family_id": "FAM-2026-006",
+            "hypothesis_ids": ["HYP-2026-006"],
+            "decision_grade_ready": True,
+            "research_gates": dict(RESEARCH_GATES),
+        },
+        {
+            "family_id": "FAM-2026-007",
+            "hypothesis_ids": ["HYP-2026-007"],
+            "decision_grade_ready": True,
+            "research_gates": dict(RESEARCH_GATES),
+        },
+    ],
 }
+RESEARCH_PROJECTION_HASH = canonical_hash(RESEARCH_PROJECTION)
 SHADOW_GATES = {
     "artifact_freshness": True,
     "nav_continuity": True,
@@ -54,11 +87,165 @@ SHADOW_GATES = {
 }
 
 
+@pytest.fixture
+def research_ledger(tmp_path, monkeypatch):
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    ledger = GlobalResearchLedger(
+        ledger_dir / "research_events.v1.jsonl", research_root=tmp_path
+    )
+    family_ids = ("FAM-2026-006", "FAM-2026-007")
+    ledger.register_wave(
+        ResearchWave(
+            wave_id="WAVE-2026-001",
+            track=InferenceTrack.EXPLORATORY,
+            family_ids=family_ids,
+            method=MultipleTestingMethod.BENJAMINI_YEKUTIELI,
+            alpha_or_q=0.10,
+            registered_at=NOW,
+            policy_artifact="policy/wave.json",
+            policy_sha256=hashlib.sha256(b"wave").hexdigest(),
+            owner_ratified=True,
+        ),
+        recorded_at=NOW,
+    )
+    for ordinal in (6, 7):
+        family_id = "FAM-2026-{:03d}".format(ordinal)
+        hypothesis_id = "HYP-2026-{:03d}".format(ordinal)
+        experiment_id = "EXP-2026-{:04d}".format(ordinal)
+        ledger.register_family(
+            HypothesisFamily(
+                family_id=family_id,
+                wave_id="WAVE-2026-001",
+                challenge_epoch_id="CHALLENGE-2026-{:03d}".format(ordinal),
+                name="Synthetic lifecycle family",
+                economic_mechanism="A falsifiable mechanism.",
+                family_scope_hash=hashlib.sha256(family_id.encode()).hexdigest(),
+                primary_metric="residual_return",
+                benchmark="frozen benchmark",
+                expected_direction=ExpectedDirection.GREATER_THAN,
+                null_value=0.0,
+                economic_hurdle=0.01,
+                primary_variant_id="primary",
+                maximum_trial_units=1,
+                selection_trial_budget=0,
+                within_family_method=MultipleTestingMethod.HOLM_BONFERRONI,
+                family_alpha=0.05,
+                registered_at=NOW,
+                source_artifact="hypotheses/{}.md".format(hypothesis_id),
+                source_sha256=hashlib.sha256(hypothesis_id.encode()).hexdigest(),
+                owner_ratified=True,
+            ),
+            recorded_at=NOW,
+        )
+        ledger.register_experiment(
+            ResearchExperiment(
+                experiment_id=experiment_id,
+                family_id=family_id,
+                hypothesis_id=hypothesis_id,
+                parent_experiment_ids=(),
+                generated_after_results=False,
+                generation_reason="INITIAL",
+                frozen_primary_metric="residual_return",
+                registered_at=NOW,
+                source_artifact="experiments/{}.json".format(experiment_id),
+                source_sha256=hashlib.sha256(experiment_id.encode()).hexdigest(),
+                owner_ratified=True,
+            ),
+            recorded_at=NOW,
+        )
+        model_sha = hashlib.sha256(
+            "{}-model".format(experiment_id).encode()
+        ).hexdigest()
+        ledger.register_run(
+            ResearchRun(
+                attempt_id=deterministic_attempt_id(model_sha),
+                family_id=family_id,
+                hypothesis_id=hypothesis_id,
+                experiment_id=experiment_id,
+                run_id="{}-model".format(experiment_id),
+                run_class=ResearchRunClass.MODEL_TRIAL,
+                phase=ResearchPhase.DISCOVERY,
+                occurred_at=NOW,
+                source_artifact="runs/{}-model.json".format(experiment_id),
+                source_sha256=model_sha,
+                statistical_trial_id=deterministic_trial_id(family_id, 1),
+                primary_metric="residual_return",
+                variant_id="primary",
+                variant_definition_hash=hashlib.sha256(b"primary").hexdigest(),
+                consumes_trial_budget=True,
+                preregistered=True,
+                code_sha256=hashlib.sha256(b"code").hexdigest(),
+                data_snapshot_sha256=hashlib.sha256(b"discovery-input").hexdigest(),
+                evaluator_spec_sha256=hashlib.sha256(b"model-spec").hexdigest(),
+                effective_sample_floor=30,
+            ),
+            recorded_at=NOW,
+        )
+        challenge_sha = hashlib.sha256(
+            "{}-challenge".format(experiment_id).encode()
+        ).hexdigest()
+        ledger.register_run(
+            ResearchRun(
+                attempt_id=deterministic_attempt_id(challenge_sha),
+                family_id=family_id,
+                hypothesis_id=hypothesis_id,
+                experiment_id=experiment_id,
+                run_id="{}-challenge".format(experiment_id),
+                run_class=ResearchRunClass.CHALLENGE_READ,
+                phase=ResearchPhase.CHALLENGE,
+                occurred_at=NOW,
+                source_artifact="runs/{}-challenge.json".format(experiment_id),
+                source_sha256=challenge_sha,
+                statistical_trial_id=deterministic_trial_id(family_id, 900),
+                primary_metric="residual_return",
+                variant_id="primary",
+                variant_definition_hash=hashlib.sha256(b"primary").hexdigest(),
+                preregistered=True,
+                code_sha256=hashlib.sha256(b"challenge-code").hexdigest(),
+                data_snapshot_sha256=hashlib.sha256(b"challenge-input").hexdigest(),
+                evaluator_spec_sha256=hashlib.sha256(b"challenge-spec").hexdigest(),
+                effective_sample_floor=30,
+            ),
+            recorded_at=NOW,
+        )
+    projection = {
+        **RESEARCH_PROJECTION,
+        "event_chain_head": ledger.store.read_all()[-1].event_hash,
+    }
+    monkeypatch.setattr(ledger, "project", lambda: projection)
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "RESEARCH_PROJECTION", projection)
+    monkeypatch.setattr(module, "RESEARCH_PROJECTION_HASH", canonical_hash(projection))
+    return ledger
+
+
+def _evaluator_contract_fields(*variant_ids):
+    frozen = [
+        {
+            "variant_id": variant_id,
+            "variant_definition_hash": hashlib.sha256(
+                variant_id.encode("utf-8")
+            ).hexdigest(),
+        }
+        for variant_id in variant_ids
+    ]
+    return {
+        "frozen_variants": frozen,
+        "search_census": [],
+        "search_census_hash": canonical_hash([]),
+        "selection_trial_units": 0,
+    }
+
+
 def _candidate_dict(**overrides):
     payload = {
-        "schema_version": "caerus_alpha_lab_candidate_snapshot_v1",
+        "schema_version": "caerus_alpha_lab_candidate_snapshot_v2",
         "hypothesis_id": "HYP-2026-006",
         "experiment_id": "EXP-2026-0006",
+        "family_id": "FAM-2026-006",
+        "ledger_event_chain_head": RESEARCH_PROJECTION["event_chain_head"],
+        "ledger_projection_hash": RESEARCH_PROJECTION_HASH,
         "title": "Activist event response",
         "technique_family": "EVENT_STUDY",
         "economic_mechanism": "Slow institutional response to activist filings.",
@@ -111,23 +298,40 @@ def test_paid_data_requirement_creates_owner_review_without_purchase():
     assert "APPROVE_REQUEST" in item.options
 
 
-def test_research_evidence_routes_to_owner_but_never_activates_shadow():
-    assessment = assess_candidate(_candidate(), assessed_at=NOW)
+def test_research_evidence_routes_to_owner_but_never_activates_shadow(research_ledger):
+    assessment = assess_candidate(
+        _candidate(), assessed_at=NOW, research_ledger=research_ledger
+    )
     assert assessment.state == "EVIDENCE_READY_FOR_OWNER_REVIEW"
     assert assessment.queue_items[0].item_type is QueueItemType.RESEARCH_DECISION_REVIEW
     assert assessment.to_dict()["promotion_performed"] is False
 
 
-def test_owner_pursue_still_requires_separate_shadow_approval():
+def test_owner_review_candidate_cannot_self_attest_without_ledger_projection():
+    assessment = assess_candidate(_candidate(), assessed_at=NOW)
+    assert assessment.state == "RESEARCH_GATES_FAILED"
+    assert "canonical_research_ledger_projection_missing" in assessment.blockers
+
+
+def test_owner_review_verdict_requires_every_v2_research_gate():
+    gates = dict(RESEARCH_GATES)
+    del gates["complete_trial_census"]
+    with pytest.raises(ContractValidationError, match="mandatory v2 gates"):
+        _candidate(research_gates=gates)
+
+
+def test_owner_pursue_still_requires_separate_shadow_approval(research_ledger):
     assessment = assess_candidate(
-        _candidate(owner_research_decision="PURSUE"), assessed_at=NOW
+        _candidate(owner_research_decision="PURSUE"),
+        assessed_at=NOW,
+        research_ledger=research_ledger,
     )
     assert assessment.state == "AWAITING_SHADOW_APPROVAL"
     assert assessment.queue_items[0].item_type is QueueItemType.SHADOW_ACTIVATION_REVIEW
     assert assessment.queue_items[0].payload["registry_change_performed"] is False
 
 
-def test_shadow_checkpoint_and_paper_nomination_are_fail_closed():
+def test_shadow_checkpoint_and_paper_nomination_are_fail_closed(research_ledger):
     checkpoint = assess_candidate(
         _candidate(
             owner_research_decision="PURSUE",
@@ -135,6 +339,7 @@ def test_shadow_checkpoint_and_paper_nomination_are_fail_closed():
             shadow_observation_days=20,
         ),
         assessed_at=NOW,
+        research_ledger=research_ledger,
     )
     assert checkpoint.state == "SHADOW_CHECKPOINT_DUE"
     assert "shadow_evidence_missing" in checkpoint.blockers
@@ -152,6 +357,7 @@ def test_shadow_checkpoint_and_paper_nomination_are_fail_closed():
             evidence=evidence,
         ),
         assessed_at=NOW,
+        research_ledger=research_ledger,
     )
     assert paper.state == "PAPER_NOMINATION_READY"
     assert paper.queue_items[0].item_type is QueueItemType.PAPER_PROMOTION_REVIEW
@@ -169,12 +375,13 @@ def test_shadow_checkpoint_and_paper_nomination_are_fail_closed():
             evidence=evidence,
         ),
         assessed_at=NOW,
+        research_ledger=research_ledger,
     )
     assert failed.state == "SHADOW_CHECKPOINT_DUE"
     assert "shadow_gate_failed:portfolio_utility" in failed.blockers
 
 
-def test_cio_queue_prioritizes_paper_over_data_reviews():
+def test_cio_queue_prioritizes_paper_over_data_reviews(research_ledger):
     data = DataRequirement(
         requirement_id="paid.data.v1",
         provider_id="vendor",
@@ -190,6 +397,7 @@ def test_cio_queue_prioritizes_paper_over_data_reviews():
     paper = _candidate(
         hypothesis_id="HYP-2026-007",
         experiment_id="EXP-2026-0007",
+        family_id="FAM-2026-007",
         owner_research_decision="PURSUE",
         shadow_status="COMPLETE",
         shadow_observation_days=60,
@@ -199,11 +407,17 @@ def test_cio_queue_prioritizes_paper_over_data_reviews():
             {"artifact": "shadow.json", "sha256": "b" * 64, "label": "Shadow evidence"},
         ],
     )
-    queue = build_cio_queue((blocked, paper), generated_at=NOW)
+    queue = build_cio_queue(
+        (blocked, paper), generated_at=NOW, research_ledger=research_ledger
+    )
     assert queue["items"][0]["item_type"] == "PAPER_PROMOTION_REVIEW"
     assert queue["purchase_performed"] is False
     assert queue["promotion_performed"] is False
-    repeat = build_cio_queue((blocked, paper), generated_at=datetime(2026, 7, 21, 16, 0, tzinfo=timezone.utc))
+    repeat = build_cio_queue(
+        (blocked, paper),
+        generated_at=datetime(2026, 7, 21, 16, 0, tzinfo=timezone.utc),
+        research_ledger=research_ledger,
+    )
     assert repeat["decision_fingerprint"] == queue["decision_fingerprint"]
     assert repeat["queue_hash"] != queue["queue_hash"]
 
@@ -216,7 +430,7 @@ def test_candidate_hash_tampering_and_local_write_fail_closed(tmp_path, capsys):
 
     candidate_path = tmp_path / "candidate_snapshot.json"
     candidate_path.write_text(json.dumps(_candidate_dict()), encoding="utf-8")
-    with pytest.raises((FileNotFoundError, ResearchBoundaryError)):
+    with pytest.raises((ContractValidationError, FileNotFoundError, ResearchBoundaryError)):
         control_plane_main(
             [
                 "build-queue",
@@ -234,7 +448,7 @@ def test_candidate_hash_tampering_and_local_write_fail_closed(tmp_path, capsys):
 
 def test_evaluator_contract_is_bounded_and_hash_checked(tmp_path):
     unsigned = {
-        "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+        "schema_version": "caerus_alpha_lab_evaluator_spec_v2",
         "hypothesis_id": "HYP-2026-006",
         "evaluator_id": "event_v1",
         "technique_family": "EVENT_STUDY",
@@ -244,6 +458,19 @@ def test_evaluator_contract_is_bounded_and_hash_checked(tmp_path):
         "primary_metric": "residual_return",
         "data_contract_ids": ["event_tape_v1"],
         "challenge_period": "2025-01-01/2025-12-31",
+        "family_id": "FAM-2026-006",
+        "experiment_id": "EXP-2026-0006",
+        "exploratory_wave_id": "WAVE-2026-001",
+        "challenge_epoch_id": "CHALLENGE-2026-001",
+        "expected_direction": "GREATER_THAN",
+        "null_value": 0.0,
+        "economic_hurdle": 0.0,
+        "inference_method": "ROMANO_WOLF",
+        "inference_alpha_or_q": 0.10,
+        "resampling_unit": "REBALANCE_DATE_BLOCK",
+        "effective_sample_floor": 30,
+        "evaluator_code_sha256": HASH,
+        **_evaluator_contract_fields("primary", "placebo"),
     }
     spec = EvaluatorSpec.from_dict({**unsigned, "spec_hash": canonical_hash(unsigned)})
     assert spec.technique_family is TechniqueFamily.EVENT_STUDY
@@ -260,6 +487,142 @@ def test_evaluator_contract_is_bounded_and_hash_checked(tmp_path):
     boundary = inspect_evaluator_boundary(unsafe)
     assert boundary["status"] == "FAIL"
     assert boundary["findings"] == ["forbidden_import:brokers.alpaca_broker"]
+
+
+def test_evaluator_requires_one_registered_trial_id_per_variant(tmp_path, monkeypatch):
+    unsigned = {
+        "schema_version": "caerus_alpha_lab_evaluator_spec_v2",
+        "hypothesis_id": "HYP-2026-006",
+        "evaluator_id": "event_v1",
+        "technique_family": "EVENT_STUDY",
+        "module": "projects.alpha_lab.evaluators.synthetic_test",
+        "callable_name": "evaluate",
+        "maximum_variants": 2,
+        "primary_metric": "residual_return",
+        "data_contract_ids": ["event_tape_v1"],
+        "challenge_period": "2025-01-01/2025-12-31",
+        "family_id": "FAM-2026-006",
+        "experiment_id": "EXP-2026-0006",
+        "exploratory_wave_id": "WAVE-2026-001",
+        "challenge_epoch_id": "CHALLENGE-2026-001",
+        "expected_direction": "GREATER_THAN",
+        "null_value": 0.0,
+        "economic_hurdle": 0.0,
+        "inference_method": "ROMANO_WOLF",
+        "inference_alpha_or_q": 0.10,
+        "resampling_unit": "REBALANCE_DATE_BLOCK",
+        "effective_sample_floor": 30,
+        "evaluator_code_sha256": hashlib.sha256(
+            b"def evaluate(packet, phase):\n    return {}\n"
+        ).hexdigest(),
+        **_evaluator_contract_fields("primary", "placebo"),
+    }
+    spec = EvaluatorSpec.from_dict({**unsigned, "spec_hash": canonical_hash(unsigned)})
+    source = tmp_path / "synthetic_test.py"
+    source.write_text("def evaluate(packet, phase):\n    return {}\n", encoding="utf-8")
+    module = types.ModuleType(spec.module)
+    module.__file__ = str(source)
+    module.evaluate = lambda packet, phase: {
+        "variant_count": 2,
+        "primary_metric_name": "residual_return",
+        "orders_submitted": False,
+        "search_census": [],
+        "search_census_hash": canonical_hash([]),
+        "selection_trial_units": 0,
+        "variants": [
+            {
+                "variant_id": "primary",
+                "variant_definition_hash": hashlib.sha256(b"primary").hexdigest(),
+                "evidence_verdict": "NEGATIVE",
+                "primary_metric_value": -0.01,
+                "p_value": None,
+                "inference_eligible": False,
+                "ineligibility_reasons": ["NO_VALID_P_VALUE"],
+                "stress_scenario_pass": False,
+                "capacity_and_concentration_pass": False,
+                "effective_sample_size": 20,
+            },
+            {
+                "variant_id": "placebo",
+                "variant_definition_hash": hashlib.sha256(b"placebo").hexdigest(),
+                "evidence_verdict": "NEGATIVE",
+                "primary_metric_value": -0.02,
+                "p_value": None,
+                "inference_eligible": False,
+                "ineligibility_reasons": ["NO_VALID_P_VALUE"],
+                "stress_scenario_pass": False,
+                "capacity_and_concentration_pass": False,
+                "effective_sample_size": 20,
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        "projects.alpha_lab.control_plane.evaluator.importlib.import_module",
+        lambda name: module,
+    )
+    packet = {
+        "data_gate_status": "READY_FOR_FROZEN_EVALUATOR",
+        "hypothesis_id": spec.hypothesis_id,
+        "assets": {"event_tape_v1": {}},
+    }
+    with pytest.raises(ContractValidationError, match="every evaluator variant"):
+        run_evaluator(
+            spec=spec,
+            input_packet=packet,
+            phase=EvaluationPhase.DISCOVERY,
+            registered_trial_ids=("FAM-2026-006-T001",),
+        )
+    result = run_evaluator(
+        spec=spec,
+        input_packet=packet,
+        phase=EvaluationPhase.DISCOVERY,
+        registered_trial_ids=("FAM-2026-006-T001", "FAM-2026-006-T002"),
+    )
+    assert result["registered_trial_ids"] == [
+        "FAM-2026-006-T001",
+        "FAM-2026-006-T002",
+    ]
+
+
+def test_challenge_evaluator_rejects_boolean_only_authority(tmp_path, monkeypatch):
+    unsigned = {
+        "schema_version": "caerus_alpha_lab_evaluator_spec_v2",
+        "hypothesis_id": "HYP-2026-006",
+        "evaluator_id": "event_v1",
+        "technique_family": "EVENT_STUDY",
+        "module": "projects.alpha_lab.evaluators.synthetic_test",
+        "callable_name": "evaluate",
+        "maximum_variants": 1,
+        "primary_metric": "residual_return",
+        "data_contract_ids": ["event_tape_v1"],
+        "challenge_period": "2025-01-01/2025-12-31",
+        "family_id": "FAM-2026-006",
+        "experiment_id": "EXP-2026-0006",
+        "exploratory_wave_id": "WAVE-2026-001",
+        "challenge_epoch_id": "CHALLENGE-2026-001",
+        "expected_direction": "GREATER_THAN",
+        "null_value": 0.0,
+        "economic_hurdle": 0.0,
+        "inference_method": "ROMANO_WOLF",
+        "inference_alpha_or_q": 0.10,
+        "resampling_unit": "REBALANCE_DATE_BLOCK",
+        "effective_sample_floor": 30,
+        "evaluator_code_sha256": HASH,
+        **_evaluator_contract_fields("primary"),
+    }
+    spec = EvaluatorSpec.from_dict({**unsigned, "spec_hash": canonical_hash(unsigned)})
+    packet = {
+        "data_gate_status": "READY_FOR_FROZEN_EVALUATOR",
+        "hypothesis_id": spec.hypothesis_id,
+        "assets": {"event_tape_v1": {}},
+    }
+    with pytest.raises(ContractValidationError, match="canonical ledger access event"):
+        run_evaluator(
+            spec=spec,
+            input_packet=packet,
+            phase=EvaluationPhase.CHALLENGE,
+            registered_trial_ids=("FAM-2026-006-T900",),
+        )
 
 
 def test_eight_newly_frozen_evaluator_specs_are_hash_valid():

@@ -1,6 +1,10 @@
 # Experiment Ledger
 
-Append-only. Never delete failed or superseded experiments.
+Preserved append-only human lifecycle projection. Never delete failed or
+superseded experiments. After the global-ledger cutover, cumulative family,
+experiment-generation, trial, verified-inference, challenge, and independent-
+review truth comes from the canonical GCP event chain;
+this table remains a readable lifecycle/verdict view.
 
 | Experiment | Hypothesis | Frozen date | State | Primary classification | Evidence packet | Verdict |
 |---|---|---|---|---|---|---|
@@ -16,7 +20,7 @@ Append-only. Never delete failed or superseded experiments.
 | EXP-2026-0010 | HYP-2026-010 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0010.md` | `ITERATE` — `BLOCKED_DATA` |
 | EXP-2026-0011 | HYP-2026-011 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0011.md` | `ITERATE` — `BLOCKED_DATA` |
 | EXP-2026-0012 | HYP-2026-012 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0012.md` | `ITERATE` — `BLOCKED_DATA` |
-| EXP-2026-0013 | HYP-2026-013 | 2026-07-30 | `RUNNING` | `UNPROVEN` | Pending first immutable data-gate packet | `PENDING` — source-audited AI power/grid event tape required; returns and challenge period remain unread |
+| EXP-2026-0013 | HYP-2026-013 | 2026-07-30 | `RUNNING` | `UNPROVEN` | GCP `HYP-2026-013/ai-power-grid-readiness-20260730T212000Z-hyp-2026-013-data-gate-v1` | `ITERATE` — `BLOCKED_DATA`; first immutable gate exists, the source-audited event tape is still required, and returns/challenge remain unread |
 
 ## State vocabulary
 

@@ -1,12 +1,33 @@
 {
-  "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+  "schema_version": "caerus_alpha_lab_evaluator_spec_v2",
   "hypothesis_id": "HYP-YYYY-NNN",
+  "family_id": "FAM-YYYY-NNN",
+  "experiment_id": "EXP-YYYY-NNNN",
+  "exploratory_wave_id": "WAVE-YYYY-NNN",
+  "challenge_epoch_id": "CHALLENGE-YYYY-NNN",
   "evaluator_id": "hyp_yyyy_nnn_evaluator_v1",
   "technique_family": "EVENT_STUDY",
   "module": "projects.alpha_lab.evaluators.hyp_yyyy_nnn",
   "callable_name": "evaluate",
   "maximum_variants": 1,
+  "frozen_variants": [
+    {
+      "variant_id": "primary",
+      "variant_definition_hash": "SHA256_OF_THE_FROZEN_VARIANT_DEFINITION"
+    }
+  ],
+  "search_census": [],
+  "search_census_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "selection_trial_units": 0,
   "primary_metric": "frozen_primary_metric",
+  "expected_direction": "GREATER_THAN",
+  "null_value": 0.0,
+  "economic_hurdle": 0.0,
+  "inference_method": "HOLM_BONFERRONI",
+  "inference_alpha_or_q": 0.1,
+  "resampling_unit": "REBALANCE_DATE_BLOCK",
+  "effective_sample_floor": 30,
+  "evaluator_code_sha256": "SHA256_OF_THE_FROZEN_EVALUATOR_MODULE",
   "data_contract_ids": ["frozen_data_contract_v1"],
   "challenge_period": "YYYY-MM-DD/YYYY-MM-DD",
   "spec_hash": "SHA256_OF_THE_DOCUMENT_WITHOUT_THIS_FIELD"

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from projects.alpha_lab.factory.canonical import canonical_hash, format_datetime
 from projects.alpha_lab.factory.contracts import _require_aware
+from projects.alpha_lab.factory.errors import ContractValidationError
+from projects.alpha_lab.factory.research_ledger import GlobalResearchLedger
 
 from .models import (
     CandidateAssessment,
@@ -22,6 +24,54 @@ from .models import (
 
 def _failed_gates(prefix: str, values: Dict[str, bool]) -> List[str]:
     return ["{}:{}".format(prefix, name) for name, passed in sorted(values.items()) if not passed]
+
+
+def project_candidate_research_state(
+    research_ledger: GlobalResearchLedger,
+) -> Tuple[Dict[str, Any], FrozenSet[Tuple[str, str, str]]]:
+    """Project an actual ledger and recover its evidence-producing lineage."""
+
+    if not isinstance(research_ledger, GlobalResearchLedger):
+        raise ContractValidationError(
+            "candidate lifecycle evidence requires an actual GlobalResearchLedger"
+        )
+    projection = research_ledger.project()
+    records = research_ledger.store.read_all()
+    observed_head = records[-1].event_hash if records else None
+    if projection.get("event_chain_head") != observed_head:
+        raise ContractValidationError(
+            "research ledger changed while candidate evidence was projected"
+        )
+    family_primary_variants = {
+        str(record.payload["family_id"]): str(record.payload["primary_variant_id"])
+        for record in records
+        if record.event_type == research_ledger.FAMILY_EVENT
+    }
+    primary_model_bindings = frozenset(
+        (
+            str(record.payload["family_id"]),
+            str(record.payload["hypothesis_id"]),
+            str(record.payload["experiment_id"]),
+        )
+        for record in records
+        if record.event_type == research_ledger.RUN_EVENT
+        and record.payload.get("run_class") == "MODEL_TRIAL"
+        and record.payload.get("variant_id")
+        == family_primary_variants.get(str(record.payload.get("family_id")))
+    )
+    challenge_evidence_bindings = frozenset(
+        (
+            str(record.payload["family_id"]),
+            str(record.payload["hypothesis_id"]),
+            str(record.payload["experiment_id"]),
+        )
+        for record in records
+        if record.event_type == research_ledger.RUN_EVENT
+        and record.payload.get("run_class") == "CHALLENGE_READ"
+    )
+    return projection, challenge_evidence_bindings.intersection(
+        primary_model_bindings
+    )
 
 
 def _data_item(candidate: CandidateSnapshot, requirement: Any) -> QueueItem:
@@ -52,10 +102,20 @@ def _data_item(candidate: CandidateSnapshot, requirement: Any) -> QueueItem:
     )
 
 
-def assess_candidate(candidate: CandidateSnapshot, *, assessed_at: datetime) -> CandidateAssessment:
+def assess_candidate(
+    candidate: CandidateSnapshot,
+    *,
+    assessed_at: datetime,
+    research_ledger: Optional[GlobalResearchLedger] = None,
+) -> CandidateAssessment:
     """Return the next governed action without performing a lifecycle transition."""
 
     _require_aware(assessed_at, "assessed_at")
+    research_state = (
+        project_candidate_research_state(research_ledger)
+        if research_ledger is not None
+        else None
+    )
     queue: List[QueueItem] = []
     blockers: List[str] = []
 
@@ -96,6 +156,39 @@ def assess_candidate(candidate: CandidateSnapshot, *, assessed_at: datetime) -> 
         )
 
     research_failures = _failed_gates("research_gate_failed", dict(candidate.research_gates))
+    if candidate.research_verdict is ResearchVerdict.EVIDENCE_READY_FOR_OWNER_REVIEW:
+        if research_state is None:
+            research_failures.append("canonical_research_ledger_projection_missing")
+        else:
+            research_projection, challenge_evidence_bindings = research_state
+            family_rows = [
+                item
+                for item in research_projection.get("families", [])
+                if item.get("family_id") == candidate.family_id
+            ]
+            projection_valid = bool(
+                len(family_rows) == 1
+                and candidate.ledger_event_chain_head
+                == research_projection.get("event_chain_head")
+                and candidate.ledger_projection_hash
+                == canonical_hash(research_projection)
+                and family_rows[0].get("decision_grade_ready") is True
+                and candidate.hypothesis_id
+                in set(family_rows[0].get("hypothesis_ids", []))
+                and (
+                    candidate.family_id,
+                    candidate.hypothesis_id,
+                    candidate.experiment_id,
+                )
+                in challenge_evidence_bindings
+                and dict(candidate.research_gates)
+                == dict(family_rows[0].get("research_gates", {}))
+                and all(family_rows[0].get("research_gates", {}).values())
+            )
+            if not projection_valid:
+                research_failures.append(
+                    "candidate_not_bound_to_decision_grade_ledger_state"
+                )
     if not candidate.evidence:
         research_failures.append("decision_grade_evidence_missing")
     blockers.extend(research_failures)
@@ -266,10 +359,20 @@ def assess_candidate(candidate: CandidateSnapshot, *, assessed_at: datetime) -> 
 
 
 def build_cio_queue(
-    candidates: Iterable[CandidateSnapshot], *, generated_at: datetime
+    candidates: Iterable[CandidateSnapshot],
+    *,
+    generated_at: datetime,
+    research_ledger: Optional[GlobalResearchLedger] = None,
 ) -> Dict[str, Any]:
     _require_aware(generated_at, "generated_at")
-    assessments = [assess_candidate(item, assessed_at=generated_at) for item in candidates]
+    assessments = [
+        assess_candidate(
+            item,
+            assessed_at=generated_at,
+            research_ledger=research_ledger,
+        )
+        for item in candidates
+    ]
     items = sorted(
         (queue_item for assessment in assessments for queue_item in assessment.queue_items),
         key=lambda item: (-item.priority, item.item_type.value, item.hypothesis_id),

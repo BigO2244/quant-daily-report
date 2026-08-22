@@ -32,7 +32,10 @@ the frozen test executed, say `RUN EXPERIMENT`.
 
 - `CURRENT_STATE.md` — honest baseline of what Caerus presently knows.
 - `STRATEGY_BACKLOG.md` — candidate mechanisms, not a leaderboard of Sharpe.
-- `EXPERIMENT_LEDGER.md` — append-only record of every frozen experiment.
+- `EXPERIMENT_LEDGER.md` — preserved human experiment history and projection.
+- `factory/research_ledger.py` — typed global wave/family/experiment/trial,
+  verified-inference, single-use challenge, and independent-review authority
+  backed by the GCP append-only event chain.
 - `DECISION_LOG.md` — owner decisions to pursue, park, or kill.
 - `templates/HYPOTHESIS.md` — preregistration contract.
 - `templates/ALPHA_CARD.md` — standard evidence and classification packet.

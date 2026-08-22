@@ -18,7 +18,8 @@
     "hypothesis_runs": "<hypothesis_id>/<run_id>/",
     "forward_observations": "options_proxy_forward/<artifact_class>/<as_of_date>/<run_id>/",
     "shared_working_data": "shared/",
-    "provider_readiness": "provider_readiness/"
+    "provider_readiness": "provider_readiness/",
+    "global_research_ledger": "ledger/research_events.v1.jsonl"
   },
   "identifiers": {
     "bundle_id": "<UTC_YYYYMMDDTHHMMSSZ>-<12_hex_content_hash>",
@@ -59,6 +60,10 @@
     "require_source_and_license_metadata": true,
     "require_no_active_collector_preflight": true,
     "maximum_concurrent_collectors": 1,
+    "global_research_ledger_append_only": true,
+    "require_owner_ratified_family_mapping": true,
+    "require_pre_outcome_trial_registration": true,
+    "single_use_challenge_epoch": true,
     "delete_source_after_copy": false
   },
   "backup": {

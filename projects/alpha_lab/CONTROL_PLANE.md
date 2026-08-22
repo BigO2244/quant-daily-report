@@ -78,6 +78,8 @@ Create a draft from `templates/CANDIDATE_SNAPSHOT.json`, omit
 ```bash
 python -m projects.alpha_lab.control_plane.cli seal-candidate \
   --draft /path/to/candidate_draft.json \
+  --ledger /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
+  --repo-root /mnt/disks/alpha-lab/alpha-lab-project \
   > /path/to/sealed_candidate_response.json
 ```
 
@@ -86,28 +88,66 @@ snapshot as an immutable manifested bundle. The response wraps the sealed
 snapshot under `candidate`; extract that object only when a standalone local
 snapshot is needed for a read-only assessment.
 
-Every gate is boolean and fail-closed. A missing gate is not inferred from a
-good return. Evidence references require SHA-256 hashes. A Shadow evidence
-reference must be labeled as Shadow evidence before Paper nomination is
-possible.
+For an owner-review verdict, the sealer ignores draft gate booleans, validates
+the exact family–hypothesis–experiment lineage, and derives the complete gate
+map, event-chain head, and projection hash from the canonical ledger.
+Assessment and queue generation accept an actual verified ledger—not a caller-
+authored projection—and re-read its event chain. Evidence references require
+SHA-256 hashes. A Shadow evidence reference must be labeled as Shadow evidence
+before Paper nomination is possible.
 
 ## Generic evaluator adapters
 
 Each new hypothesis may provide one adapter below
 `projects.alpha_lab.evaluators`. The frozen spec records:
 
+- family, experiment, exploratory-wave, and challenge-epoch identity;
 - technique family;
 - module and callable;
 - primary metric;
-- maximum variant budget;
+- expected direction, null, economic hurdle, and effective-sample floor;
+- exact evaluator-module SHA-256;
+- its exact ordered variant IDs and variant-definition hashes;
+- the deterministic internal-search census, its hash, and the mechanically
+  derived selection-trial units;
+- its per-run maximum variant count; the global ledger separately enforces the
+  cumulative family budget and one registered trial ID per frozen variant;
 - exact data-contract IDs; and
 - locked challenge period.
 
 The adapter receives only the certified input packet and evaluation phase. It
 must return the frozen primary metric name, number of variants attempted, and
-`orders_submitted: false`. The runner rejects challenge access unless it is
-explicitly authorized, rejects a changed primary metric or excess variants,
-and statically rejects direct production imports or order calls.
+`orders_submitted: false`. It must also reproduce the frozen ordered variant
+contract and complete search census. The runner requires one already registered
+family trial ID per returned variant, verifies the ledger's definition hashes
+and selection-unit total, rejects a changed primary metric or undeclared
+search, and statically rejects direct production imports or order calls.
+
+Challenge execution through the reusable API accepts only an access event on a
+ledger whose complete typed semantics replay successfully and whose frozen
+input hash matches the bytes about to be opened. The outcome-bearing CLI adds
+the canonical-GCP-path requirement. A self-signed event-shaped JSON object is
+not authority.
+
+## Interrupted evaluator closure
+
+The evaluator finalizes its manifested result bundle before it closes the
+corresponding ledger trials. If the process stops between those operations, do
+not rerun the evaluator or reopen a challenge input. Reconcile the immutable
+bundle instead:
+
+```bash
+python -m projects.alpha_lab.control_plane.cli reconcile-evaluator-bundle \
+  --bundle /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/control_plane/evaluator_runs/<HYP-ID>/<date>/<bundle-id> \
+  --spec /mnt/disks/alpha-lab/alpha-lab-project/projects/alpha_lab/experiments/evaluator_specs/<HYP-ID>.json \
+  --ledger /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
+  --repo-root /mnt/disks/alpha-lab/alpha-lab-project
+```
+
+Reconciliation re-verifies the manifest, result hash, frozen spec, trial and
+variant contracts, search accounting, and challenge access event. It adds only
+missing result closures and verifies matching existing closures, so recovery
+after zero, some, or all closures is idempotent.
 
 Every evaluator that produces dated return observations should also call
 `projects.alpha_lab.evaluators.regime_diagnostics.summarize_regime_observations`.
@@ -123,12 +163,43 @@ claim or allocation rule requires its own separately frozen holdout.
 python -m projects.alpha_lab.control_plane.cli run-evaluator \
   --spec /path/to/frozen_evaluator_spec.json \
   --input /path/to/ready_data_gate_packet.json \
-  --phase DISCOVERY
+  --phase DISCOVERY \
+  --trial-id FAM-YYYY-NNN-T001 \
+  --ledger /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
+  --write \
+  --repo-root /mnt/disks/alpha-lab/alpha-lab-project
 ```
 
-Challenge-period execution additionally requires
-`--authorize-challenge-access`. That flag records permission to read the frozen
-challenge panel; it does not relax any evidence gate.
+Challenge execution rejects Boolean-only authority. It requires a registered
+challenge trial and epoch plus `--challenge-access` pointing to the exact
+ledger access artifact. The command atomically consumes the shared epoch before
+opening the input, then verifies the bytes against the frozen per-trial hash.
+All entrants in a shared epoch must be frozen before that first access. The
+current command supports an epoch with exactly one entrant; multi-family epochs
+fail closed until an atomic batch runner is implemented. A consumed epoch is
+never reused, including after an evaluator failure.
+
+Family inference is recomputed from immutable trial results. Holm-Bonferroni is
+the currently implemented verified within-family engine; a frozen Romano-Wolf
+family remains blocked until a joint-resampling verifier exists. Challenge
+confirmation is recomputed across the complete epoch with Holm. A final
+independent-review event must bind the current ledger head and attest PIT,
+replay, benchmark/factor, and artifact integrity before decision-grade status
+is possible.
+
+Historical migration is dry-run by default:
+
+```bash
+python -m projects.alpha_lab.factory.import_research_ledger \
+  --repo-root /mnt/disks/alpha-lab/alpha-lab-project \
+  --data-root /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab
+```
+
+A canonical write additionally requires `--write` and an owner-ratified
+migration manifest bound to the exact audited source receipts. The importer
+classifies the current 66 data gates as attempts, the eight evaluated variants
+as trials, the eight return grids as robustness children, and imports no
+challenge event.
 
 ## Licensed-data workflow
 
@@ -153,7 +224,9 @@ Build a queue from one or more sealed snapshots:
 
 ```bash
 python -m projects.alpha_lab.control_plane.cli build-queue \
-  --candidate /path/to/candidate_snapshot.json
+  --candidate /path/to/candidate_snapshot.json \
+  --ledger /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
+  --repo-root /mnt/disks/alpha-lab/alpha-lab-project
 ```
 
 To persist a finalized queue, run on `caerus-vm` using the authoritative GCP
@@ -164,6 +237,7 @@ cd /mnt/disks/alpha-lab/alpha-lab-project
 /home/brettolson/.venvs/quant-daily-report/bin/python \
   -m projects.alpha_lab.control_plane.cli build-queue \
   --candidate-dir outputs/research/alpha_lab/control_plane/candidate_snapshots \
+  --ledger outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
   --write \
   --repo-root .
 ```

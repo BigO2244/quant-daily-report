@@ -64,6 +64,29 @@ state and continue strategy discussion.
 - Predeclare the hypothesis family, primary metric, benchmark, risk model,
   holding horizon, cost model, trial budget, pass criteria, and kill criteria.
 - Record every attempted variant. Negative results are permanent evidence.
+- Use the canonical GCP global research ledger for family, wave, statistical
+  trial, inference, and challenge accounting. Register every outcome-bearing
+  variant before access; data gates and prespecified robustness cells are
+  attempts, not extra trials.
+- Freeze wave membership and its correction method before opening validation
+  outcomes. New exploratory waves default to Benjamini-Yekutieli at the frozen
+  q unless a separately validated dependence contract authorizes BH. Use the
+  verified Holm within-family engine for new work; preserve older frozen
+  Romano-Wolf contracts as evidence, but do not call them decision-grade until
+  a joint-resampling verifier exists.
+- Consume a shared challenge epoch once for the complete frozen entrant set
+  before any outcome-bearing input is read. Boolean authorization is invalid.
+- Never reuse a challenge input hash, or the same panel manifest over an
+  overlapping challenge period, under a renamed family or epoch.
+- Freeze the ordered variant-definition hashes and deterministic internal
+  search census before outcome access; derive selection units from that census.
+- After an interrupted evaluator close, reconcile the finalized manifested
+  bundle idempotently. Do not rerun or reopen challenge evidence.
+- Bind every owner-review candidate to the canonical ledger projection and an
+  independent review of PIT, replay, benchmark/factor, and artifact integrity.
+- Treat owner ratification, preregistration, and independent review as
+  non-decision-grade until their identities and reviewer separation are
+  authenticated; names and Boolean attestations are not sufficient.
 - Separate selection alpha, portfolio/factor exposure, diversification value,
   and implementation effects.
 - Use chronological walk-forward evaluation, an untouched challenge period,
@@ -94,3 +117,11 @@ Use the strongest available frontier model as root orchestrator. For a frozen
 experiment with independent workstreams, delegate bounded PIT/data audit,
 signal research, implementation, and adversarial verification tasks. The root
 reviews all material evidence and owns the final classification.
+
+The canonical cross-repository phase sequence, hardening program, current
+gate, maintenance checklist, and rollback policy live in the `caerus-atlas`
+repository at
+`docs/operations/quant_shop_institution_and_hardening_roadmap.md`. Alpha Lab
+implements ledger-bound research work but must not duplicate or independently
+advance that roadmap. Any phase-status change must update the Atlas roadmap,
+evidence, tests, and Git coordination record in the same reviewed change.

@@ -71,7 +71,38 @@ deployment, strategy registry, returns, or frozen holdout behavior.
 | Options forward observation | `options_proxy_forward/<artifact_class>/<as_of_date>/<run_id>/` | Immutable artifact plus health and boundary evidence for the session |
 | Shared working/index data | `shared/` | Explicitly marked checkpoint or finalized input; never inferred from filename alone |
 | Provider readiness | `provider_readiness/` | Dated readiness artifact with provider and blocker state |
+| Global research ledger | `ledger/research_events.v1.jsonl` | One typed, append-only hash chain for waves, families, experiment generations, attempts, statistical trials, verified inference, challenge consumption, and independent review |
 | Collector work in progress | `data_spine/.staging/` and named checkpoints | Incomplete; excluded from decision evidence and migration attestation |
+
+The global research ledger is the sole machine authority for cumulative trial
+counts, experiment lineage, challenge consumption, and decision-grade research
+gates. Per-run chains remain authoritative evidence
+for their run; the global chain links them by exact path and hash. Data gates,
+collections, transformations, cost grids, validation windows, and regime cells
+do not become statistical trials merely because they have run artifacts.
+
+The ledger must be appended immediately before an outcome-bearing statistical
+trial is opened. A shared challenge epoch is consumed once, for its entire
+frozen entrant set, before any outcome-bearing input byte is read. A crash or
+negative result does not refund the access. Markdown, Atlas, and
+`EXPERIMENT_LEDGER.md` are human projections after cutover, not writable
+competing authorities.
+
+Challenge reuse is global to the underlying evidence, not merely an epoch
+name: an input hash cannot appear in two epochs, and the same panel manifest
+cannot be reused over an overlapping challenge period. Finalized evaluator
+bundles are the recovery source after interrupted ledger closure; recovery
+must verify and close missing results rather than rerun outcome access.
+
+Until an authenticated identity service verifies owner signatures,
+preregistration authorship, and reviewer–author separation, those three
+decision-grade blockers remain closed. A true Boolean or plausible name in an
+artifact is not identity authority.
+
+Candidate snapshots cannot self-attest research readiness. An owner-review
+snapshot must carry the matching family ID, global event-chain head, and
+canonical projection hash; the lifecycle re-verifies all three before emitting
+an owner decision item.
 
 `source_id` uses lowercase letters, numbers, dots, underscores, and hyphens.
 Bundle IDs use `<UTC YYYYMMDDTHHMMSSZ>-<12 hex content hash>`. Experiment IDs

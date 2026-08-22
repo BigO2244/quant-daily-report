@@ -44,13 +44,23 @@ Choose one: `ALPHA_CANDIDATE`, `FACTOR_HARVEST_CANDIDATE`,
 
 ## Frozen experiment
 
+- Hypothesis family ID:
+- Family generation / experiment ID:
+- Parent family or experiment IDs:
+- Exploratory wave ID and frozen membership:
+- Family scope hash:
 - Primary metric:
+- Expected direction, null value, and minimum economic hurdle:
+- Frozen primary variant ID:
 - Secondary diagnostics:
 - Walk-forward design:
-- Untouched challenge period:
+- Resampling/independence unit and effective-sample floor:
+- Untouched challenge epoch ID, exact period, and panel hash:
 - Cost and capacity assumptions:
-- Maximum variants in this family:
-- Multiple-testing correction:
+- Maximum statistical trial units in this family generation:
+- Nested ML selection-trial budget, if applicable:
+- Within-family FWER method:
+- Wave-level multiple-testing method and alpha/q:
 
 ## Pass criteria
 

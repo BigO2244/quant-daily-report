@@ -21,7 +21,28 @@ from projects.alpha_lab.factory.errors import ContractValidationError
 
 _HYPOTHESIS_ID = re.compile(r"^HYP-\d{4}-\d{3}$")
 _EXPERIMENT_ID = re.compile(r"^EXP-\d{4}-\d{4}$")
+_FAMILY_ID = re.compile(r"^FAM-\d{4}-\d{3}$")
 _REQUIREMENT_ID = re.compile(r"^[a-z][a-z0-9._-]{2,127}$")
+
+REQUIRED_RESEARCH_GATES_V2 = frozenset(
+    {
+        "family_lineage_integrity",
+        "frozen_spec_integrity",
+        "point_in_time_integrity",
+        "deterministic_replay",
+        "complete_trial_census",
+        "trial_budget_compliant",
+        "family_inference_pass",
+        "exploratory_wave_fdr_pass",
+        "locked_validation_economic_pass",
+        "benchmark_and_factor_model",
+        "costs_capacity_and_concentration",
+        "challenge_epoch_integrity",
+        "challenge_confirmation_pass",
+        "independent_review",
+        "artifact_and_event_chain_integrity",
+    }
+)
 
 
 class AccessMode(str, Enum):
@@ -198,6 +219,9 @@ class CandidateSnapshot:
     data_requirements: Tuple[DataRequirement, ...]
     evidence: Tuple[EvidenceReference, ...]
     source_snapshot_hash: str
+    family_id: Optional[str] = None
+    ledger_event_chain_head: Optional[str] = None
+    ledger_projection_hash: Optional[str] = None
     schema_version: str = "caerus_alpha_lab_candidate_snapshot_v1"
 
     def __post_init__(self) -> None:
@@ -231,6 +255,24 @@ class CandidateSnapshot:
                 raise ContractValidationError("{} names must be non-empty".format(name))
             if not all(isinstance(value, bool) for value in gates.values()):
                 raise ContractValidationError("{} values must be boolean".format(name))
+        if self.research_verdict is ResearchVerdict.EVIDENCE_READY_FOR_OWNER_REVIEW:
+            missing = sorted(REQUIRED_RESEARCH_GATES_V2 - set(self.research_gates))
+            if missing:
+                raise ContractValidationError(
+                    "owner-review evidence is missing mandatory v2 gates: {}".format(
+                        ",".join(missing)
+                    )
+                )
+            if self.schema_version != "caerus_alpha_lab_candidate_snapshot_v2":
+                raise ContractValidationError(
+                    "owner-review evidence requires candidate snapshot v2"
+                )
+            if self.family_id is None or _FAMILY_ID.fullmatch(self.family_id) is None:
+                raise ContractValidationError(
+                    "owner-review evidence requires a valid family_id"
+                )
+            require_sha256(self.ledger_event_chain_head, "ledger_event_chain_head")
+            require_sha256(self.ledger_projection_hash, "ledger_projection_hash")
         requirement_ids = [item.requirement_id for item in self.data_requirements]
         if len(requirement_ids) != len(set(requirement_ids)):
             raise ContractValidationError("data requirement IDs cannot repeat")
@@ -241,7 +283,7 @@ class CandidateSnapshot:
         return self.shadow_review_checkpoints[-1]
 
     def unsigned_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "hypothesis_id": self.hypothesis_id,
             "experiment_id": self.experiment_id,
@@ -261,6 +303,22 @@ class CandidateSnapshot:
             "data_requirements": [item.to_dict() for item in self.data_requirements],
             "evidence": [item.to_dict() for item in self.evidence],
         }
+        if self.schema_version == "caerus_alpha_lab_candidate_snapshot_v2" or any(
+            value is not None
+            for value in (
+                self.family_id,
+                self.ledger_event_chain_head,
+                self.ledger_projection_hash,
+            )
+        ):
+            result.update(
+                {
+                    "family_id": self.family_id,
+                    "ledger_event_chain_head": self.ledger_event_chain_head,
+                    "ledger_projection_hash": self.ledger_projection_hash,
+                }
+            )
+        return result
 
     def to_dict(self) -> Dict[str, Any]:
         payload = self.unsigned_dict()
@@ -294,6 +352,9 @@ class CandidateSnapshot:
             ),
             evidence=tuple(EvidenceReference.from_dict(item) for item in value["evidence"]),
             source_snapshot_hash=supplied_hash,
+            family_id=value.get("family_id"),
+            ledger_event_chain_head=value.get("ledger_event_chain_head"),
+            ledger_projection_hash=value.get("ledger_projection_hash"),
             schema_version=value.get("schema_version", "caerus_alpha_lab_candidate_snapshot_v1"),
         )
 
