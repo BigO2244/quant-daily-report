@@ -1,5 +1,19 @@
 {
   "schema_version": "caerus_strategy_registry_v1",
+  "authority_scope": {
+    "covers": [
+      "research_lifecycle",
+      "shadow_modeling",
+      "orion_paper_control_plane"
+    ],
+    "does_not_cover": [
+      "system_wide_live_authority",
+      "lyra_live_runtime_gates",
+      "broker_factual_live_state"
+    ],
+    "current_operating_state": "docs/CURRENT_OPERATING_STATE.md",
+    "note": "A false global Live-disabled claim was previously inferred from PAPER-scoped fields. Resolve Live authority from the owner decision, deployed gates, execution artifacts, and broker state."
+  },
   "sleeve_control_plane": {
     "schema_version": "caerus_sleeve_control_plane_registry_v1",
     "terminal_statuses": [
@@ -40,7 +54,8 @@
         "current_primary_sleeve": "caerus_orion",
         "capital_eligibility_requires_owner_approval": true,
         "automatic_promotion_enabled": false,
-        "live_enabled": false
+        "live_enabled": false,
+        "live_enabled_scope": "THIS_ORION_PAPER_ALLOCATION_POLICY_ONLY"
       }
     },
     "manifest_path": "research_registry/sleeves/manifest.json",
@@ -443,6 +458,20 @@
       "eligible_for_promotion": true,
       "benchmark": "SPY",
       "execution_impact": "NON_EXECUTIONAL",
+      "execution_impact_scope": "RESEARCH_REGISTRY_AND_SHADOW_PIPELINE_ONLY",
+      "operating_lane_refs": [
+        {
+          "lane": "shadow",
+          "status": "active",
+          "authority": "config/research/strategy_registry.json"
+        },
+        {
+          "lane": "live",
+          "status": "active",
+          "authority": "docs/governance/decision_records/lyra_live_owner_decision_20260819.json",
+          "operating_truth": "docs/evidence/lyra_live_operating_truth_2026-08-22.json"
+        }
+      ],
       "display_order": 30,
       "capabilities": {
         "produces_holdings": true,

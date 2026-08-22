@@ -125,7 +125,8 @@ Provenance confidence health: LOW
 - Shadow artifacts are present and fresh.
 - Operational shadow NAV remains LOW confidence pending timing semantics
   governance.
-- Orion and Lyra remain shadow-only challengers.
+- In this dated Shadow-health example, Orion and Lyra are modeled Shadow
+  challengers. This example does not establish current capital-lane authority.
 
 Interpretation:
 The shadow lane ran successfully, but performance claims should be treated as

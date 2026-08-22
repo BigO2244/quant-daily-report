@@ -1,37 +1,42 @@
 # Alpha Stack
 
 Alpha Stack is the Caerus quantitative trading platform for US long-only equities plus a gated options overlay. The current operating reality is:
-- paper execution remains active and unchanged
-- new strategy variants are validated through research and shadow lanes first
+- Orion PAPER execution remains active
+- the separately governed Lyra Live portfolio is active, funded, and recurring
+- new strategy variants are validated through research and Shadow lanes first
 - promotion stays explicit: `research -> backtest -> shadow -> paper -> live`
 
 ## Current State
 
 - Daily orchestrator: `daily_quant_report.py`
-- Paper execution posture: Alpaca paper only
-- Current paper execution control: **Caerus Polaris**
-- Primary shadow candidate: **Caerus Orion**
-- Secondary shadow challenger: **Caerus Lyra**
+- PAPER execution control: **Caerus Orion**
+- Live execution control: **Caerus Lyra**, through the isolated owner-approved Lyra Live portfolio
+- Shadow models: **Polaris, Orion, Lyra, Polaris_Alpha, Orion_Alpha**
 - Benchmark: **SPY**
 
 ## Named Strategies
 
 - `Caerus Polaris` / `caerus_polaris`
-  - current paper baseline / operational control
+  - historical research baseline and Shadow comparison control
 - `Caerus Orion` / `caerus_orion`
-  - primary shadow candidate
-  - Alpha Lab v2 lead candidate: H2 rank-decay exit + H6 top-5 concentration
+  - sole PAPER capital sleeve and a continuing Shadow comparison series
+  - H2 rank-decay exit + H6 top-5 concentration
 - `Caerus Lyra` / `caerus_lyra`
-  - secondary shadow challenger
-  - Alpha Lab v2 challenger: H1 weekly rebalance + H6 top-5 concentration
+  - continuing Shadow comparison series and separately governed Live portfolio
+  - H1 weekly rebalance + H6 top-5 concentration
 - `SPY` / `spy_benchmark`
   - benchmark only
 
-Current promotion state:
-- Polaris remains the active paper model
-- Orion is shadow only
-- Lyra is shadow only
+Current lane state:
+- Orion is the sole PAPER capital sleeve
+- Lyra Live is owner-approved, funded, recurring, and fill-confirmed
+- Lyra also remains in Shadow for modeled comparison; that does not make it Shadow-only
+- the legacy FR-104 and generic Live v1 lanes remain disabled
 - Shadow is artifact-only and non-blocking
+
+See `docs/CURRENT_OPERATING_STATE.md` for the lane-by-lane authority map and
+`docs/evidence/lyra_live_operating_truth_2026-08-22.json` for the read-only
+runtime and broker evidence.
 
 ## Seven-Layer Architecture
 

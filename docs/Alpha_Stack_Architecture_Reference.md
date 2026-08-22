@@ -5,29 +5,29 @@ This document is the current architecture reference for Alpha Stack. It reflects
 ## Current Named Strategy State
 
 - `Caerus Polaris` / `caerus_polaris`
-  - current paper baseline / operational control
+  - historical research baseline and Shadow comparison control
 - `Caerus Orion` / `caerus_orion`
-  - primary shadow candidate
-  - derived from the Alpha Lab v2 lead combination: H2 rank-decay exit + H6 top-5 concentration
+  - sole PAPER capital sleeve and continuing Shadow comparison series
+  - H2 rank-decay exit + H6 top-5 concentration
 - `Caerus Lyra` / `caerus_lyra`
-  - secondary shadow challenger
-  - derived from the Alpha Lab v2 challenger combination: H1 weekly rebalance + H6 top-5 concentration
+  - continuing Shadow comparison series plus a separately governed Live portfolio
+  - H1 weekly rebalance + H6 top-5 concentration
 - `Cassiopeia` / `caerus_cassiopeia`
   - research-only event-driven identity; not an execution sleeve
 - `SPY` / `spy_benchmark`
   - benchmark
 
 Current promotion state:
-- Polaris = paper
-- Orion = shadow challenger; default FR-104 `LIVE_PILOT` sleeve only when all
-  live-pilot approval gates pass
-- Lyra = shadow challenger
+- Polaris = historical research control and Shadow series
+- Orion = sole PAPER capital sleeve and Shadow series; no Live authority
+- Lyra = Shadow series plus owner-approved, funded, recurring Live portfolio
+- legacy FR-104 and generic Live v1 = disabled
 - Cassiopeia = research only
 - promotion ladder remains `research -> backtest -> shadow -> paper -> live`
 
-Named strategy labels are governance identities. They are distinct from
-functional Alpha Stack sleeves and from the capped FR-104 live-pilot execution
-lane.
+Named strategy labels are governance identities. Lane membership is
+many-to-many and is not encoded by one research lifecycle field. The current
+authority map is `docs/CURRENT_OPERATING_STATE.md`.
 
 ## Purpose and Governance
 

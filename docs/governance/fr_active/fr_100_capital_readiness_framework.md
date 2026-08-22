@@ -183,9 +183,9 @@ capacity, execution coverage, and owner approval support that exact claim.
 
 | Sleeve | Current model trust assessment |
 |---|---|
-| Polaris | Paper baseline/control. PIT rebaseline materially downgraded legacy risk claims; parity harness and migration evidence remain incomplete. |
-| Orion | Shadow only. Useful for Orion/Lyra redundancy triage, not promotion. |
-| Lyra | Shadow only. Not independently promotion-ready; should remain in Orion/Lyra disposition work or a future approved redeployment thesis. |
+| Polaris | Historical Shadow baseline/control. PIT rebaseline materially downgraded legacy risk claims; parity harness and migration evidence remain incomplete. |
+| Orion | PAPER-authorized and Shadow-observed. Its research evidence remains useful for Orion/Lyra redundancy triage, not for additional promotion claims. |
+| Lyra | Research-evidence scope: Shadow observed and not independently promotion-ready. This evidence classification does not negate the later, separately owner-approved Lyra Live operating lane. |
 | Cassiopeia | Research only. 13D tape is PIT-safe but campaign dedupe weakened returns; Form 4 is pilot only. |
 | Phoenix | Research only and not viable in current Phase B candidate because capacity failed the 5 percent ADV policy. |
 | Cygnus | Research/shelved. v0 shelved; v1 blocked on PIT consensus/EPS-surprise data. |

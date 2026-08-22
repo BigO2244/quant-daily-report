@@ -337,7 +337,9 @@ see [`../architecture/research_mcp_current_state_2026-05-29.md`](../architecture
 Assumptions:
 
 - The current execution system remains paper-only and Polaris-only for orders.
-- Orion and Lyra remain shadow-only until governance says otherwise.
+- Within this dated research-backlog scope, Orion and Lyra remain Shadow
+  comparison series until research governance says otherwise. Current capital
+  lane authority is separate; see `docs/CURRENT_OPERATING_STATE.md`.
 - FR-024 through FR-027 remain additive research infrastructure.
 - FR-028 remains high blast-radius and must not silently rewrite historical
   performance semantics.

@@ -488,7 +488,9 @@ def test_dashboard_v1_surfaces_alpha_sleeves_and_live_pilot_evidence(tmp_path: P
     assert payload["sections"]["operator_control_tower"]["summary"]["live_pilot_state"] == "ACTIVE"
     assert payload["sections"]["operator_control_tower"]["summary"]["alpha_pair_count"] == 2
     assert payload["sections"]["operator_control_tower"]["latest_order"]["ticker"] == "AAPL"
-    assert payload["sections"]["account_layers"]["rows"][1]["layer"] == "Live pilot account"
+    assert payload["sections"]["account_layers"]["rows"][1]["layer"] == (
+        "Legacy FR-104 live-pilot account"
+    )
     assert payload["sections"]["governance_state"]["summary"]["fr068_pilot_blocking"] is False
 
 

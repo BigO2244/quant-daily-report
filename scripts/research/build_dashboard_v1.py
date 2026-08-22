@@ -1466,7 +1466,7 @@ class DashboardV1Builder:
                 "capital_behavior": "paper only",
             },
             {
-                "layer": "Live pilot account",
+                "layer": "Legacy FR-104 live-pilot account",
                 "status": live_pilot.get("status") or "NO_DATA",
                 "cash": (live_pilot.get("account") or {}).get("cash"),
                 "equity": (live_pilot.get("account") or {}).get("equity"),
@@ -1651,7 +1651,7 @@ class DashboardV1Builder:
         elif live_state == "BLOCKED":
             actions.append(
                 {
-                    "title": "Live pilot blocked",
+                    "title": "Legacy FR-104 live pilot blocked",
                     "status": "ACTION_REQUIRED",
                     "severity": "action",
                     "detail": str(metrics.get("idle_cash_reason") or live_pilot.get("status") or "Live-pilot path is blocked."),
@@ -1663,10 +1663,10 @@ class DashboardV1Builder:
         elif live_state == "IDLE" and deployed_pct in (None, 0.0):
             actions.append(
                 {
-                    "title": "Live pilot cash idle",
+                    "title": "Legacy FR-104 live pilot cash idle",
                     "status": "WATCH",
                     "severity": "watch",
-                    "detail": str(metrics.get("idle_cash_reason") or "No live-pilot capital is currently deployed."),
+                    "detail": str(metrics.get("idle_cash_reason") or "No legacy FR-104 live-pilot capital is currently deployed; this does not describe the separate Lyra Live portfolio."),
                     "expected_artifact": live_pilot.get("plan_path") or "outputs/live_pilot/plans/live_pilot_plan_<date>.json",
                     "blocks_pilot": False,
                     "operator_action": "Check whether a qualifying manually approved FR-104 order exists today.",
@@ -1769,7 +1769,7 @@ class DashboardV1Builder:
             },
             {
                 "id": "live_capital",
-                "label": "Live Pilot Capital",
+                "label": "Legacy FR-104 Capital",
                 "value": deployed_pct,
                 "value_format": "percent",
                 "detail": f"Cash {live_pilot.get('account', {}).get('cash')} · Equity {live_pilot.get('account', {}).get('equity')}",
@@ -1777,7 +1777,7 @@ class DashboardV1Builder:
             },
             {
                 "id": "latest_order",
-                "label": "Latest Live Order",
+                "label": "Latest FR-104 Order",
                 "value": latest_order.get("status"),
                 "value_format": "text",
                 "detail": f"{latest_order.get('ticker') or '—'} {latest_order.get('side') or ''} {latest_order.get('qty') or '—'} {latest_order.get('order_type') or ''}".strip(),

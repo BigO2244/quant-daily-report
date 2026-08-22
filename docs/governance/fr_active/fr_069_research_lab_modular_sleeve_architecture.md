@@ -123,7 +123,7 @@ forces every sleeve through `Universe(as_of_date)`. Mapping of existing strategi
 
 | Sleeve | sleeve_id | universe_family | Status today | Lab target |
 |---|---|---|---|---|
-| Polaris | `caerus_polaris` | `caerus_large_cap` | paper baseline; PIT-rebaselined (MATERIAL) | reference sleeve |
+| Polaris | `caerus_polaris` | `caerus_large_cap` | historical Shadow control; PIT-rebaselined (MATERIAL) | reference sleeve |
 | Orion | `caerus_orion` | `caerus_large_cap` | shadow; rebaseline pending | wrap `h2_rank_decay_exit` |
 | Lyra | `caerus_lyra` | `caerus_large_cap` | shadow; rebaseline pending | wrap `h1_weekly` |
 | Phoenix | `caerus_phoenix` | `caerus_large_cap` | research (crisis reversal) | sleeve + regime input |

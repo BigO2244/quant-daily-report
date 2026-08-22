@@ -70,8 +70,8 @@ approval.
 
 | Sleeve | Current role | Present artifacts | Phase C gap | Minimum next action |
 |---|---|---|---|---|
-| Polaris | Paper baseline/reference sleeve | Manifest row, parity plan, existing production behavior | Generalized harness parity is not implemented. | Keep production behavior unchanged; define fixture parity before any harness migration. |
-| Orion | Shadow challenger | Manifest row, Orion/Lyra PIT plan, redundancy packet, matched PIT artifact, PIT packet, shadow artifacts | FR-069 evidence envelope and owner disposition thresholds incomplete. | Continue observing; no retirement decision. |
+| Polaris | Historical Shadow reference sleeve | Manifest row, parity plan, existing comparison behavior | Generalized harness parity is not implemented. | Keep comparison behavior unchanged; define fixture parity before any harness migration. |
+| Orion | PAPER sleeve plus Shadow comparison | Manifest row, Orion/Lyra PIT plan, redundancy packet, matched PIT artifact, PIT packet, Shadow artifacts | FR-069 evidence envelope and owner disposition thresholds incomplete. | Continue research observation; no retirement decision. |
 | Lyra | Shadow challenger | Manifest row, Orion/Lyra PIT plan, redundancy packet, matched PIT artifact, PIT packet, shadow artifacts | FR-069 evidence envelope and owner disposition thresholds incomplete; matched PIT evidence does not prove Lyra superiority. | Continue observing as current low-confidence watch-list leader; no promotion/retirement decision. |
 | Phoenix | Research-stage crisis-reversal sleeve candidate | Manifest placeholder, archived spec, onboarding packet, evidence-envelope template, existing research artifacts | Decision-grade crisis-window evidence and Shadow-readiness packet missing. | Continue Research-stage evidence collection; no Shadow activation. |
 | Cygnus | Research-stage earnings-drift sleeve; v0 shelved | Manifest placeholder, archived spec, onboarding packet, evidence-envelope template, v0 shelved evidence | v1 consensus/EPS-surprise data dependency unresolved. | Keep shelved; approve vendor/data requirements before new evidence. |

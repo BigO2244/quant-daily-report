@@ -76,7 +76,7 @@ No sleeve should receive live capital on `2026-06-22`.
 
 Current sleeve posture:
 
-- `Polaris`: paper baseline/control, not a live pilot nomination.
+- At this decision date, the PAPER control was `Polaris`; it was not a live-pilot nomination.
 - `Orion`: shadow/redundancy triage only; matched PIT evidence does not prove a decisive lead.
 - `Lyra`: not independently promotion-ready; any apparent watch-list advantage is low-confidence.
 - `Cassiopeia`: research only; 13D campaign dedupe weakened the signal and Form 4 evidence remains pilot/research-grade.

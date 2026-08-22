@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -47,6 +48,56 @@ def test_default_registry_preserves_current_active_shadow_strategies() -> None:
         "caerus_lyra",
     )
     assert "caerus_orion" in registry.research_challenger_ids()
+
+
+def test_registry_scopes_live_truth_without_changing_shadow_or_paper_behavior() -> None:
+    payload = json.loads(
+        Path("config/research/strategy_registry.json").read_text(encoding="utf-8")
+    )
+
+    authority_scope = payload["authority_scope"]
+    assert "system_wide_live_authority" in authority_scope["does_not_cover"]
+    assert authority_scope["current_operating_state"] == "docs/CURRENT_OPERATING_STATE.md"
+    assert payload["sleeve_control_plane"]["paper_allocation_policy"]["governance"][
+        "live_enabled_scope"
+    ] == "THIS_ORION_PAPER_ALLOCATION_POLICY_ONLY"
+
+    lyra = next(
+        row for row in payload["strategies"] if row["strategy_id"] == "caerus_lyra"
+    )
+    assert lyra["status"] == "shadow"
+    assert lyra["execution_impact"] == "NON_EXECUTIONAL"
+    assert lyra["execution_impact_scope"] == "RESEARCH_REGISTRY_AND_SHADOW_PIPELINE_ONLY"
+    live = next(row for row in lyra["operating_lane_refs"] if row["lane"] == "live")
+    assert live == {
+        "lane": "live",
+        "status": "active",
+        "authority": "docs/governance/decision_records/lyra_live_owner_decision_20260819.json",
+        "operating_truth": "docs/evidence/lyra_live_operating_truth_2026-08-22.json",
+    }
+
+
+def test_lyra_live_operating_observation_is_bound_to_owner_authority() -> None:
+    decision_path = Path(
+        "docs/governance/decision_records/lyra_live_owner_decision_20260819.json"
+    )
+    observation = json.loads(
+        Path("docs/evidence/lyra_live_operating_truth_2026-08-22.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    decision = json.loads(decision_path.read_text(encoding="utf-8"))
+
+    assert observation["operating_status"] == "LIVE_ACTIVE"
+    assert observation["authority"]["decision"] == "APPROVE"
+    assert observation["authority"]["decision_content_hash"] == decision["content_hash"]
+    assert observation["latest_completed_execution"]["broker_write_performed"] is True
+    assert observation["latest_completed_execution"]["submitted_order_count"] == 5
+    assert observation["latest_completed_execution"]["filled_order_count"] == 5
+    assert observation["latest_completed_execution"]["posttrade_reconciliation"] == "ALIGNED"
+    assert observation["source_sha256"][str(decision_path)] == hashlib.sha256(
+        decision_path.read_bytes()
+    ).hexdigest()
 
 
 def test_repo_registry_loader_prefers_repo_local_config(tmp_path: Path) -> None:

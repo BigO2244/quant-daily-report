@@ -31,8 +31,8 @@ Canonical manifest:
 
 The manifest includes current sleeves:
 
-- Polaris: `current_paper_baseline` / `paper_observed`
-- Orion: `current_shadow_challenger` / `shadow_observed`
+- Polaris: historical comparison control / `shadow_observed`
+- Orion: PAPER capital sleeve / continuing `shadow_observed` comparison
 - Lyra: `current_shadow_challenger` / `shadow_observed`
 
 The manifest includes future placeholders:

@@ -1,7 +1,7 @@
 ---
 status: ACTIVE
 owner: Caerus program owner
-last_audit: 2026-08-19
+last_audit: 2026-08-22
 scope: all files beneath docs/
 ---
 
@@ -33,10 +33,13 @@ machine policy and date-specific operational evidence.
 
 | Document or artifact | Status | Authority |
 |---|---|---|
+| `docs/CURRENT_OPERATING_STATE.md` | `CANONICAL_CURRENT_STATE_INDEX` | Current multi-lane map: Orion PAPER, Lyra Live, and modeled Shadow series; resolves the false assumption that one research-registry lifecycle field describes all execution lanes |
+| `docs/evidence/lyra_live_operating_truth_2026-08-22.json` | `CANONICAL_FOR_ITS_CAPTURE_STATUS` | Read-only, source-hash-bound operating observation: Lyra Live gates enabled, recurring schedule installed, 2026-08-20 execution COMPLETE with five of five fills and aligned reconciliation, and current Live broker positions present |
+| `docs/governance/decision_records/lyra_live_owner_decision_20260819.json` | `CANONICAL_OWNER_AUTHORITY` | Owner-approved isolated Lyra Live portfolio: one-time initialization plus recurring Monday-close signal to Tuesday 09:35 ET execution, 95% maximum gross, 5% reserve, fractional long-only/no-leverage construction |
 | `CAERUS_OPERATING_SYSTEM_REFERENCE.md` | `DRAFT_FOR_OWNER_RATIFICATION` | Entry point and source hierarchy; becomes canonical only after owner ratification |
 | `docs/architecture/generic_deployment_accounting_migration_plan.md` | `RESEARCH_OR_PROPOSAL` | Controlling implementation plan candidate and implemented-vs-pending register for the generic operating model; all implemented contracts remain advisory and do not change active deployment authority |
 | `docs/architecture/generic_migration_compatibility_inventory.md` | `CURRENT_REFERENCE` | Explicit read-only preservation rules for legacy PAPER schema 3, exact-plan v3, WAL v1, causal ownership, FR-104, and historical run artifacts during migration |
-| `docs/governance/decision_records/owner_directive_2026-08-18_generic_lane_migration.json` | `CANONICAL` | Hash-bound owner decision: generic PAPER is not yet cut over and legacy runtime remains unchanged; Orion is a frozen comparison fixture only; local Lyra edits remain candidate state; adaptive allocation starts in Shadow; generic Live cutover remains conditional |
+| `docs/governance/decision_records/owner_directive_2026-08-18_generic_lane_migration.json` | `CANONICAL_FOR_ITS_MIGRATION_SCOPE` | Hash-bound owner decision: generic PAPER was not yet cut over and legacy runtime remained unchanged; Orion was frozen solely as a generic-migration comparison fixture; local Lyra edits remained candidate state; adaptive allocation began in Shadow; generic Live cutover remained conditional. It does not govern the later dedicated Lyra Live lane. |
 | `docs/baselines/orion_legacy_paper_fixture_capture_status_20260818.json` | `HISTORICAL_RECORD` | Initial repository-only search was blocked; later read-only VM evidence below recovered the complete factual fixture |
 | `docs/baselines/orion_legacy_paper_factual_fixture_20260818.json` | `CANONICAL_FOR_ITS_DATE_AND_COMPARISON_SCOPE` | Frozen 2026-08-18 factual Orion legacy comparison input with same-session decision, broker state, target, and intended orders; no current deployment or execution authority |
 | `docs/baselines/orion_legacy_paper_factual_vm_sources_20260818.json` | `CANONICAL_FOR_ITS_CAPTURE_STATUS` | Byte-hash and lineage provenance for the read-only VM factual fixture; remote state remained unchanged and kill switch armed |
@@ -71,7 +74,7 @@ machine policy and date-specific operational evidence.
 | `docs/runbooks/GENERIC_LIVE_DISABLED_CONSUMPTION.md` | `CURRENT_REFERENCE` | Observation-only operating instructions for the disabled scheduled pipeline, truth consumer, no-send outbox, and candidate preflight; cannot enable execution or publication |
 | `docs/governance/proposals/adaptive_shadow_v1_policy_candidate.json` | `APPROVED_FOR_SHADOW_OBSERVATION_ONLY` | Immutable proposed terms remain hash-stable; the separate owner decision approves that exact candidate for gated Shadow observation and grants no promotion, execution, activation, or Paper/Live authority |
 | `docs/governance/proposals/ADAPTIVE_SHADOW_V1_DECISION_BRIEF.md` | `CURRENT_REFERENCE` | Plain-language decision and current blocked/static-Polaris activation status for the hash-bound adaptive Shadow v1 candidate |
-| `config/research/strategy_registry.json` | `CANONICAL` | Machine-readable sleeve and lane policy |
+| `config/research/strategy_registry.json` | `CANONICAL_FOR_RESEARCH_SHADOW_AND_PAPER_SCOPE` | Machine-readable research, Shadow, and Orion PAPER policy. Its nested PAPER `live_enabled` field is not system-wide Live authority and cannot negate the separate Lyra Live owner/runtime/broker chain. |
 | `docs/architecture/caerus_as_built_data_flow.md` | `CANONICAL` | Straight-through operating, accounting, and audit contract |
 | `docs/governance/caerus_investment_doctrine.md` | `CANONICAL` | Strategy, promotion, retirement, and construction principles |
 | `docs/governance/CURRENT_RESEARCH_ROADMAP.md` | `CURRENT_REFERENCE` | Research priorities and reconciled state as of its stated date |
@@ -110,6 +113,13 @@ machine policy and date-specific operational evidence.
    Lyra edits are candidate-only, and Orion survives only as immutable
    comparison evidence. The directive records and invalidates the earlier
    erroneous content hash that inferred Lyra authority.
+6. A 2026-08-22 audit found a newer, separate owner-approved Lyra Live lane.
+   Lyra initialized on 2026-08-20 with five submitted and filled Live orders,
+   aligned reconciliation, and a recurring Tuesday schedule. Older statements
+   that “Live is disabled” remain valid only for their named legacy FR-104,
+   generic Live v1, or date-scoped migration boundary. They are false when read
+   as system-wide operating state. The single-status research registry remains
+   authoritative inside its declared research/Shadow/PAPER scope only.
 
 ## Ongoing review rule
 

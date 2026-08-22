@@ -4,14 +4,18 @@ This repository hosts Alpha Stack, a regime-switching multi-sleeve equity platfo
 
 ## Current Strategy State
 
-- `Caerus Polaris` / `caerus_polaris`: current paper baseline / operational control
-- `Caerus Orion` / `caerus_orion`: primary shadow candidate
-- `Caerus Lyra` / `caerus_lyra`: secondary shadow challenger
+- `Caerus Polaris` / `caerus_polaris`: historical research baseline and Shadow control
+- `Caerus Orion` / `caerus_orion`: sole PAPER capital sleeve plus Shadow series
+- `Caerus Lyra` / `caerus_lyra`: Shadow series plus separately governed Live portfolio
 - `SPY` / `spy_benchmark`: benchmark
 - Current promotion state:
-  - Polaris = paper
-  - Orion = shadow only
-  - Lyra = shadow only
+  - Polaris = Shadow research control
+  - Orion = PAPER plus Shadow
+  - Lyra = Live plus Shadow
+  - legacy FR-104 and generic Live v1 = disabled
+
+See `docs/CURRENT_OPERATING_STATE.md` before interpreting a lifecycle label as
+system-wide execution authority.
 
 ## Run Locally
 

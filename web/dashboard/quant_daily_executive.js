@@ -362,11 +362,11 @@ function renderOperatorControlTower(payload) {
   const actions = tower.operator_actions || [];
   setText(
     'operator-action-summary',
-    `${summary.operator_action_required ? 'action required' : 'no blocking action'} · live ${summary.live_pilot_state || '—'}`,
+    `${summary.operator_action_required ? 'action required' : 'no blocking action'} · legacy FR-104 ${summary.live_pilot_state || '—'}`,
     summary.operator_action_required ? 'neutral' : 'pos'
   );
   setHTML('operator-context-matrix', [
-    matrixItem('Live Pilot', summary.live_pilot_state || '—', `deployed ${fmtPct(summary.live_pilot_deployed_pct)}`, statusClass(summary.live_pilot_state)),
+    matrixItem('Legacy FR-104', summary.live_pilot_state || '—', `deployed ${fmtPct(summary.live_pilot_deployed_pct)} · Lyra Live separate`, statusClass(summary.live_pilot_state)),
     matrixItem('Open Orders', String(summary.live_pilot_open_orders ?? 0), `latest ${summary.latest_order_status || '—'}`, (summary.live_pilot_open_orders || 0) ? 'neutral' : 'pos'),
     matrixItem('Alpha Pairs', String(summary.alpha_pair_count ?? 0), 'Polaris and Orion comparisons', (summary.alpha_pair_count || 0) ? 'pos' : 'neutral'),
     matrixItem('FR-068 Impact', summary.fr068_pilot_blocking ? 'pilot-blocking' : 'not pilot-blocking', 'promotion/scaling gate', summary.fr068_pilot_blocking ? 'neg' : 'pos'),

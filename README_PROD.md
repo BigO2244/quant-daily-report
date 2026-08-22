@@ -2,11 +2,15 @@
 
 ## Current Strategy State
 
-- `Caerus Polaris` / `caerus_polaris` is the current paper execution control.
-- `Caerus Orion` / `caerus_orion` is the primary shadow candidate only.
-- `Caerus Lyra` / `caerus_lyra` is the secondary shadow challenger only.
+- `Caerus Orion` / `caerus_orion` is the sole PAPER capital sleeve.
+- `Caerus Lyra` / `caerus_lyra` is a Shadow comparison series and the strategy
+  in the separately governed, owner-approved Live portfolio.
+- `Caerus Polaris` / `caerus_polaris` is the historical research baseline and
+  Shadow comparison control.
 - `SPY` remains the benchmark.
-- Orion and Lyra are not promoted to paper.
+- Lyra is not promoted to PAPER; its Live authority is an independent lane.
+
+Current multi-lane authority: `docs/CURRENT_OPERATING_STATE.md`.
 
 ## Environment Setup
 

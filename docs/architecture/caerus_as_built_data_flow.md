@@ -2,12 +2,15 @@
 
 **As built:** 2026-08-14 owner-approved migration
 
-**Capital scope:** Alpaca PAPER only
+**Contract scope:** Orion Alpaca PAPER lane only. This document does not model
+or negate the separately governed Lyra Live portfolio; see
+`docs/CURRENT_OPERATING_STATE.md`.
 
 **Current capital allocation:** 100% of sleeve risk budget to Caerus Orion, with
 5% account cash target
 
-**Live and options:** blocked
+**This Orion PAPER contract:** no Live authority; options execution blocked.
+Lyra Live is active under its separate owner decision and runtime controls.
 
 ## Executive conclusion
 

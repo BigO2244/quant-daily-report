@@ -209,8 +209,8 @@ Future FR-069 MCP surfaces should be read-only and answer:
 
 | Sleeve / Overlay | Current role | Phase A classification | Required onboarding work |
 |---|---|---|---|
-| Polaris | Current paper baseline | Reference security-selection sleeve | Preserve behavior; define parity gate against FR-068 PIT rebaseline before any generalized harness migration. |
-| Orion | Shadow challenger | Core-momentum security-selection sleeve | Preserve shadow behavior; PIT rebaseline and differentiation evidence required before any disposition decision. |
+| Polaris | Historical Shadow control | Reference security-selection sleeve | Preserve comparison behavior; define parity gate against FR-068 PIT rebaseline before any generalized harness migration. |
+| Orion | PAPER sleeve plus Shadow comparison | Core-momentum security-selection sleeve | Preserve lane behavior; PIT rebaseline and differentiation evidence required before any research disposition decision. |
 | Lyra | Shadow challenger | Core-momentum security-selection sleeve | Preserve shadow behavior; PIT rebaseline and differentiation evidence required before any disposition decision. |
 | Phoenix | Research crisis-reversal candidate | Crisis-reversal security-selection sleeve | Define activation data, regime inputs, artifact envelope, passive evidence, and drawdown/recovery criteria. |
 | Cygnus | Shelved v0 earnings/post-earnings-drift research | Event-driven sleeve, vendor-gated for v1 | Preserve v0 shelved verdict; define consensus/EPS-surprise dependency before any v1 evidence run. |

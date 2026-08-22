@@ -52,8 +52,13 @@ Review this before 9:35 AM ET each trading day.
 
 - `Caerus Polaris` = historical research baseline / operational comparison control
 - `Caerus Orion` = sole PAPER execution authority and shadow-observed strategy
-- `Caerus Lyra` = secondary shadow challenger
+- `Caerus Lyra` = shadow-observed strategy plus the separately governed Live portfolio
 - `SPY` = benchmark
+
+Lyra Live uses independent owner authority, gates, state, and scheduling. It is
+not the legacy FR-104 Live pilot and must not be diagnosed from Orion's PAPER
+registry fields. See `docs/CURRENT_OPERATING_STATE.md` before making an
+operating-status claim.
 
 ### 1. Confirm VM precompute completed (~7:00 AM ET)
 
@@ -99,7 +104,8 @@ Or trigger the workflow and watch the "Alpaca smoke test" and "Diag Alpaca auth"
 | 1:00 AM | VM cron | Overnight agents | `scripts/cron_overnight.sh` writes overnight signals. |
 | 6:30 AM | VM cron | Research digest | `scripts/cron_research.sh` writes research digest. |
 | 7:00 AM | VM cron | Precompute | `scripts/cron_precompute.sh` evaluates all sleeves, seals one Orion Decision target, quarantines the legacy research frame, and then writes non-blocking shadow artifacts. |
-| 9:35 AM | VM cron | Execution | `scripts/cron_execute.sh` validates the sealed target, self-heals if needed, applies fresh Risk/broker state, and creates exact orders from the same Decision hash. |
+| 9:35 AM weekdays | VM cron | Orion PAPER execution | `scripts/cron_execute.sh` validates the sealed target, self-heals if needed, applies fresh Risk/broker state, and creates exact orders from the same Decision hash. |
+| 9:35 AM Tuesdays | VM managed cron | Lyra Live execution | `scripts/cron_lyra_live_portfolio.sh recurring` consumes the completed Monday-close Lyra target under its separate owner decision and fail-closed Live gates. |
 | 10:00 AM | VM cron | Confirmation | `scripts/cron_confirm.sh` sends confirmation/reporting email. |
 | 7:15 PM | VM cron | Broker truth | `scripts/cron_broker_ledger.sh` pulls the sole actual-PAPER NAV authority from Alpaca. |
 | 7:45 PM | VM cron | Portfolio history | Canonical append-only portfolio history derives from the broker ledger and escalates freshness failures. |

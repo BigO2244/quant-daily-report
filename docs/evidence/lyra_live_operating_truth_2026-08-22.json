@@ -1,0 +1,81 @@
+{
+  "schema_version": "caerus.operating_truth_observation.v1",
+  "observation_id": "lyra-live-operating-truth:2026-08-22",
+  "observed_at": "2026-08-22T15:00:00-04:00",
+  "classification": "READ_ONLY_OPERATIONAL_EVIDENCE",
+  "strategy_id": "caerus_lyra",
+  "lane_id": "lyra_live_portfolio",
+  "operating_status": "LIVE_ACTIVE",
+  "authority": {
+    "decision": "APPROVE",
+    "decision_id": "lyra-live-owner-decision:20260819",
+    "decision_path": "docs/governance/decision_records/lyra_live_owner_decision_20260819.json",
+    "decision_content_hash": "4d553b1e56c947bc76951b33fc612a0c9aa4b8c5e1ecff0e5f58ac689c2e0f6d",
+    "owner": "Brett Olson",
+    "recurring_cadence": "MONDAY_XNYS_CLOSE_TO_TUESDAY_09_35_ET",
+    "source_variant": "h1_weekly_h6_top5"
+  },
+  "deployment": {
+    "host": "alpha-stack-scheduler",
+    "repository_path": "/home/brettolson/quant-daily-report",
+    "repository_head": "48e5f362557398e565c76580ce294cee37fecb4c",
+    "repository_clean": true,
+    "upstream_aligned": true,
+    "deployment_validation": "PASS",
+    "lyra_live_enabled": true,
+    "lyra_live_submit_approved": true,
+    "live_endpoint": "https://api.alpaca.markets",
+    "paper_endpoint": false,
+    "recurring_schedule_installed": true
+  },
+  "latest_completed_execution": {
+    "execution_session": "2026-08-20",
+    "mode": "initialization",
+    "execution_authority": true,
+    "status": "COMPLETE",
+    "broker_write_performed": true,
+    "submitted_order_count": 5,
+    "filled_order_count": 5,
+    "symbols": [
+      "DELL",
+      "INTC",
+      "MU",
+      "STX",
+      "WDC"
+    ],
+    "posttrade_reconciliation": "ALIGNED",
+    "unexpected_positions": [],
+    "deployed_sha": "97c738ef23577febcd9d0fe5b35ae6db9ab020db",
+    "plan_hash": "2c07bad4d7c54e0e783119159e16539a0b22fb8297f53b609ebd02f5025946df",
+    "target_source_hash": "6c6378a534bf88cc6d8ef90e26688dd0694ed55bc4651bdbdcad177c3e118bf9"
+  },
+  "current_broker_observation": {
+    "account_active": true,
+    "account_blocked": false,
+    "trading_blocked": false,
+    "open_order_count": 0,
+    "position_symbols": [
+      "DELL",
+      "INTC",
+      "MU",
+      "STX",
+      "WDC"
+    ]
+  },
+  "lane_boundaries": {
+    "orion_paper": "ACTIVE_AND_SEPARATE",
+    "lyra_shadow": "ACTIVE_MODELED_RESEARCH_LANE_AND_SEPARATE",
+    "legacy_fr104_live_pilot": "DISABLED",
+    "generic_live_v1": "DISABLED",
+    "lyra_live_portfolio": "ACTIVE"
+  },
+  "source_sha256": {
+    "docs/governance/decision_records/lyra_live_owner_decision_20260819.json": "a1ab9c7c71f1661873a537e2c2beea8901b334ee8a02fa057c23200a7c34b1ad",
+    "scripts/cron_lyra_live_portfolio.sh": "bd80f495a03624cdf95e5d621086a853789d26b652dad3319b2db981f749e66f",
+    "/home/brettolson/.caerus/lyra_live.env": "ca7928d274356ebe3b273eb3f89b4f1c32d6c94814c0e3de9e702444ece095fd",
+    "/home/brettolson/.caerus/lyra_live_state/2026-08-20/plan.json": "cbf1c3d1f50ccca11050b0f7fafc5b03c011400919f9726b81a50ce1811e0af1",
+    "/home/brettolson/.caerus/lyra_live_state/2026-08-20/result.json": "50eeefb2b204e27debc2e4ecff3f01709749f4d88b9e650ede1442dcc67dd4ff"
+  },
+  "scope_note": "The research strategy registry governs modeled Shadow and Orion PAPER state. Its nested PAPER live_enabled flag is not system-wide Live authority and must not be used to infer that all Live lanes are disabled.",
+  "mutation_performed": false
+}

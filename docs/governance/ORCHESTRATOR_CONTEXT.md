@@ -20,8 +20,10 @@ strategy, review, and task delegation.
 
 ## Current System State
 
-Caerus is a paper-traded quantitative investment platform with deterministic
-artifacts and an explicit research-to-production promotion ladder.
+Caerus is a quantitative investment platform with concurrent Shadow, PAPER, and
+Live equity lanes, deterministic artifacts, and an explicit
+research-to-production promotion ladder. The canonical lane map is
+`docs/CURRENT_OPERATING_STATE.md`.
 
 - The owner-approved 2026-08-14 portfolio operating-model migration is
   implemented. Precompute admits one immutable session, produces one terminal
@@ -44,7 +46,10 @@ artifacts and an explicit research-to-production promotion ladder.
   account/position valuation shares one `pulled_at_utc`. The strict 19:45 build
   has no model fallback and writes the end-of-day portfolio audit.
 - Polaris remains the historical research baseline and daily shadow comparison control.
-- Lyra is the shadow challenger.
+- Lyra remains a modeled Shadow challenger and also runs in a separately
+  governed, funded Live portfolio. Its owner-approved initialization submitted
+  and filled five Live orders on 2026-08-20; post-trade reconciliation was
+  aligned, and a recurring Tuesday 09:35 ET schedule is installed.
 - Adaptive Shadow v1 candidate hash `0ee486...` is owner-approved for
   observation only across Polaris and Lyra. All preregistered readiness gates
   remain binding; the first enabled readiness result fails closed to static
@@ -52,9 +57,10 @@ artifacts and an explicit research-to-production promotion ladder.
   constraint inputs are incomplete. It grants no PAPER/Live or execution
   authority.
 - SPY is the benchmark anchor.
-- Orion sends PAPER orders only after immutable package validation. The `$500`
-  FR-104 live-pilot lane remains blocked and separately governed; no live
-  credential, approval, or kill-switch state is changed by the PAPER promotion.
+- Orion sends PAPER orders only after immutable package validation. The legacy
+  FR-104 and generic Live v1 lanes remain disabled and separately governed.
+  Their disabled state does not disable the independent Lyra Live portfolio.
+  Orion's PAPER promotion does not grant Live authority.
 - Execution integrity and target attainment are in observation after the June
   12 FR-070 remediation. New FR-070 implementation work requires classified
   evidence from the next run.
@@ -95,6 +101,12 @@ artifacts and an explicit research-to-production promotion ladder.
 - `docs/governance/CODEX_TASK_TEMPLATE.md`
 - `docs/governance/STRATEGIC_ESCALATION_POLICY.md`
 - `config/research/strategy_registry.json`
+- Upstream quant-shop institution and hardening roadmap: the `caerus-atlas`
+  repository's
+  `docs/operations/quant_shop_institution_and_hardening_roadmap.md`. Caerus
+  supplies operating truth and must not carry a competing phase plan. A phase
+  change is valid only through the roadmap's evidence, review, Git, and rollback
+  protocol.
 
 ## Current Priority Stack
 

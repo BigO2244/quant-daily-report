@@ -51,15 +51,15 @@ editing code or specs.
 
 ---
 
-## 1. Verified state (as of 2026-08-14)
+## 1. Verified state (research baseline 2026-08-14; operating state reconciled 2026-08-22)
 
 - **Repo:** quant-daily-report / Caerus Quant / Alpha Stack
 - **Pre-triage deployed baseline:** `efd193dc3520e7383ced00e6e0bc6e4f0c431e78`
-- **Production posture:** paper remains the production posture. A separate,
-  tightly capped `$500` FR-104 Level 2.5 live-pilot evidence lane may collect
-  forward broker/operational evidence only when explicitly approved; it is not
-  production, not dynamic allocation, and not proof of promotion readiness. No
-  shorting, no leverage.
+- **Capital posture:** Orion remains the sole PAPER sleeve. A separate
+  owner-approved Lyra Live portfolio is active, funded, recurring, long-only,
+  and unlevered. Its first session on 2026-08-20 submitted and filled five
+  orders with aligned reconciliation. The legacy FR-104 and generic Live v1
+  lanes remain disabled.
 - **Current PAPER capital allocation:** Caerus Orion (`caerus_orion`) has 100%
   of the configured sleeve risk budget and is sourced from the
   `h2_rank_decay_exit_h6_top5` shadow snapshot for the current or immediately
@@ -100,8 +100,10 @@ editing code or specs.
   governed inputs and holds the static Polaris modeled control. It emits no
   adaptive performance evidence and grants no Paper, Live, promotion,
   execution, or automatic-recovery authority.
-- **Live posture:** blocked. Orion's PAPER authority does not approve FR-104 live
-  submission and does not change credentials, endpoint pins, or kill-switches.
+- **Live posture:** Lyra Live is active under its separate owner decision and
+  runtime gates. Orion has no Live authority. Legacy FR-104 and generic Live v1
+  remain disabled; those narrower disabled states must not be reported as a
+  system-wide Live block.
 - **Concentration alpha shadows:** Polaris_Alpha (`caerus_polaris_alpha`) and
   Orion_Alpha (`caerus_orion_alpha`) are forward shadow-only concentration
   variants activated 2026-06-23. Polaris_Alpha is Top 4 / 20% cap versus the
@@ -157,9 +159,9 @@ framework, and FR-065 dashboard decision-grade consolidation.
 |----------|------------------------|-----------------|--------|-----|--------|--------------------|--------------|
 | Polaris | security_selection / core_momentum | shadow | growth_engine_v4 | yes | yes | no | historical_research_control; no PAPER authority |
 | Polaris_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 4 / 20% cap; compare only against preserved Polaris baseline; no capital |
-| Orion | security_selection / core_momentum | paper | h2_rank_decay_exit_h6_top5 | — | yes | no | PAPER-only execution authority; immutable package handoff; live disabled |
+| Orion | security_selection / core_momentum | paper | h2_rank_decay_exit_h6_top5 | — | yes | no | PAPER-only execution authority; immutable package handoff; no Live authority |
 | Orion_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 3 / 25% cap; compare only against preserved Orion baseline; no capital |
-| Lyra | security_selection / core_momentum | shadow | constrained_lyra.py | yes | yes | yes | shadow_only |
+| Lyra | security_selection / core_momentum | shadow | constrained_lyra.py | yes | yes | yes | Shadow-observed research status plus separate owner-approved, funded, recurring Live portfolio |
 | Phoenix | security_selection / crisis_reversal | research / not_viable_current_phase_b | phoenix.py | run_phoenix_research.py | no | no | research_module / produces_artifacts; PIT liquidity evidence is decision-grade but current Phase B candidate fails 5% ADV capacity policy; not Shadow-readiness eligible |
 | Cygnus | security_selection / earnings_drift | research | research/cygnus | run_cygnus_research.py | no | no | v0_shelved_after_stage2_fail; v1_vendor_gated |
 | Cassiopeia | security_selection / event_driven | research | none (spec-only) | none | no | no | spec_only — canonical EVENT-DRIVEN strategy (FR-052); selector code re-homed to Argo 2026-06-08 |

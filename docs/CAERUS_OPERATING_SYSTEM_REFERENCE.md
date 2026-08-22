@@ -2,7 +2,7 @@
 status: DRAFT_FOR_OWNER_RATIFICATION
 owner: Brett Olson, CIO and product owner
 scope: Caerus operating model, governance, deployment, accounting, and reporting
-last_updated: 2026-08-18
+last_updated: 2026-08-22
 ---
 
 # Caerus Operating System Reference
@@ -20,6 +20,23 @@ It does not replace detailed contracts. It defines which documents and machine
 artifacts control a question, how conflicts are resolved, and the one
 end-to-end operating model Caerus is building toward. It exists to prevent
 architecture and governance drift.
+
+## Current operating-state correction — 2026-08-22
+
+The current multi-lane state is indexed in
+[`CURRENT_OPERATING_STATE.md`](CURRENT_OPERATING_STATE.md). Orion is the sole
+PAPER capital sleeve. Lyra remains a modeled Shadow comparison series and also
+operates through a separate owner-approved, funded, recurring Live portfolio.
+Its 2026-08-20 initialization submitted five Alpaca Live orders; all five
+filled and post-trade reconciliation was `ALIGNED`. The current read-only
+runtime and broker observation is
+[`lyra_live_operating_truth_2026-08-22.json`](evidence/lyra_live_operating_truth_2026-08-22.json).
+
+The legacy FR-104 Live pilot and generic Live v1 lane remain disabled. The
+migration chronology below is preserved for its stated lane and date; its
+earlier unqualified “Live disabled” language does not describe the independent
+Lyra Live portfolio after the 2026-08-19 owner decision and 2026-08-20 fill.
+Research-registry Shadow/PAPER fields cannot establish system-wide Live state.
 
 ## Non-negotiable operating model
 
@@ -46,9 +63,12 @@ flowchart TD
 
 The detailed, as-built contract for this flow is
 [`docs/architecture/caerus_as_built_data_flow.md`](architecture/caerus_as_built_data_flow.md).
-No alternative execution path, target-construction path, accounting path, or
-reporting fallback may be introduced without an explicit amendment to that
-contract and this reference.
+No unregistered execution path, target-construction path, accounting path, or
+reporting fallback may be introduced. The owner-approved Lyra Live executor is
+an existing governed direct lane and is explicitly recorded in the current
+operating-state index; its remaining enrollment into the generic lane control
+plane is a cleanliness gap, not evidence that it is disabled. Any further path
+requires an explicit amendment to the as-built contract and this reference.
 
 ## Migration implementation status
 
@@ -273,7 +293,9 @@ PAPER and unrelated entries are unchanged. This installed state is sealed in
 content hash
 `07941e134f68251f5be9bc5b12812d863e83080023cf415767657c098fbc30d1`.
 Enabling capture is not owner approval and still requires the exact policy and
-session owner artifacts named above. Live remains disabled and armed.
+session owner artifacts named above. At that dated generic-capture boundary,
+generic Live v1 remained disabled and armed; this statement does not describe
+the separately governed Lyra Live portfolio.
 
 On 2026-08-19 Brett superseded the fixed-$460 Live candidate with a cash-only
 dynamic-capital policy. The immutable owner record is

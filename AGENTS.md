@@ -98,8 +98,12 @@ Execution:
 - Trader consumes only the hash-verified approved execution package
 - Broker fills preserve exact-order and sleeve-decision provenance through the
   causal ownership ledger, valuation, and read-only daily audit
-- Live capital remains blocked; the PAPER promotion does not arm FR-104 or
-  modify live credentials
+- Lyra has a separate owner-approved Live portfolio with independent gates,
+  credentials, state, and recurring Tuesday cadence; its 2026-08-20
+  initialization submitted and filled five Live orders with aligned
+  reconciliation
+- The legacy FR-104 and generic Live v1 lanes remain disabled; Orion's PAPER
+  authority does not arm either lane
 
 Automation:
 - Shadow runs automatically after precompute via:
@@ -122,7 +126,8 @@ non-trading Artifact Governance + Operational Telemetry backlog phase.
 
 - **Project**: Caerus Quant / Alpha Stack quantitative trading platform
 - **Scope**: US long-only equities + options overlay, paper trading through Alpaca
-- **Production posture**: paper only, no shorting, no leverage
+- **Capital posture**: Orion PAPER plus the separately governed Lyra Live
+  portfolio; long-only and no leverage
 - **Promotion ladder**: research → backtest → shadow → paper → live
 - **Test suite**: 955 passing, 0 failing (as of 2026-04-20)
 - **Hard rule**: do not change production trading behavior casually; bias toward
@@ -135,13 +140,16 @@ non-trading Artifact Governance + Operational Telemetry backlog phase.
   - continues daily shadow evidence; no PAPER execution authority
 - **Caerus Orion** (`caerus_orion`)
   - current PAPER execution authority, owner-approved 2026-08-08
-  - derived from Alpha Lab v2 winner: H2 rank-decay exit + H6 top-5 concentration
+  - H2 rank-decay exit + H6 top-5 concentration lineage; the legacy Alpha Lab
+    v2 ranking is not current decision-grade evidence
   - exact same-day shadow snapshot is wrapped into immutable Decision/Risk/Execution packages
-  - 5% target cash and 2% target-attainment tolerance; live remains disabled
+  - 5% target cash and 2% target-attainment tolerance in the PAPER lane; Orion
+    has no Live authority
 - **Caerus Lyra** (`caerus_lyra`)
-  - secondary shadow challenger
-  - derived from Alpha Lab v2 challenger: H1 weekly rebalance + H6 top-5 concentration
-  - not promoted to paper
+  - continuing Shadow challenger and separately governed Live portfolio
+  - H1 weekly rebalance + H6 top-5 concentration
+  - not promoted to PAPER; owner-approved Live authority is isolated from the
+    PAPER control plane and is fill-confirmed
 - **SPY** (`spy_benchmark`)
   - benchmark symbol and comparison anchor
   - remains `SPY` in code and artifacts
@@ -264,19 +272,23 @@ Legacy planner targets are quarantined research evidence.
 
 - **PAPER portfolio**: registry allocator, currently with Orion as the sole
   capital sleeve and 100% of sleeve risk budget
+- **Live portfolio**: Lyra, through the isolated owner-approved
+  `lyra_live_portfolio` lane; initialization filled on 2026-08-20 and recurring
+  execution is scheduled for Tuesdays at 09:35 ET
 - **Historical research control**: Caerus Polaris
 - **Shadow daily models**: Caerus Polaris, Caerus Orion, Caerus Lyra
-- **Default FR-104 `LIVE_PILOT` sleeve**: Caerus Orion, only when all
-  live-pilot approval gates pass
+- **Legacy FR-104 `LIVE_PILOT` sleeve**: disabled and separately governed
 - **Benchmark**: SPY
 - **Promotion state**:
   - Polaris: shadow research control
-  - Orion: PAPER-only authority; live disabled and separately gated
-  - Lyra: shadow only
+  - Orion: PAPER-only authority; no Live authority
+  - Lyra: Shadow comparison plus separate owner-approved Live authority
 
-Named strategy labels are governance identities. They are distinct from
-functional alpha-stack sleeves and from the capped FR-104 live-pilot execution
-lane.
+Named strategy labels are governance identities. Lane membership is
+many-to-many: Lyra can remain a modeled Shadow series while the separately
+governed Lyra Live portfolio holds capital. Do not infer system-wide Live state
+from the PAPER control plane or a single research-registry status field. The
+current authority map is `docs/CURRENT_OPERATING_STATE.md`.
 
 ### Alpha Stack (alpha_stack/)
 
@@ -836,7 +848,9 @@ Runtime separation:
 - For promotion governance review, run
   `python3 scripts/audit_shadow_promotion_readiness.py`; Polaris remains the
   historical research baseline, Orion is the PAPER-only execution authority,
-  live remains separately blocked, and Lyra remains an artifact-only challenger.
+  and Lyra remains a Shadow comparison series. This research review does not
+  report or alter the separately governed Lyra Live portfolio. Verify operating
+  state through `docs/CURRENT_OPERATING_STATE.md` and current runtime evidence.
 - The VM cron is the production scheduler for precompute/live execution; GitHub
   daily precompute/live schedules are dispatch-only to avoid duplicate runs
 - Successful precompute triggers `scripts/run_shadow_candidates_daily.sh` for

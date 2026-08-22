@@ -5,6 +5,8 @@
   "phase": "Phase B",
   "research_only": true,
   "behavior_change_allowed": false,
+  "authority_scope": "RESEARCH_AND_SHADOW_EVIDENCE_ONLY",
+  "current_operating_state": "docs/CURRENT_OPERATING_STATE.md",
   "source_commit": "3e167b6",
   "description": "Research-only modular sleeve metadata mirrored against the canonical strategy registry. This manifest does not independently authorize trading, execution, allocation, cron, or live-capital behavior.",
   "sleeves": [
@@ -76,6 +78,7 @@
       "status": "current_shadow_challenger",
       "lifecycle_stage": "shadow_observed",
       "strategy_registry_status": "shadow",
+      "operating_lane_note": "This research lifecycle remains Shadow-observed while the separately governed Lyra Live portfolio is active. This manifest grants and revokes no capital authority.",
       "control_plane_frozen": false,
       "sleeve_type": "security_selection",
       "family": "core_momentum",
@@ -139,7 +142,7 @@
       "control_plane_frozen": false,
       "sleeve_type": "security_selection",
       "family": "core_momentum",
-      "thesis": "Owner-approved PAPER-only momentum authority using the governed rank-decay/exit snapshot; live remains blocked and research promotion claims still require decision-grade PIT evidence.",
+      "thesis": "Owner-approved PAPER-only momentum authority using the governed rank-decay/exit snapshot; Orion has no Live authority, the separately governed Lyra Live lane is active, and research promotion claims still require decision-grade PIT evidence.",
       "intended_market_environment": "Large-cap momentum regimes where faster decay and exit rules may improve drawdown or turnover-adjusted return.",
       "universe_policy": {
         "universe_family": "caerus_large_cap",

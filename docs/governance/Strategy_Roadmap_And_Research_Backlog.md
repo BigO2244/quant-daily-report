@@ -22,11 +22,15 @@ This document is strategic context only. For authoritative FR status and the ope
 
 | Strategy | Status | Objective |
 |-----------|-----------|-----------|
-| Polaris | Active Paper Baseline | Core momentum and quality paper execution baseline |
-| Orion | Shadow Challenger / Default LIVE_PILOT Sleeve | Secondary factor expression; default live-pilot sleeve only when gated and approved |
-| Lyra | Shadow Challenger | Secondary factor expression |
+| Polaris | Historical Shadow Control | Core-momentum research comparison baseline |
+| Orion | PAPER + Shadow | Sole PAPER capital sleeve and continuing Shadow comparison; no Live authority |
+| Lyra | Live + Shadow | Owner-approved recurring Live portfolio and continuing Shadow comparison |
 | Cassiopeia | Research Only | Event-driven research lane; not an execution sleeve |
 | Constrained Lyra | Research | Concentration-controlled variant |
+
+This roadmap's research labels do not replace lane authority. The current
+multi-lane map is `docs/CURRENT_OPERATING_STATE.md`; legacy FR-104 and generic
+Live v1 remain disabled.
 | Argo | Concept | Regime and allocation overlay |
 
 Named strategy labels are governance identities. They are distinct from

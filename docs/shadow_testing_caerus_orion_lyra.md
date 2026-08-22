@@ -2,13 +2,14 @@
 
 ## Purpose
 - Create a DEV-only side-by-side shadow lane for the new momentum variants.
-- Keep Caerus Polaris as the production paper control and comparison anchor.
-- Track Caerus Orion and Caerus Lyra without sending any orders.
+- Keep Caerus Polaris as the historical Shadow comparison control.
+- Track Caerus Orion and Caerus Lyra in this Shadow workflow without sending
+  orders. This workflow does not describe their separate capital lanes.
 
 ## Strategy Roles
-- `Caerus Polaris` / `caerus_polaris`: current baseline momentum control.
-- `Caerus Orion` / `caerus_orion`: primary shadow candidate, H2 rank-decay exit + H6 top-5 concentration.
-- `Caerus Lyra` / `caerus_lyra`: secondary shadow challenger, H1 weekly rebalance + H6 top-5 concentration.
+- `Caerus Polaris` / `caerus_polaris`: historical Shadow baseline momentum control.
+- `Caerus Orion` / `caerus_orion`: Shadow-observed and the sole PAPER capital sleeve; H2 rank-decay exit + H6 top-5 concentration.
+- `Caerus Lyra` / `caerus_lyra`: Shadow-observed and separately Live-authorized; H1 weekly rebalance + H6 top-5 concentration.
 - `SPY` / `spy_benchmark`: benchmark only. The benchmark symbol remains `SPY`.
 
 ## Artifact Paths
@@ -47,9 +48,11 @@
   and do not create hidden state.
 
 ## Operating Rules
-- Polaris remains the operational paper control.
-- Orion is the lead shadow candidate.
-- Lyra is the secondary challenger.
+- Polaris remains the historical Shadow control.
+- Orion remains a Shadow comparison and the sole PAPER capital sleeve.
+- Lyra remains a Shadow comparison and separately operates in Live.
+- Shadow artifacts never establish or alter PAPER or Live authority; see
+  `docs/CURRENT_OPERATING_STATE.md`.
 - SPY remains the benchmark.
 - This shadow lane must not write to `outputs/paper_state/`, broker state, or execution payloads.
 - Phase C artifacts are labeled `RESEARCH_ONLY` and `NON_EXECUTIONAL`. They must

@@ -23,7 +23,7 @@
           "capital_behavior": "FR-104 capped pilot only",
           "cash": 500.0,
           "equity": 500.0,
-          "layer": "Live pilot account",
+          "layer": "Legacy FR-104 live-pilot account",
           "positions_count": 0,
           "source": "outputs/live_pilot/runs/2026-06-23T100012-0400_59e97cb",
           "status": "SUBMITTED"
@@ -572,7 +572,7 @@
         {
           "detail": "Cash 500.0 \u00b7 Equity 500.0",
           "id": "live_capital",
-          "label": "Live Pilot Capital",
+          "label": "Legacy FR-104 Capital",
           "status": "ACTIVE",
           "value": 0.0,
           "value_format": "percent"
@@ -580,7 +580,7 @@
         {
           "detail": "NEE BUY 1.161710012 limit",
           "id": "latest_order",
-          "label": "Latest Live Order",
+          "label": "Latest FR-104 Order",
           "status": "OrderStatus.PENDING_NEW",
           "value": "OrderStatus.PENDING_NEW",
           "value_format": "text"

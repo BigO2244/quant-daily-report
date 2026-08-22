@@ -45,7 +45,7 @@ Candidate semantic checks:
 | Planned orders | Planned execution payload has explicit action, symbol, quantity, and side fields for every order. | Detect malformed execution intent before operator review. |
 | Position intent | Sell quantities do not exceed known planned/current position evidence when that evidence is available. | Surface potential pre-execution inconsistency without changing broker behavior. |
 | Cash intent | Buy notional and cash assumptions are explicit when present. | Highlight incomplete buying-power context. |
-| Strategy surface | Paper strategy remains Polaris; Orion and Lyra remain shadow-only. | Prevent accidental surface blending in artifacts. |
+| Strategy surface | The precompute/PAPER surface uses Orion; Shadow continues to model Polaris, Orion, and Lyra. The separate Lyra Live portfolio has its own authority and artifacts. | Prevent accidental cross-lane blending while preserving the actual multi-lane operating state. |
 | Suppressed effects | Self-heal artifacts explicitly report suppressed email, shadow, latest, and reconciliation side effects. | Preserve degraded-state visibility. |
 | Provenance | Bundle artifacts identify producer or source path where available. | Improve auditability and replay review. |
 
