@@ -28,21 +28,35 @@ material fail closed. Output files and preparation directories are create-only.
 ## Gate A: clean release dependencies
 
 Gate A must pass on the release candidate before any registry, migration,
-publication, or projection preparation. The committed contract targets exactly
-Ubuntu 22.04 x86_64, glibc 2.35, and CPython 3.10.12. It declares Alpha's
-runtime imports in `requirements.in`, locks every test dependency to one hashed
-binary wheel, and records each wheel's filename, size, SHA-256, metadata hashes,
-target tags, and target dependency closure in the machine-readable manifest.
-Wheel binaries are temporary ceremony inputs and must not enter Git.
+publication, or projection preparation. Gate A targets exactly Ubuntu 22.04
+x86_64, glibc 2.35, and CPython 3.10.12. The dependency contract declares
+Alpha's runtime imports in `requirements.in`, locks every test dependency to
+one hashed binary wheel, and records each wheel's filename, size, SHA-256,
+metadata hashes, target tags, and target dependency closure. The wheel
+manifest's `dependency_resolution_base_commit` records resolver lineage only;
+it is not the release source identity. The separately reviewed source archive,
+source manifest, file manifest, and canonical release-input manifest bind the
+final committed source.
+The source verifier also requires the `git archive` global PAX `comment` to
+equal the declared commit and reconstructs the complete Git tree OID from the
+exact file modes and bytes; commit and tree labels are therefore checked
+provenance, not caller assertions.
 
-From the repository root on the clean release host:
+The operator receives these reviewed, absolute-path inputs:
+
+- the exact `git archive` tar, canonical source manifest, and canonical
+  file-only manifest for the final reviewed commit;
+- the 25 binary wheels named by
+  `phase1-cp310-linux-x86_64-wheel-manifest.json`;
+- the canonical `caerus_alpha_lab_clean_release_input_v1` manifest; and
+- the approved release parent. Wheel binaries and generated release/source
+  manifests are ceremony inputs and must not enter Git.
+
+Download the target wheels into a temporary wheelhouse before entering Gate A.
+This is the only network-enabled dependency preparation step:
 
 ```bash
-python3.10 -c 'import sys; assert sys.version_info[:3] == (3, 10, 12), sys.version'
-python3.10 -m projects.alpha_lab.factory.release_dependencies --repo-root .
-
 WHEELHOUSE="$(mktemp -d /tmp/caerus-alpha-phase1-wheelhouse.XXXXXX)"
-RELEASE_VENV="$(mktemp -d /tmp/caerus-alpha-phase1-venv.XXXXXX)"
 
 python3.10 -m pip download \
   --dest "$WHEELHOUSE" \
@@ -56,30 +70,161 @@ python3.10 -m pip download \
   --implementation cp \
   --abi cp310 \
   -r projects/alpha_lab/release/phase1-cp310-linux-x86_64.lock
-
-python3.10 -m projects.alpha_lab.factory.release_dependencies \
-  --repo-root . --wheelhouse "$WHEELHOUSE"
-
-python3.10 -m venv "$RELEASE_VENV"
-PIP_NO_INDEX=1 "$RELEASE_VENV/bin/python" -m pip install \
-  --no-index \
-  --find-links="$WHEELHOUSE" \
-  --require-hashes \
-  -r projects/alpha_lab/release/phase1-cp310-linux-x86_64.lock
-
-PYTHONNOUSERSITE=1 "$RELEASE_VENV/bin/python" -m pip check
-PYTHONNOUSERSITE=1 "$RELEASE_VENV/bin/python" -m pytest \
-  -p no:cacheprovider -q projects/alpha_lab/tests
 ```
 
-The only permitted dependency-driven skips are the two existing DuckDB tests,
-which use `pytest.importorskip("duckdb")`. DuckDB is not needed by the signing
-ceremony and remains an explicitly excluded optional materialization engine.
-The yfinance network adapter is injected by its tests and remains governed by
-the parent runtime pin; it causes no skip. Any other skip, sdist, unpinned or
-unhashed requirement, wheel-set difference, import-contract change, incompatible
-platform/ABI, dependency-closure difference, or metadata/hash drift fails Gate
-A. Do not continue to signing on a failure.
+The following placeholders must be replaced by the exact paths and digest from
+the reviewed release-input packet. The packet also delivers
+`gate_a_bootstrap.py` as a separate byte-identical artifact and records its
+owner-approved SHA-256. That minimal standard-library trust root authenticates
+its own bytes against both the explicit authorization and source file manifest,
+then verifies and extracts the complete archive using create-only,
+descriptor-relative no-follow operations. It imports no code from a checkout.
+
+Run its dry verification first, then repeat with `--write` to create and seal
+`$RELEASE_PARENT/bootstrap/sha256/$SOURCE_ARCHIVE_SHA256/app`. Existing valid
+content is verified idempotently; incomplete or divergent content is never
+repaired, deleted, or reused:
+
+```bash
+RELEASE_PARENT=/approved/release/parent
+SOURCE_ARCHIVE_SHA256=<EXACT_SOURCE_ARCHIVE_SHA256>
+BOOTSTRAP_SHA256=<EXACT_OWNER_APPROVED_BOOTSTRAP_SHA256>
+BOOTSTRAP_TOOL=/protected-release-input/gate_a_bootstrap.py
+
+python3.10 -I -S -B "$BOOTSTRAP_TOOL" \
+  --source-archive /absolute/path/to/source.tar \
+  --source-manifest /absolute/path/to/source_manifest.json \
+  --file-manifest /absolute/path/to/file_manifest.json \
+  --release-parent "$RELEASE_PARENT" \
+  --authorized-source-archive-sha256 "$SOURCE_ARCHIVE_SHA256" \
+  --authorized-bootstrap-sha256 "$BOOTSTRAP_SHA256"
+
+python3.10 -I -S -B "$BOOTSTRAP_TOOL" \
+  --source-archive /absolute/path/to/source.tar \
+  --source-manifest /absolute/path/to/source_manifest.json \
+  --file-manifest /absolute/path/to/file_manifest.json \
+  --release-parent "$RELEASE_PARENT" \
+  --authorized-source-archive-sha256 "$SOURCE_ARCHIVE_SHA256" \
+  --authorized-bootstrap-sha256 "$BOOTSTRAP_SHA256" \
+  --write
+
+BOOTSTRAP_ROOT="$RELEASE_PARENT/bootstrap/sha256/$SOURCE_ARCHIVE_SHA256/app"
+GATE_A_BUILDER="$BOOTSTRAP_ROOT/projects/alpha_lab/factory/release_build.py"
+```
+
+Gate A refuses write mode unless the loaded builder and colocated dependency
+validator are at that exact content-addressed path and their bytes match the
+source file manifest. Never import the builder from a mutable legacy checkout,
+ambient `PYTHONPATH`, user site, or a stale VM module. Invoke the exact file
+with `-I -S -B`, which disables ambient Python paths, site initialization, and
+bytecode writes. First run the non-mutating preflight and default dry build:
+
+```bash
+python3.10 -I -S -B "$GATE_A_BUILDER" preflight \
+  --repo-root "$BOOTSTRAP_ROOT" \
+  --source-archive /absolute/path/to/source.tar \
+  --source-manifest /absolute/path/to/source_manifest.json \
+  --file-manifest /absolute/path/to/file_manifest.json \
+  --wheelhouse "$WHEELHOUSE" \
+  --release-input-manifest /absolute/path/to/release_input_manifest.json \
+  --release-parent "$RELEASE_PARENT"
+
+python3.10 -I -S -B "$GATE_A_BUILDER" build \
+  --repo-root "$BOOTSTRAP_ROOT" \
+  --source-archive /absolute/path/to/source.tar \
+  --source-manifest /absolute/path/to/source_manifest.json \
+  --file-manifest /absolute/path/to/file_manifest.json \
+  --wheelhouse "$WHEELHOUSE" \
+  --release-input-manifest /absolute/path/to/release_input_manifest.json \
+  --release-parent "$RELEASE_PARENT"
+```
+
+Only after the preflight output has been independently reviewed may the
+operator add both write controls:
+
+```bash
+python3.10 -I -S -B "$GATE_A_BUILDER" build \
+  --repo-root "$BOOTSTRAP_ROOT" \
+  --source-archive /absolute/path/to/source.tar \
+  --source-manifest /absolute/path/to/source_manifest.json \
+  --file-manifest /absolute/path/to/file_manifest.json \
+  --wheelhouse "$WHEELHOUSE" \
+  --release-input-manifest /absolute/path/to/release_input_manifest.json \
+  --release-parent "$RELEASE_PARENT" \
+  --interpreter /usr/bin/python3.10 \
+  --write \
+  --authorized-release-input-sha256 <EXACT_RELEASE_INPUT_SHA256>
+```
+
+The build is create-only and content-addressed. It copies the verified source
+and wheels, extracts the source file-only with descriptor-relative no-follow
+operations, creates a copied venv, installs with `--no-index` and
+`--require-hashes`, and executes dependency validation, `pip check`, the exact
+357-test inventory, and the 355-pass/2-DuckDB-skip suite inside a proven Linux
+user/network namespace. It binds all 25 locked distributions, the explicit
+`pip`/`setuptools` venv bootstrap allowance, the external base interpreter and
+complete stdlib-tree identities, and the sealed app/venv/wheel/lock tree.
+Caches, JUnit output, and temporary state remain outside the release.
+
+The external-runtime receipt also binds Ubuntu's OS-release bytes, every shared
+object loaded by the interpreter, and the exact single-link `/usr/bin/git`
+binary. The versioned
+`caerus_alpha_lab_atlas_gate_e_runtime_receipt_v1` inside
+`verification_receipt.json` is the direct Atlas provenance surface. It binds
+the release-input, build, and built-manifest identities; copied Python bytes;
+the canonical complete site-packages subtree; lock, wheel-manifest, and
+installed-distribution closure; and the release/app/venv owner and mode census.
+`READY.verification_receipt_sha256` binds that whole receipt, while independent
+verification reports the exact `READY` SHA-256. No caller-derived runtime hash
+is an alternative authority.
+
+`verification_receipt.json` and canonical `READY` are written last. A crash
+before durable `READY` leaves an unreferenced directory that is never repaired,
+deleted, or reused automatically. An existing valid address is idempotently
+verified; any incomplete or divergent collision fails closed.
+
+Verify independently immediately before every ceremony invocation:
+
+```bash
+python3.10 -I -S -B "$GATE_A_BUILDER" verify \
+  --release-dir /approved/release/parent/releases/sha256/<EXACT_RELEASE_INPUT_SHA256>
+
+python3.10 -I -S -B "$GATE_A_BUILDER" ceremony \
+  --release-dir /approved/release/parent/releases/sha256/<EXACT_RELEASE_INPUT_SHA256> \
+  --ceremony-output-root /protected-review/approved-output-workspace \
+  -- registry verify-history \
+  --history /protected-review/identity_registry_history.json \
+  --trust-anchor /protected-pin/root_trust_anchor.json \
+  --external-pin <active-registry-hash>
+```
+
+Mode `0555`/`0444` is tamper-evident but is not an adversarial seal against the
+same Unix owner, which can restore write permission. Before any Gate E ceremony,
+an administrator must place the release and bootstrap hierarchy under a
+different non-writing principal or a read-only mount. The launcher fails closed
+for root, a same-owner caller, writable ancestors, group/other-write modes, or
+a descriptor-relative ACL-aware effective principal that can write any
+protected release/bootstrap file or directory. It records the current effective
+UID/GID and canonical protected-tree write-denial census, then runs
+a second complete release/base-runtime verification before execution. This
+separate-principal/read-only control is an external production Gate E action;
+until it is proven on the exact Ubuntu host, release work remains in progress.
+
+The launcher executes only `projects.alpha_lab.factory.ceremony`, uses the
+exact app and interpreter paths from `READY`, forbids relative paths and
+publication `--write`, applies OS-level network isolation, and re-verifies the
+sealed release after the command. Outputs must be create-only and beneath the
+separately approved, preexisting no-symlink ceremony-output root, which must be
+outside the release, authoritative checkout/data roots, and protected inputs.
+
+The only permitted dependency-driven skips are the two named DuckDB tests.
+DuckDB is not needed by the signing ceremony and remains an explicitly excluded
+optional materialization engine. The yfinance adapter is injected by tests and
+causes no skip. Any other skip, sdist, unpinned or unhashed requirement,
+wheel-set difference, import-contract change, incompatible platform/ABI,
+dependency-closure difference, external-runtime drift, cache, extra file,
+mutable mode, source-link member, or metadata/hash-chain drift fails Gate A.
+Do not continue to signing on a failure.
 
 ## Protected inputs
 

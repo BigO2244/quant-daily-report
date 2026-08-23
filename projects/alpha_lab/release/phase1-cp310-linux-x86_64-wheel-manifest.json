@@ -1,7 +1,7 @@
 {
   "schema_version": "caerus_alpha_lab_phase1_wheel_manifest_v1",
   "classification": "RELEASE_TEST_DEPENDENCY_CONTRACT",
-  "base_source_commit": "60c86dc3c9b0ad440a07a2008ece1711c11dd925",
+  "dependency_resolution_base_commit": "60c86dc3c9b0ad440a07a2008ece1711c11dd925",
   "target": {
     "operating_system": "Ubuntu",
     "operating_system_version": "22.04",

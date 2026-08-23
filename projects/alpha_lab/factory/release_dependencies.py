@@ -11,8 +11,11 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import io
 import json
+import os
 import re
+import stat
 import sys
 import zipfile
 from email.parser import BytesParser
@@ -369,7 +372,7 @@ def _validate_manifest_shape(manifest: Mapping[str, Any]) -> None:
     required = {
         "schema_version",
         "classification",
-        "base_source_commit",
+        "dependency_resolution_base_commit",
         "target",
         "generator",
         "lock",
@@ -381,8 +384,13 @@ def _validate_manifest_shape(manifest: Mapping[str, Any]) -> None:
         raise ReleaseDependencyError("wheel manifest schema is invalid")
     if manifest.get("classification") != "RELEASE_TEST_DEPENDENCY_CONTRACT":
         raise ReleaseDependencyError("wheel manifest classification is invalid")
-    if not re.fullmatch(r"[0-9a-f]{40}", str(manifest.get("base_source_commit", ""))):
-        raise ReleaseDependencyError("wheel manifest base source commit is invalid")
+    if not re.fullmatch(
+        r"[0-9a-f]{40}",
+        str(manifest.get("dependency_resolution_base_commit", "")),
+    ):
+        raise ReleaseDependencyError(
+            "wheel manifest dependency-resolution base commit is invalid"
+        )
     if manifest.get("target") != EXPECTED_TARGET:
         raise ReleaseDependencyError("wheel manifest target drifted")
 
@@ -445,59 +453,104 @@ def _validate_wheelhouse_files(
 ) -> None:
     """Validate the exact wheel set, bytes, metadata, and embedded tags."""
 
-    wheelhouse = wheelhouse.expanduser().resolve()
-    if not wheelhouse.is_dir():
-        raise ReleaseDependencyError(f"wheelhouse is not a directory: {wheelhouse}")
-    actual_files = {path.name: path for path in wheelhouse.iterdir() if path.is_file()}
-    if set(actual_files) != set(expected_files):
-        missing = sorted(set(expected_files) - set(actual_files))
-        extra = sorted(set(actual_files) - set(expected_files))
+    wheelhouse = wheelhouse.expanduser().absolute()
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        wheelhouse_fd = os.open(str(wheelhouse), flags)
+    except OSError as exc:
+        raise ReleaseDependencyError(f"wheelhouse is not a no-follow directory: {wheelhouse}") from exc
+    actual_names = set(os.listdir(wheelhouse_fd))
+    if actual_names != set(expected_files):
+        os.close(wheelhouse_fd)
+        missing = sorted(set(expected_files) - actual_names)
+        extra = sorted(actual_names - set(expected_files))
         raise ReleaseDependencyError(
             f"wheelhouse has extra or missing files; missing={missing}, extra={extra}"
         )
-    for filename, path in actual_files.items():
-        record = expected_files[filename]
-        value = path.read_bytes()
-        if len(value) != record["bytes"] or _sha256(value) != record["sha256"]:
-            raise ReleaseDependencyError(f"wheel file hash/size drift: {filename}")
-        try:
-            with zipfile.ZipFile(path) as archive:
-                metadata_names = [
-                    name for name in archive.namelist()
-                    if name.endswith(".dist-info/METADATA")
-                ]
-                wheel_names = [
-                    name for name in archive.namelist()
-                    if name.endswith(".dist-info/WHEEL")
-                ]
-                if len(metadata_names) != 1 or len(wheel_names) != 1:
-                    raise ReleaseDependencyError(f"wheel metadata layout is invalid: {filename}")
-                metadata_bytes = archive.read(metadata_names[0])
-                wheel_bytes = archive.read(wheel_names[0])
-        except (OSError, zipfile.BadZipFile, KeyError) as exc:
-            raise ReleaseDependencyError(f"cannot inspect wheel: {filename}") from exc
-        if _sha256(metadata_bytes) != record["metadata_sha256"]:
-            raise ReleaseDependencyError(f"embedded METADATA drift: {filename}")
-        if _sha256(wheel_bytes) != record["wheel_metadata_sha256"]:
-            raise ReleaseDependencyError(f"embedded WHEEL metadata drift: {filename}")
-        metadata = BytesParser(policy=compat32).parsebytes(metadata_bytes)
-        distribution = _normalize_name(str(metadata.get("Name", "")))
-        if distribution != _normalize_name(str(record["distribution"])):
-            raise ReleaseDependencyError(f"wheel distribution metadata drift: {filename}")
-        if metadata.get("Version") != record["version"]:
-            raise ReleaseDependencyError(f"wheel version metadata drift: {filename}")
-        if metadata.get("Requires-Python") != record["requires_python"]:
-            raise ReleaseDependencyError(f"wheel Requires-Python drift: {filename}")
-        actual_dependencies = _target_dependencies(metadata.get_all("Requires-Dist", []))
-        if actual_dependencies != record["target_dependencies"]:
-            raise ReleaseDependencyError(f"target dependency metadata drift: {filename}")
-        wheel_metadata = BytesParser(policy=compat32).parsebytes(wheel_bytes)
-        python_tag, abi_tag, platform_tag = _wheel_components(
-            filename, distribution, str(record["version"])
-        )
-        embedded_tags = set(wheel_metadata.get_all("Tag", []))
-        if embedded_tags != _expanded_filename_tags(python_tag, abi_tag, platform_tag):
-            raise ReleaseDependencyError(f"wheel tag metadata drift: {filename}")
+    try:
+        for filename in sorted(actual_names):
+            try:
+                descriptor = os.open(
+                    filename,
+                    os.O_RDONLY
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0),
+                    dir_fd=wheelhouse_fd,
+                )
+            except OSError as exc:
+                raise ReleaseDependencyError(
+                    f"wheelhouse entry is not a no-follow regular file: {filename}"
+                ) from exc
+            try:
+                before = os.fstat(descriptor)
+                if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                    raise ReleaseDependencyError(
+                        f"wheelhouse entry is not a single-link regular file: {filename}"
+                    )
+                chunks = []
+                while True:
+                    chunk = os.read(descriptor, 1024 * 1024)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                after = os.fstat(descriptor)
+            finally:
+                os.close(descriptor)
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+            ):
+                raise ReleaseDependencyError(
+                    f"wheelhouse entry changed while reading: {filename}"
+                )
+            value = b"".join(chunks)
+            record = expected_files[filename]
+            if len(value) != record["bytes"] or _sha256(value) != record["sha256"]:
+                raise ReleaseDependencyError(f"wheel file hash/size drift: {filename}")
+            try:
+                with zipfile.ZipFile(io.BytesIO(value)) as archive:
+                    metadata_names = [
+                        name for name in archive.namelist()
+                        if name.endswith(".dist-info/METADATA")
+                    ]
+                    wheel_names = [
+                        name for name in archive.namelist()
+                        if name.endswith(".dist-info/WHEEL")
+                    ]
+                    if len(metadata_names) != 1 or len(wheel_names) != 1:
+                        raise ReleaseDependencyError(f"wheel metadata layout is invalid: {filename}")
+                    metadata_bytes = archive.read(metadata_names[0])
+                    wheel_bytes = archive.read(wheel_names[0])
+            except (OSError, zipfile.BadZipFile, KeyError) as exc:
+                raise ReleaseDependencyError(f"cannot inspect wheel: {filename}") from exc
+            if _sha256(metadata_bytes) != record["metadata_sha256"]:
+                raise ReleaseDependencyError(f"embedded METADATA drift: {filename}")
+            if _sha256(wheel_bytes) != record["wheel_metadata_sha256"]:
+                raise ReleaseDependencyError(f"embedded WHEEL metadata drift: {filename}")
+            metadata = BytesParser(policy=compat32).parsebytes(metadata_bytes)
+            distribution = _normalize_name(str(metadata.get("Name", "")))
+            if distribution != _normalize_name(str(record["distribution"])):
+                raise ReleaseDependencyError(f"wheel distribution metadata drift: {filename}")
+            if metadata.get("Version") != record["version"]:
+                raise ReleaseDependencyError(f"wheel version metadata drift: {filename}")
+            if metadata.get("Requires-Python") != record["requires_python"]:
+                raise ReleaseDependencyError(f"wheel Requires-Python drift: {filename}")
+            actual_dependencies = _target_dependencies(metadata.get_all("Requires-Dist", []))
+            if actual_dependencies != record["target_dependencies"]:
+                raise ReleaseDependencyError(f"target dependency metadata drift: {filename}")
+            wheel_metadata = BytesParser(policy=compat32).parsebytes(wheel_bytes)
+            python_tag, abi_tag, platform_tag = _wheel_components(
+                filename, distribution, str(record["version"])
+            )
+            embedded_tags = set(wheel_metadata.get_all("Tag", []))
+            if embedded_tags != _expanded_filename_tags(python_tag, abi_tag, platform_tag):
+                raise ReleaseDependencyError(f"wheel tag metadata drift: {filename}")
+    finally:
+        os.close(wheelhouse_fd)
 
 
 def validate_release_dependency_contract(

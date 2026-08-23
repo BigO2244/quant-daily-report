@@ -16,6 +16,7 @@ import base64
 import hashlib
 import os
 import shutil
+import stat
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -171,21 +172,72 @@ def _reject_secret_material(value: Any) -> None:
         raise ContractValidationError("ceremony material contains private key material")
 
 
-def _write_create_only(path: Path, value: bytes) -> None:
-    path = path.expanduser().resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+def _canonical_output_path(path: Path) -> Path:
+    candidate = path.expanduser()
+    raw = str(candidate)
+    if not raw.startswith("/") or os.path.normpath(raw) != raw or "\x00" in raw:
+        raise ContractValidationError("ceremony output must be a canonical absolute path")
+    approved_raw = os.environ.get("CAERUS_CEREMONY_OUTPUT_ROOT")
+    if approved_raw:
+        approved = Path(approved_raw)
+        if (
+            not approved_raw.startswith("/")
+            or os.path.normpath(approved_raw) != approved_raw
+            or (candidate != approved and approved not in candidate.parents)
+        ):
+            raise ContractValidationError("ceremony output escapes its approved workspace")
+    return candidate
+
+
+def _open_output_directory(path: Path) -> int:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptor = os.open("/", flags)
     try:
-        with os.fdopen(descriptor, "wb", closefd=True) as stream:
-            stream.write(value)
-            stream.flush()
-            os.fsync(stream.fileno())
+        for part in path.parts[1:]:
+            child = os.open(part, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
     except Exception:
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
+        os.close(descriptor)
         raise
+
+
+def _write_create_only(path: Path, value: bytes) -> None:
+    path = _canonical_output_path(path)
+    try:
+        parent = _open_output_directory(path.parent)
+    except OSError as exc:
+        raise ContractValidationError(
+            "ceremony output parent must already exist without symlink components"
+        ) from exc
+    descriptor = os.open(
+        path.name,
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0),
+        0o600,
+        dir_fd=parent,
+    )
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ContractValidationError("ceremony output is not a single-link regular file")
+        offset = 0
+        while offset < len(value):
+            offset += os.write(descriptor, value[offset:])
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+        os.fsync(parent)
+        os.close(parent)
 
 
 def _emit_json(value: Mapping[str, Any], output: Optional[Path]) -> None:
@@ -205,8 +257,18 @@ def _emit_prepare_bundle(
 ) -> None:
     """Create a review bundle create-only, with the review manifest last."""
 
-    destination = output_dir.expanduser().resolve()
-    destination.mkdir(parents=True, exist_ok=False, mode=0o700)
+    destination = _canonical_output_path(output_dir)
+    try:
+        parent = _open_output_directory(destination.parent)
+    except OSError as exc:
+        raise ContractValidationError(
+            "ceremony output parent must already exist without symlink components"
+        ) from exc
+    try:
+        os.mkdir(destination.name, 0o700, dir_fd=parent)
+        os.fsync(parent)
+    finally:
+        os.close(parent)
     try:
         _write_create_only(destination / artifact_name, _canonical_bytes(artifact))
         signed_payload = review_manifest.get("signed_payload")
@@ -218,7 +280,7 @@ def _emit_prepare_bundle(
         _write_create_only(
             destination / "review_manifest.json", _canonical_bytes(review_manifest)
         )
-        directory_descriptor = os.open(str(destination), os.O_RDONLY)
+        directory_descriptor = _open_output_directory(destination)
         try:
             os.fsync(directory_descriptor)
         finally:
@@ -1249,6 +1311,16 @@ def _ledger_arguments(parser: argparse.ArgumentParser) -> None:
     _history_arguments(parser)
 
 
+def _disable_argument_abbreviations(parser: argparse.ArgumentParser) -> None:
+    """Require exact long options on every nested public ceremony parser."""
+
+    parser.allow_abbrev = False
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for child in action.choices.values():
+                _disable_argument_abbreviations(child)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     domains = parser.add_subparsers(dest="domain", required=True)
@@ -1387,6 +1459,7 @@ def _build_parser() -> argparse.ArgumentParser:
     command = projection_commands.add_parser("verify", help="replay ledger and verify final signed export")
     _ledger_arguments(command)
     command.add_argument("--signed-export", type=Path, required=True)
+    _disable_argument_abbreviations(parser)
     return parser
 
 

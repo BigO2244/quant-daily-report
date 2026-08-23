@@ -98,14 +98,31 @@ promotion, allocation, scheduling, deployment, broker behavior, or trading.
 
 ## External-signer operator surface
 
-Before preparing any signing request, the clean release dependency Gate A in
-`RESEARCH_SIGNING_CEREMONY.md` must pass against the committed hashed lock and
-exact wheel manifest. A local developer environment is not release evidence.
+Before preparing any signing request, the complete clean-release Gate A in
+`RESEARCH_SIGNING_CEREMONY.md` must pass against the final source archive,
+canonical source/file/release-input manifests, committed hashed lock, exact
+25-wheel wheelhouse, sealed runtime manifest, verification receipt, and
+content-addressed `READY`. A local developer environment, dependency-only
+validation, or a stale source identity is not release evidence. The wheel
+manifest's `dependency_resolution_base_commit` is resolver lineage, not the
+release source commit.
+Atlas consumes the versioned `atlas_gate_e_runtime_receipt` nested in Alpha's
+immutable verification receipt and checks its chain through the independently
+pinned `READY` bytes. Same-owner read-only modes are explicitly insufficient:
+the production launcher also requires a different non-writing principal or a
+read-only mount and re-verifies the external Python, stdlib/shared-library, and
+reviewed `/usr/bin/git` identities immediately before use.
 
-The installed module entry point is:
+After an isolated direct-file `release_build verify`, invoke the reviewed
+content-addressed builder only through the sealed public-only launcher:
 
 ```bash
-python -m projects.alpha_lab.factory.ceremony --help
+python3.10 -I -S -B \
+  /approved/release/parent/bootstrap/sha256/<SOURCE_ARCHIVE_SHA256>/app/projects/alpha_lab/factory/release_build.py \
+  ceremony \
+  --release-dir /approved/release/parent/releases/sha256/<EXACT_RELEASE_INPUT_SHA256> \
+  --ceremony-output-root /protected-review/approved-output-workspace \
+  -- registry --help
 ```
 
 Registry, attestation, migration, publication, and projection subcommands all
@@ -115,6 +132,8 @@ immediately verify them. All histories use
 signed releases plus the declared external pin. Operational commands require
 the protected root trust-anchor file and external registry hash separately.
 See `RESEARCH_SIGNING_CEREMONY.md` for the complete ceremony and KMS examples.
+The launcher forbids publication writes; any separately authorized publication
+mutation remains outside this public-only release surface.
 
 Every authenticated control-plane invocation that supplies `--ledger` must
 also supply all three inputs below:

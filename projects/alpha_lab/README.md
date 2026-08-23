@@ -57,8 +57,10 @@ the frozen test executed, say `RUN EXPERIMENT`.
   and CIO Paper-nomination workflow.
 - `RESEARCH_SIGNING_CEREMONY.md` — public-only registry, detached attestation,
   migration/QS-003 publication, and signed-projection operator workflow.
-- `requirements.in` and `release/` — Alpha-only direct runtime declaration plus
-  the binary-only, fully hashed CPython 3.10 Gate A test lock and wheel manifest.
+- `requirements.in`, `release/`, and `factory/release_build.py` — Alpha-only
+  direct runtime declaration, binary-only fully hashed CPython 3.10 dependency
+  contract, create-only Gate A source/build/seal/verify/ceremony launcher, and
+  the immutable Atlas-consumable Gate E runtime provenance receipt.
 - `control_plane/` — generic evaluator contract, lifecycle assessor, paid-data
   requests, and deterministic CIO queue generation.
 
