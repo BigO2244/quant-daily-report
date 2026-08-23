@@ -98,6 +98,10 @@ promotion, allocation, scheduling, deployment, broker behavior, or trading.
 
 ## External-signer operator surface
 
+Before preparing any signing request, the clean release dependency Gate A in
+`RESEARCH_SIGNING_CEREMONY.md` must pass against the committed hashed lock and
+exact wheel manifest. A local developer environment is not release evidence.
+
 The installed module entry point is:
 
 ```bash

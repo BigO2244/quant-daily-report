@@ -25,6 +25,62 @@ All JSON input is strict: duplicate keys, non-finite numbers, malformed public
 keys, unknown signing fields, path substitutions, stale pins, and secret
 material fail closed. Output files and preparation directories are create-only.
 
+## Gate A: clean release dependencies
+
+Gate A must pass on the release candidate before any registry, migration,
+publication, or projection preparation. The committed contract targets exactly
+Ubuntu 22.04 x86_64, glibc 2.35, and CPython 3.10.12. It declares Alpha's
+runtime imports in `requirements.in`, locks every test dependency to one hashed
+binary wheel, and records each wheel's filename, size, SHA-256, metadata hashes,
+target tags, and target dependency closure in the machine-readable manifest.
+Wheel binaries are temporary ceremony inputs and must not enter Git.
+
+From the repository root on the clean release host:
+
+```bash
+python3.10 -c 'import sys; assert sys.version_info[:3] == (3, 10, 12), sys.version'
+python3.10 -m projects.alpha_lab.factory.release_dependencies --repo-root .
+
+WHEELHOUSE="$(mktemp -d /tmp/caerus-alpha-phase1-wheelhouse.XXXXXX)"
+RELEASE_VENV="$(mktemp -d /tmp/caerus-alpha-phase1-venv.XXXXXX)"
+
+python3.10 -m pip download \
+  --dest "$WHEELHOUSE" \
+  --require-hashes \
+  --only-binary=:all: \
+  --platform manylinux_2_34_x86_64 \
+  --platform manylinux_2_28_x86_64 \
+  --platform manylinux_2_17_x86_64 \
+  --platform manylinux2014_x86_64 \
+  --python-version 3.10 \
+  --implementation cp \
+  --abi cp310 \
+  -r projects/alpha_lab/release/phase1-cp310-linux-x86_64.lock
+
+python3.10 -m projects.alpha_lab.factory.release_dependencies \
+  --repo-root . --wheelhouse "$WHEELHOUSE"
+
+python3.10 -m venv "$RELEASE_VENV"
+PIP_NO_INDEX=1 "$RELEASE_VENV/bin/python" -m pip install \
+  --no-index \
+  --find-links="$WHEELHOUSE" \
+  --require-hashes \
+  -r projects/alpha_lab/release/phase1-cp310-linux-x86_64.lock
+
+PYTHONNOUSERSITE=1 "$RELEASE_VENV/bin/python" -m pip check
+PYTHONNOUSERSITE=1 "$RELEASE_VENV/bin/python" -m pytest \
+  -p no:cacheprovider -q projects/alpha_lab/tests
+```
+
+The only permitted dependency-driven skips are the two existing DuckDB tests,
+which use `pytest.importorskip("duckdb")`. DuckDB is not needed by the signing
+ceremony and remains an explicitly excluded optional materialization engine.
+The yfinance network adapter is injected by its tests and remains governed by
+the parent runtime pin; it causes no skip. Any other skip, sdist, unpinned or
+unhashed requirement, wheel-set difference, import-contract change, incompatible
+platform/ABI, dependency-closure difference, or metadata/hash drift fails Gate
+A. Do not continue to signing on a failure.
+
 ## Protected inputs
 
 Two inputs must arrive separately from the reviewed history file:
@@ -60,7 +116,8 @@ credential:
 
 ```bash
 gcloud kms keys versions get-public-key 1 \
-  --location=global --keyring=caerus-research --key=research-author \
+  --location="<APPROVED_LOCATION>" \
+  --keyring=caerus-research --key=research-author \
   --public-key-format=pem --output-file=/protected-review/research-author.pem
 ```
 
@@ -70,7 +127,7 @@ copies taken from the preparation directory:
 ```bash
 python -m projects.alpha_lab.factory.ceremony registry finalize \
   --request /protected-review/registry-release-1/review_manifest.json \
-  --signature /protected-review/registry-release-1/signature.b64 \
+  --signature /protected-review/registry-release-1/signature.raw \
   --trust-anchor /protected-pin/root_trust_anchor.json \
   --external-pin <exact-registry-directory-sha256> \
   --output-dir /protected-review/registry-release-1-final
@@ -110,11 +167,15 @@ For an approved Cloud KMS Ed25519 machine-role key, omit
 
 ```bash
 gcloud kms asymmetric-sign \
-  --location=global --keyring=caerus-research \
+  --location="<APPROVED_LOCATION>" --keyring=caerus-research \
   --key=research-author --version=1 \
   --input-file=/protected-review/event-attestation/signing_payload.json \
-  --signature-file=/protected-review/event-attestation/signature.b64
+  --signature-file=/protected-review/event-attestation/signature.raw
 ```
+
+Cloud KMS writes the detached Ed25519 signature as raw bytes. Ceremony finalize
+commands accept that exact 64-byte `.raw` file directly; base64 conversion is
+neither required nor preferred.
 
 ## 3. Migration plan and QS-003
 

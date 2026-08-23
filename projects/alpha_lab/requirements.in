@@ -1,0 +1,11 @@
+# Alpha Lab direct runtime dependencies.
+#
+# Keep this surface separate from the parent trading runtime: Alpha release
+# ceremonies install the target-specific hashed lock under release/.  These
+# pins declare only third-party imports exercised directly by Alpha runtime
+# modules; optional DuckDB/yfinance lanes retain their own explicit gates.
+cryptography==49.0.0
+openpyxl==3.1.5
+pandas==2.3.3
+pyarrow==20.0.0
+requests==2.32.5

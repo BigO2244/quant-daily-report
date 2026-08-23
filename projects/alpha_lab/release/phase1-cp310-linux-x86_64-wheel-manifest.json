@@ -1,0 +1,341 @@
+{
+  "schema_version": "caerus_alpha_lab_phase1_wheel_manifest_v1",
+  "classification": "RELEASE_TEST_DEPENDENCY_CONTRACT",
+  "base_source_commit": "60c86dc3c9b0ad440a07a2008ece1711c11dd925",
+  "target": {
+    "operating_system": "Ubuntu",
+    "operating_system_version": "22.04",
+    "architecture": "x86_64",
+    "glibc_version": "2.35",
+    "python_implementation": "CPython",
+    "python_version": "3.10.12",
+    "python_tag": "cp310",
+    "abi_tag": "cp310"
+  },
+  "generator": {
+    "resolver": "pip 26.2.1 binary-only cross-platform download plus explicit CPython 3.10 marker-closure inspection",
+    "index": "https://pypi.org/simple",
+    "inputs": [
+      {
+        "path": "projects/alpha_lab/requirements.in",
+        "bytes": 430,
+        "sha256": "ba03721078d5b03c9a6843047fc7991717479c656f05730f689f4764e3a6b25c"
+      },
+      {
+        "path": "projects/alpha_lab/release/phase1-test-requirements.in",
+        "bytes": 174,
+        "sha256": "fa432ef24e4a5e3605cd43b56c427745e07f9bcf9508cfd1c9beb210619c4291"
+      }
+    ],
+    "platform_arguments": [
+      "manylinux_2_34_x86_64",
+      "manylinux_2_28_x86_64",
+      "manylinux_2_17_x86_64",
+      "manylinux2014_x86_64"
+    ],
+    "download_command": "python3.10 -m pip download --dest \"$WHEELHOUSE\" --require-hashes --only-binary=:all: --platform manylinux_2_34_x86_64 --platform manylinux_2_28_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 --python-version 3.10 --implementation cp --abi cp310 -r projects/alpha_lab/release/phase1-cp310-linux-x86_64.lock",
+    "no_index_install_command": "\"$RELEASE_VENV/bin/python\" -m pip install --no-index --find-links=\"$WHEELHOUSE\" --require-hashes -r projects/alpha_lab/release/phase1-cp310-linux-x86_64.lock"
+  },
+  "lock": {
+    "path": "projects/alpha_lab/release/phase1-cp310-linux-x86_64.lock",
+    "bytes": 2607,
+    "sha256": "a7db6d5f8f96879aad5b3a8c38ed7ad6ed094aac0ae66c8a0e69677353745549",
+    "requirement_count": 25,
+    "wheel_count": 25
+  },
+  "import_contract": {
+    "cryptography": {"distribution": "cryptography", "status": "REQUIRED_RUNTIME"},
+    "duckdb": {"distribution": "duckdb", "status": "OPTIONAL_EXCLUDED", "reason": "Only DuckDB-specific materialization tests use pytest.importorskip; release ceremony and remaining suite do not import it."},
+    "openpyxl": {"distribution": "openpyxl", "status": "REQUIRED_RUNTIME"},
+    "pandas": {"distribution": "pandas", "status": "REQUIRED_RUNTIME"},
+    "pyarrow": {"distribution": "pyarrow", "status": "REQUIRED_RUNTIME"},
+    "pytest": {"distribution": "pytest", "status": "REQUIRED_TEST"},
+    "requests": {"distribution": "requests", "status": "REQUIRED_RUNTIME"},
+    "yfinance": {"distribution": "yfinance", "status": "EXTERNAL_ADAPTER_MOCKED_FOR_TEST", "reason": "The suite injects the adapter and does not import the network client; the parent runtime retains its independent yfinance pin."}
+  },
+  "optional_exclusions": [
+    {
+      "distribution": "duckdb",
+      "test_behavior": "pytest.importorskip",
+      "expected_skipped_tests": 2,
+      "runtime_effect": "DuckDB materialization commands remain fail-closed when the optional dependency is absent."
+    }
+  ],
+  "wheels": [
+    {
+      "distribution": "certifi",
+      "version": "2026.7.22",
+      "filename": "certifi-2026.7.22-py3-none-any.whl",
+      "bytes": 136983,
+      "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
+      "requires_python": ">=3.7",
+      "metadata_sha256": "ef5af1638fbb23676ac3c5777dfcfc2cd9c348fe4172ed5ba3d277655b248090",
+      "wheel_metadata_sha256": "2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "cffi",
+      "version": "2.1.1",
+      "filename": "cffi-2.1.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "bytes": 218742,
+      "sha256": "194cffa889098ced9976c3fc6340305e43f6303657d298da55366907c05c22d6",
+      "requires_python": ">=3.10",
+      "metadata_sha256": "558bafb9093a8e790175d9ecff9688382981d744877dad86fd6770db0f4dc918",
+      "wheel_metadata_sha256": "c47c0efe37c47e865ab34371be545a9b0dd055998919301551b8247ec9b792c8",
+      "target_dependencies": ["pycparser"]
+    },
+    {
+      "distribution": "charset-normalizer",
+      "version": "3.5.1",
+      "filename": "charset_normalizer-3.5.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "bytes": 261644,
+      "sha256": "96eefc178f8636b9c760c5829345307fd81cfae9ab1e80997dbddeb0f54ee9a3",
+      "requires_python": ">=3.7",
+      "metadata_sha256": "955c93827d59f1280f6d6a76b1e11bfb999cc65a55df83a6f9b28b7bc0e467f6",
+      "wheel_metadata_sha256": "19601a57dbc05e3d2e550552a4d2b517efcf28556daadd29a904dff2a0914f86",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "cryptography",
+      "version": "49.0.0",
+      "filename": "cryptography-49.0.0-cp39-abi3-manylinux_2_34_x86_64.whl",
+      "bytes": 4735650,
+      "sha256": "2400ef9c9e2299a25614eb1dea3db54a69b1349efd043bfac9c67630d136df36",
+      "requires_python": ">=3.9, !=3.9.0, !=3.9.1",
+      "metadata_sha256": "1fc839d24efc355f0e5c507aa807822bca4371e732603b6d3e92b24038deded2",
+      "wheel_metadata_sha256": "327259338befb0ae5f0e45ccc7b51339d65c20061e7ab35662f223af55db0f95",
+      "target_dependencies": ["cffi", "typing-extensions"]
+    },
+    {
+      "distribution": "et-xmlfile",
+      "version": "2.0.0",
+      "filename": "et_xmlfile-2.0.0-py3-none-any.whl",
+      "bytes": 18059,
+      "sha256": "7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
+      "requires_python": ">=3.8",
+      "metadata_sha256": "0e97d7ea909ed0fbe03d88bc8b6f58677cee1b07bd3353ce361cd2405915204e",
+      "wheel_metadata_sha256": "1e20998f3bb2e83c3485d5f94772c214f0e6152e015a5f07fbc5b7f577e6817e",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "exceptiongroup",
+      "version": "1.3.1",
+      "filename": "exceptiongroup-1.3.1-py3-none-any.whl",
+      "bytes": 16740,
+      "sha256": "a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598",
+      "requires_python": ">=3.7",
+      "metadata_sha256": "81984a523a2f7a522ad12bea784a8bb85edec0805ebbd0fb4e350169a36dd802",
+      "wheel_metadata_sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db",
+      "target_dependencies": ["typing-extensions"]
+    },
+    {
+      "distribution": "idna",
+      "version": "3.19",
+      "filename": "idna-3.19-py3-none-any.whl",
+      "bytes": 68550,
+      "sha256": "815e7be7a7806d54abb586dc943addc79e8b2ee16915059658cbeff4b1b43bf4",
+      "requires_python": ">=3.9",
+      "metadata_sha256": "4d113161aca8582e8d28fddf3ea50f19b607209c2b3e4364379a163454680084",
+      "wheel_metadata_sha256": "ff23073da055face9f40cc14a28f3735275308cddcf315d6157461a9a7cdfbb6",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "iniconfig",
+      "version": "2.3.0",
+      "filename": "iniconfig-2.3.0-py3-none-any.whl",
+      "bytes": 7484,
+      "sha256": "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12",
+      "requires_python": ">=3.10",
+      "metadata_sha256": "40d773f84e4e112f495bbf4f1be9cbd2d456c0aeb6ef5311f75d1bf322f2165b",
+      "wheel_metadata_sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "numpy",
+      "version": "2.2.6",
+      "filename": "numpy-2.2.6-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "bytes": 16801050,
+      "sha256": "fc7b73d02efb0e18c000e9ad8b83480dfcd5dfd11065997ed4c6747470ae8915",
+      "requires_python": ">=3.10",
+      "metadata_sha256": "22d648f53848429464ca643b40d73b49a920d47876fc77c395d4dca4e834904a",
+      "wheel_metadata_sha256": "b1933f35e50ccf61b87c37a731fd757a291c0b170b6905a26119a3c1005abd0b",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "openpyxl",
+      "version": "3.1.5",
+      "filename": "openpyxl-3.1.5-py2.py3-none-any.whl",
+      "bytes": 250910,
+      "sha256": "5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
+      "requires_python": ">=3.8",
+      "metadata_sha256": "23f80ca9830dd89435da1710f26deda8f81e5409287e74540210c72627a4ad96",
+      "wheel_metadata_sha256": "0d96a30f8a702d6b9eef40807dced86b14f5c0b51c88d06f37f4d372f5e996d1",
+      "target_dependencies": ["et-xmlfile"]
+    },
+    {
+      "distribution": "packaging",
+      "version": "26.3",
+      "filename": "packaging-26.3-py3-none-any.whl",
+      "bytes": 129956,
+      "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+      "requires_python": ">=3.9",
+      "metadata_sha256": "70fdb89fc4d4a9a043bf7372b8972bcc883fddff34ab55e9cf80d73875384763",
+      "wheel_metadata_sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "pandas",
+      "version": "2.3.3",
+      "filename": "pandas-2.3.3-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "bytes": 12769373,
+      "sha256": "dd7478f1463441ae4ca7308a70e90b33470fa593429f9d4c578dd00d1fa78838",
+      "requires_python": ">=3.9",
+      "metadata_sha256": "40ee953dc7ca155840b639a1881ff84578075187fce0ac20eeda55a7fa0d9a90",
+      "wheel_metadata_sha256": "7240c7dbda3a445bb29b9f7f5023b24168f7828faafb559c9205a8134b8191a8",
+      "target_dependencies": ["numpy", "python-dateutil", "pytz", "tzdata"]
+    },
+    {
+      "distribution": "pluggy",
+      "version": "1.6.0",
+      "filename": "pluggy-1.6.0-py3-none-any.whl",
+      "bytes": 20538,
+      "sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746",
+      "requires_python": ">=3.9",
+      "metadata_sha256": "7438c35ee25a095eb7416f84b461c2d74425c5e734ad54c3912453c65244e01c",
+      "wheel_metadata_sha256": "370dfa0e3ba1ff9543ba42b41fbf10cce5fefc5404a3a577ee6de7926f7a82d5",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "pyarrow",
+      "version": "20.0.0",
+      "filename": "pyarrow-20.0.0-cp310-cp310-manylinux_2_28_x86_64.whl",
+      "bytes": 42278528,
+      "sha256": "a5704f29a74b81673d266e5ec1fe376f060627c2e42c5c7651288ed4b0db29e9",
+      "requires_python": ">=3.9",
+      "metadata_sha256": "fbdab9de7a2d5fbd625bed4f82d279fe27c17da119243ae16cbb80947374d122",
+      "wheel_metadata_sha256": "edf20ebb13af41d33759c9cdaf9a837b7d7460a15784fc73e8c76f602e1b2908",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "pycparser",
+      "version": "3.0",
+      "filename": "pycparser-3.0-py3-none-any.whl",
+      "bytes": 48172,
+      "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992",
+      "requires_python": ">=3.10",
+      "metadata_sha256": "f547a60b0ab54cc2f242213d1f87960ad80df7dd5dfeb98d17a444d48bfb6b93",
+      "wheel_metadata_sha256": "a842dba36b35633977f599ab0226d70368e33cb5187e756150d4e5c85d6bab46",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "pygments",
+      "version": "2.21.0",
+      "filename": "pygments-2.21.0-py3-none-any.whl",
+      "bytes": 1250147,
+      "sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+      "requires_python": ">=3.9",
+      "metadata_sha256": "1dde075570136774c706bf0009183a793fe0ee262e4a5590cc6eff8453eedd43",
+      "wheel_metadata_sha256": "ccec20e2307acd7da453dd7437e70c6b08e2bc3ead3bc3445af135da37b56d59",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "pytest",
+      "version": "9.0.3",
+      "filename": "pytest-9.0.3-py3-none-any.whl",
+      "bytes": 375249,
+      "sha256": "2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9",
+      "requires_python": ">=3.10",
+      "metadata_sha256": "c3966f28791686477bae35e518736d4cbea5b626d3a79011215854e2bc670207",
+      "wheel_metadata_sha256": "69e6228a0d35958183cc1812f07c565ce837b95eb51bd8a33acba9fa4f68d6c9",
+      "target_dependencies": ["exceptiongroup", "iniconfig", "packaging", "pluggy", "pygments", "tomli"]
+    },
+    {
+      "distribution": "python-dateutil",
+      "version": "2.9.0.post0",
+      "filename": "python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+      "bytes": 229892,
+      "sha256": "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427",
+      "requires_python": "!=3.0.*,!=3.1.*,!=3.2.*,>=2.7",
+      "metadata_sha256": "a9d436da322be808332f98d88325998e87cb693a678a9969feb4cfad729a6e93",
+      "wheel_metadata_sha256": "f86fedd281ae13b503d03ad2a55667ab584730157d0c3d97912e6fed7a664e79",
+      "target_dependencies": ["six"]
+    },
+    {
+      "distribution": "pytz",
+      "version": "2026.3.post1",
+      "filename": "pytz-2026.3.post1-py2.py3-none-any.whl",
+      "bytes": 508283,
+      "sha256": "dd95840dd199baea12d9cc096a1d452caa6596a1c1e4b5f3dbd1541855d5e815",
+      "requires_python": null,
+      "metadata_sha256": "25ef8a562377a28d8c6bd8c5c9e80d761d0e22ac4a7bed24e512f589644ed33d",
+      "wheel_metadata_sha256": "f86fedd281ae13b503d03ad2a55667ab584730157d0c3d97912e6fed7a664e79",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "requests",
+      "version": "2.32.5",
+      "filename": "requests-2.32.5-py3-none-any.whl",
+      "bytes": 64738,
+      "sha256": "2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6",
+      "requires_python": ">=3.9",
+      "metadata_sha256": "65b5a08da81f4915513e760965ff14b7518f65b7bb3efe0dab364bbcc4d40cb0",
+      "wheel_metadata_sha256": "ff309ddcdd65ebd02bc724dbf2bcc4a0ff53a5b61792a44548d383e4ebb19d3b",
+      "target_dependencies": ["certifi", "charset-normalizer", "idna", "urllib3"]
+    },
+    {
+      "distribution": "six",
+      "version": "1.17.0",
+      "filename": "six-1.17.0-py2.py3-none-any.whl",
+      "bytes": 11050,
+      "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+      "requires_python": ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*",
+      "metadata_sha256": "562042078c2752549f6d8a7c86dbc5dd708088a7be6d80672ec7b07100b72468",
+      "wheel_metadata_sha256": "a7178d5f925db427b9f0f51260ff6ea6673b8dd44f82f4f41a6f646f5487955c",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "tomli",
+      "version": "2.4.1",
+      "filename": "tomli-2.4.1-py3-none-any.whl",
+      "bytes": 14583,
+      "sha256": "0d85819802132122da43cb86656f8d1f8c6587d54ae7dcaf30e90533028b49fe",
+      "requires_python": ">=3.8",
+      "metadata_sha256": "b2b3fdf2566bba313106abf4a806f9c217f8f814587f1017c494d49079a0a683",
+      "wheel_metadata_sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "typing-extensions",
+      "version": "4.16.0",
+      "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+      "bytes": 45571,
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "requires_python": ">=3.9",
+      "metadata_sha256": "b05084ca1d50879865178d9fff9fabeab61bdfb1f361bfbde95421ffc8f9be46",
+      "wheel_metadata_sha256": "1b68144734c4b66791f27add5d425f3620775585718a03d0f9b110ba3a4d88db",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "tzdata",
+      "version": "2026.3",
+      "filename": "tzdata-2026.3-py2.py3-none-any.whl",
+      "bytes": 348168,
+      "sha256": "dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931",
+      "requires_python": ">=2",
+      "metadata_sha256": "511c019df477939fe7f4c38e32ad74a570c4ebb05b13fd2fffd0f0f2dbe6f7b1",
+      "wheel_metadata_sha256": "a96107396797a1ff6424b5c05c9d61ba443f32f56d695f545007b0e8ded8f7d1",
+      "target_dependencies": []
+    },
+    {
+      "distribution": "urllib3",
+      "version": "2.7.0",
+      "filename": "urllib3-2.7.0-py3-none-any.whl",
+      "bytes": 131087,
+      "sha256": "9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897",
+      "requires_python": ">=3.10",
+      "metadata_sha256": "66147856d30bbb6bed01c6ce3326d0f48d84ed5f286ac177633a1486b82eace5",
+      "wheel_metadata_sha256": "41c708c5adba6e097513ab8ccb9f1d7865a2fb469e22491a9e01dcc64da459fc",
+      "target_dependencies": []
+    }
+  ]
+}
