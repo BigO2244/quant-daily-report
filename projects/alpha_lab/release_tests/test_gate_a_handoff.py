@@ -6,6 +6,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -456,3 +457,90 @@ def test_compare_rejects_top_level_duplicate_drift(tmp_path: Path, field: str) -
     after.write_bytes(_canonical(value))
     with pytest.raises(handoff.HandoffError):
         handoff.compare_snapshots(before=before.absolute(), after=after.absolute())
+
+
+def _documented_installer() -> str:
+    runbook = (
+        Path(__file__).parents[1] / "RESEARCH_SIGNING_CEREMONY.md"
+    ).read_text(encoding="utf-8")
+    marker = '"$REVIEWED_HANDOFF" "$HANDOFF_TOOL" "$HANDOFF_SHA" <<\'PY\'\n'
+    assert runbook.count(marker) == 1
+    before_installer, after_marker = runbook.split(marker, 1)
+    install_block_prefix = before_installer.rsplit("```bash\n", 1)[1]
+    assert '"$REVIEWED_HANDOFF"' not in install_block_prefix
+    installer = after_marker.split("\nPY\n", 1)[0]
+    assert "os.O_EXCL" in installer
+    assert "oflag=excl" not in runbook
+    return installer
+
+
+def test_documented_tool_installer_is_exclusive_and_target_portable(
+    tmp_path: Path,
+) -> None:
+    installer = _documented_installer()
+    source = tmp_path / "reviewed.py"
+    target = tmp_path / "installed.py"
+    payload = b"print('reviewed')\n"
+    source.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    command = [
+        sys.executable,
+        "-I",
+        "-S",
+        "-B",
+        "-",
+        str(source),
+        str(target),
+        digest,
+    ]
+    first = subprocess.run(
+        command,
+        input=installer,
+        text=True,
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    assert first.returncode == 0, first.stderr
+    assert target.read_bytes() == payload
+    assert stat.S_IMODE(target.stat().st_mode) == 0o444
+    assert target.stat().st_nlink == 1
+
+    second = subprocess.run(
+        command,
+        input=installer,
+        text=True,
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    assert second.returncode != 0
+    assert target.read_bytes() == payload
+
+
+def test_documented_tool_installer_rejects_fifo_without_blocking(
+    tmp_path: Path,
+) -> None:
+    installer = _documented_installer()
+    source = tmp_path / "reviewed-fifo"
+    target = tmp_path / "installed.py"
+    os.mkfifo(source)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-B",
+            "-",
+            str(source),
+            str(target),
+            "0" * 64,
+        ],
+        input=installer,
+        text=True,
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert not target.exists()

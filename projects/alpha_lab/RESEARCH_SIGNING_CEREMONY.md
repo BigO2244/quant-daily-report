@@ -75,12 +75,17 @@ and file must have been absent: no overwrite, rename-replace, repair, or reuse
 is permitted. Production commands execute only that protected path.
 
 Install the reviewed tool before defining any ceremony command from it. This
-Ubuntu command uses `mkdir`'s absent-leaf requirement and GNU `dd
-oflag=excl` (an `O_EXCL` create) rather than a copying command that can
-overwrite. The exact source digest is checked before creation, and the sealed
-target digest and metadata are checked afterward. The `sha256/` parent and all
-of its named ancestors must already pass the root-owner/non-writable loop; a
-failure stops rather than repairing permissions in place:
+Ubuntu command uses `mkdir`'s absent-leaf requirement and a fixed inline
+standard-library installer that opens the target with `O_EXCL`; it does not
+depend on a platform-specific `dd` output flag or a copying command that can
+overwrite. The installer opens the reviewed source without following links,
+requires a single-link regular file, verifies stable bytes against the
+separately approved digest, writes all bytes through the exclusively created
+descriptor, seals the file, and fsyncs the file and parent. The sealed target
+digest and metadata are checked afterward. The `sha256/` parent and all of its
+named ancestors must already pass the root-owner/non-writable loop; a failure
+stops and abandons that content-addressed tool leaf rather than repairing or
+reusing it:
 
 ```bash
 set -euo pipefail
@@ -90,9 +95,6 @@ HANDOFF_SHA=<EXACT_HANDOFF_TOOL_SHA256>
 TOOLS_SHA_ROOT=/var/lib/caerus/gate-a/tools/sha256
 TOOL_DIR="$TOOLS_SHA_ROOT/$HANDOFF_SHA"
 HANDOFF_TOOL="$TOOL_DIR/gate_a_handoff.py"
-
-test "$(/usr/bin/sha256sum "$REVIEWED_HANDOFF" | /usr/bin/cut -d' ' -f1)" = \
-  "$HANDOFF_SHA"
 
 for ancestor in \
   /var /var/lib /var/lib/caerus /var/lib/caerus/gate-a \
@@ -107,10 +109,92 @@ EOF
 done
 
 sudo /usr/bin/mkdir --mode=0755 -- "$TOOL_DIR"
-sudo /usr/bin/dd if="$REVIEWED_HANDOFF" of="$HANDOFF_TOOL" \
-  bs=1048576 oflag=excl conv=fsync status=none
-sudo /usr/bin/chown 0:0 -- "$HANDOFF_TOOL"
-sudo /usr/bin/chmod 0444 -- "$HANDOFF_TOOL"
+sudo /usr/bin/python3.10 -I -S -B - \
+  "$REVIEWED_HANDOFF" "$HANDOFF_TOOL" "$HANDOFF_SHA" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+
+source, target, expected_sha256 = sys.argv[1:]
+read_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+source_fd = os.open(source, read_flags)
+try:
+    before = os.fstat(source_fd)
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        raise SystemExit("reviewed handoff source is not a single-link file")
+    os.set_blocking(source_fd, True)
+    chunks = []
+    while True:
+        chunk = os.read(source_fd, 1024 * 1024)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    after = os.fstat(source_fd)
+    if (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+        before.st_nlink,
+        before.st_uid,
+        before.st_gid,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    ) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_mode,
+        after.st_nlink,
+        after.st_uid,
+        after.st_gid,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ):
+        raise SystemExit("reviewed handoff source changed while reading")
+    payload = b"".join(chunks)
+finally:
+    os.close(source_fd)
+if len(payload) != before.st_size:
+    raise SystemExit("reviewed handoff source short read")
+if hashlib.sha256(payload).hexdigest() != expected_sha256:
+    raise SystemExit("reviewed handoff source hash mismatch")
+
+parent, name = os.path.split(target)
+parent_fd = os.open(
+    parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+)
+target_fd = None
+try:
+    target_fd = os.open(
+        name,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+        0o400,
+        dir_fd=parent_fd,
+    )
+    view = memoryview(payload)
+    while view:
+        written = os.write(target_fd, view)
+        if written <= 0:
+            raise SystemExit("short write while installing handoff tool")
+        view = view[written:]
+    os.fchmod(target_fd, 0o444)
+    os.fsync(target_fd)
+    installed = os.fstat(target_fd)
+    if (
+        not stat.S_ISREG(installed.st_mode)
+        or stat.S_IMODE(installed.st_mode) != 0o444
+        or installed.st_nlink != 1
+        or installed.st_size != len(payload)
+    ):
+        raise SystemExit("installed handoff tool metadata mismatch")
+    os.fsync(parent_fd)
+finally:
+    if target_fd is not None:
+        os.close(target_fd)
+    os.close(parent_fd)
+PY
 sudo /usr/bin/chmod 0555 -- "$TOOL_DIR"
 
 test "$(sudo /usr/bin/sha256sum "$HANDOFF_TOOL" | /usr/bin/cut -d' ' -f1)" = \

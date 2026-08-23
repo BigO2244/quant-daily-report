@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 
-VERSION = "1.0"
+VERSION = "1.1"
 TRANSFER_SCHEMA = "caerus_alpha_lab_gate_a_protected_transfer_v1"
 DIRTY_SCHEMA = "caerus_alpha_lab_dirty_snapshot_v1"
 SEMANTIC_SCHEMA = "caerus_alpha_lab_dirty_snapshot_semantic_v1"
