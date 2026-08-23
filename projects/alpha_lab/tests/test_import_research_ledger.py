@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -22,7 +22,6 @@ from projects.alpha_lab.factory.import_research_ledger import (
     audit_existing,
     bootstrap_inventory,
 )
-from projects.alpha_lab.factory import import_research_ledger as importer_module
 
 
 NOW = datetime(2026, 7, 24, 5, 18, tzinfo=timezone.utc)
@@ -278,13 +277,14 @@ def test_import_write_fails_outside_canonical_gcp_even_with_ratification(tmp_pat
             data_root=data_root,
             inventory=inventory,
             signed_plan={},
+            publication_authorization={},
             identity_history=None,
         )
 
 
-def test_canonical_import_is_idempotent_across_different_migration_times(
-    tmp_path, monkeypatch
-):
+def test_removed_unsigned_bootstrap_signature_is_rejected(tmp_path):
+    """The old mutable/idempotent bootstrap API cannot bypass QS-003."""
+
     with pytest.raises(TypeError):
         bootstrap_inventory(
             repo_root=tmp_path,
@@ -294,105 +294,3 @@ def test_canonical_import_is_idempotent_across_different_migration_times(
             ratification_path=tmp_path / "removed.json",
             recorded_at=NOW,
         )
-    return
-    repo_root, data_root = _fixture(tmp_path)
-    inventory = audit_existing(repo_root=repo_root, data_root=data_root)
-    monkeypatch.setattr(importer_module, "AUTHORITATIVE_REPO_ROOT", repo_root.resolve())
-    monkeypatch.setattr(importer_module, "AUTHORITATIVE_DATA_ROOT", data_root.resolve())
-    monkeypatch.setattr(importer_module, "EXPECTED_CANONICAL_GATE_COUNT", 1)
-    monkeypatch.setattr(
-        importer_module,
-        "EXPECTED_CANONICAL_GATE_STATUSES",
-        {"READY_FOR_FROZEN_EVALUATOR": 1},
-    )
-    monkeypatch.setattr(
-        importer_module,
-        "EXPECTED_CANONICAL_VARIANTS_BY_HYPOTHESIS",
-        {"HYP-2026-006": 2},
-    )
-    monkeypatch.setattr(importer_module, "EXPECTED_CANONICAL_ROBUSTNESS_COUNT", 2)
-    monkeypatch.setattr(
-        importer_module, "EXPECTED_CANONICAL_EXPERIMENT_HYPOTHESES", {"HYP-2026-006"}
-    )
-    ratification_path = tmp_path / "ratification.json"
-    mappings = {
-        hypothesis_id: "FAM-{}".format(hypothesis_id.removeprefix("HYP-"))
-        for hypothesis_id in FROZEN_TRIAL_BUDGETS
-    }
-    definitions = {}
-    for hypothesis_id, family_id in mappings.items():
-        metric = KNOWN_PRIMARY_METRICS[hypothesis_id]
-        definitions[family_id] = {
-            "name": "Imported {}".format(hypothesis_id),
-            "economic_mechanism": "Owner-reviewed synthetic migration fixture.",
-            "primary_metric": metric,
-            "benchmark": "FROZEN_SOURCE_BENCHMARK",
-            "expected_direction": "GREATER_THAN",
-            "null_value": 0.0,
-            "economic_hurdle": 0.0,
-            "primary_variant_id": "primary",
-            "maximum_trial_units": FROZEN_TRIAL_BUDGETS[hypothesis_id],
-            "selection_trial_budget": 0,
-            "within_family_method": "HOLM_BONFERRONI",
-            "family_alpha": 0.10,
-        }
-    ratification = {
-        "decision": "RATIFY_GLOBAL_RESEARCH_LEDGER_MIGRATION",
-        "owner": "Brett Olson",
-        "ratified_at": "2026-08-22T16:00:00Z",
-        "artifact": str(ratification_path.resolve()),
-        "source_receipts": inventory["source_receipts"],
-        "family_mappings": mappings,
-        "family_definitions": definitions,
-        "wave_method": "HOLM_BONFERRONI",
-        "wave_alpha_or_q": 0.05,
-    }
-    bad_ratification = json.loads(json.dumps(ratification))
-    bad_ratification["family_definitions"]["FAM-2026-006"][
-        "maximum_trial_units"
-    ] = 1
-    bad_ratification["artifact_sha256"] = canonical_hash(bad_ratification)
-    _write_json(ratification_path, bad_ratification)
-    with pytest.raises(ContractValidationError, match="trial budget conflicts"):
-        bootstrap_inventory(
-            repo_root=repo_root,
-            data_root=data_root,
-            inventory=inventory,
-            ratification=bad_ratification,
-            ratification_path=ratification_path,
-            recorded_at=NOW,
-        )
-    assert not (data_root / "ledger/research_events.v1.jsonl").exists()
-    ratification["artifact_sha256"] = canonical_hash(ratification)
-    _write_json(ratification_path, ratification)
-    first = bootstrap_inventory(
-        repo_root=repo_root,
-        data_root=data_root,
-        inventory=inventory,
-        ratification=ratification,
-        ratification_path=ratification_path,
-        recorded_at=NOW,
-    )
-    second = bootstrap_inventory(
-        repo_root=repo_root,
-        data_root=data_root,
-        inventory=inventory,
-        ratification=ratification,
-        ratification_path=ratification_path,
-        recorded_at=NOW + timedelta(days=1),
-    )
-    assert first["appended_event_count"] > 0
-    assert second["appended_event_count"] == 0
-    ledger_path = data_root / "ledger/research_events.v1.jsonl"
-    first_event_only = ledger_path.read_bytes().splitlines(keepends=True)[0]
-    ledger_path.write_bytes(first_event_only)
-    with pytest.raises(ContractValidationError, match="automatic repair is forbidden"):
-        bootstrap_inventory(
-            repo_root=repo_root,
-            data_root=data_root,
-            inventory=inventory,
-            ratification=ratification,
-            ratification_path=ratification_path,
-            recorded_at=NOW + timedelta(days=2),
-        )
-    assert ledger_path.read_bytes() == first_event_only

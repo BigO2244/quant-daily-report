@@ -29,7 +29,9 @@ research artifact.
 The public directory is not trusted merely because it is present on disk. A
 registry release carries a root-Ed25519 signature over its exact directory hash
 and monotonically increasing version. The root public key and the current
-registry hash are supplied from a protected, external deployment pin. The
+registry hash are supplied separately from protected external state. Neither
+the root copied inside the history file nor a pin copied into that file may
+authenticate itself. The
 runtime rejects an unanchored registry, a substituted directory, an unavailable
 historical registry hash, a non-newest release, or a rollback that conflicts
 with that external pin.
@@ -70,14 +72,17 @@ child plan differs from the reviewed plan. Until the importer is invoked with
 that anchored plan verifier, it remains in legacy-only mode and must not claim
 authenticated cutover.
 
-Use `import_research_ledger --emit-migration-plan` to emit the canonical
-signing payload. It reads evidence and public JSON only; it cannot sign,
-generate, load, or persist a private key. A write that supplies
-`--identity-registry`, `--identity-trust-anchor`, and
-`--identity-registry-pin` verifies the detached owner attestation against the
-pinned release. The importer returns `LEGACY_IMPORTED_UNAUTHENTICATED` and the
-exact `identity_activation_head_hash`; initialize subsequent ledger work with
-that head so only post-import events require authenticated signatures.
+Use the public-only ceremony in `RESEARCH_SIGNING_CEREMONY.md`. It creates the
+complete migration definition from the exact owner packet and fresh receipts,
+validates full anchored public history, emits deterministic event-plan bytes,
+and finalizes the detached owner signature. A migration signature ratifies the
+legacy plan; it does not publish it. A distinct owner-signed QS-003 artifact
+must bind the signed-plan hash, canonical path, expected bytes/head, fresh
+receipt-set hash, create-only mode, time, active registry, and prior `GENESIS`.
+Only then may the importer perform one canonical GCP create-only publication.
+The importer returns `LEGACY_IMPORTED_UNAUTHENTICATED` and the exact
+`identity_activation_head_hash`; initialize subsequent ledger work with that
+head so only post-import events require authenticated signatures.
 
 ## Operational use
 
@@ -90,6 +95,35 @@ or author–reviewer overlap fails closed.
 
 This control does not authorize GCP writes, purchases, holdout access,
 promotion, allocation, scheduling, deployment, broker behavior, or trading.
+
+## External-signer operator surface
+
+The installed module entry point is:
+
+```bash
+python -m projects.alpha_lab.factory.ceremony --help
+```
+
+Registry, attestation, migration, publication, and projection subcommands all
+emit exact canonical signing bytes, accept detached signatures only, and
+immediately verify them. All histories use
+`caerus_alpha_lab_identity_registry_history_v1` and carry complete contiguous
+signed releases plus the declared external pin. Operational commands require
+the protected root trust-anchor file and external registry hash separately.
+See `RESEARCH_SIGNING_CEREMONY.md` for the complete ceremony and KMS examples.
+
+Every authenticated control-plane invocation that supplies `--ledger` must
+also supply all three inputs below:
+
+```text
+--identity-bundle /protected-review/control_plane_identity_bundle.json
+--identity-trust-anchor /protected-pin/root_trust_anchor.json
+--identity-registry-pin <active-registry-hash>
+```
+
+The loader compares the external anchor byte-for-byte with the public copy in
+the bundle before it verifies every registry release, then compares the
+separate pin with the signed activation plan and active registry directory.
 
 ## Signed projection exports
 

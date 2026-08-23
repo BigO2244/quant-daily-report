@@ -19,14 +19,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from .canonical import canonical_hash, canonical_json, format_datetime, parse_datetime
+from .canonical import (
+    canonical_hash,
+    canonical_json,
+    format_datetime,
+    parse_datetime,
+    require_sha256,
+)
 from .errors import ContractValidationError, ResearchBoundaryError
 from .research_identity import (
     GENESIS_LEDGER_HEAD,
     IdentityActivationEvidence,
     IdentityRegistry,
     IdentityRegistryHistory,
+    IdentityRole,
     IdentityTrustAnchor,
+    ResearchAttestation,
     typed_event_payload_hash,
 )
 from .research_ledger import (
@@ -51,6 +59,20 @@ from .store import AppendOnlyJSONLEventStore, EventRecord
 AUTHORITATIVE_REPO_ROOT = Path("/mnt/disks/alpha-lab/alpha-lab-project")
 AUTHORITATIVE_DATA_ROOT = AUTHORITATIVE_REPO_ROOT / "outputs/research/alpha_lab"
 LEDGER_RELATIVE_PATH = Path("outputs/research/alpha_lab/ledger/research_events.v1.jsonl")
+PUBLICATION_MODE = "CREATE_ONLY_ATOMIC_HARD_LINK"
+PUBLICATION_AUTHORIZATION_RULE = (
+    "The migration-plan signature ratifies legacy semantics but never authorizes "
+    "publication. A distinct Brett-signed QS-003 artifact must bind the signed-plan "
+    "hash, exact canonical path, expected ledger bytes and head, fresh receipt-set "
+    "hash, create-only mode, authorization timestamp, active registry and external "
+    "pin, and prior GENESIS before one publication."
+)
+PUBLICATION_AUTHORIZATION_SCHEMA = (
+    "caerus_alpha_lab_publication_authorization_v1"
+)
+SIGNED_PUBLICATION_AUTHORIZATION_SCHEMA = (
+    "caerus_alpha_lab_signed_publication_authorization_v1"
+)
 LEGACY_WAVE_ID = "WAVE-2026-001"
 LEGACY_CHALLENGE_EPOCH_ID = "CHALLENGE-2026-001"
 _DECLARED_SPEC_HASH = re.compile(r"Spec hash: `sha256:([0-9a-f]{64})`")
@@ -1425,8 +1447,9 @@ def _build_migration_event_plan_and_records(
         "externally_pinned_registry_hash": externally_pinned_registry_hash,
         "publication_contract": {
             "location": "CANONICAL_GCP_ONLY",
-            "mode": "CREATE_ONLY_ATOMIC_HARD_LINK",
-            "owner_signature_authorizes_one_publication": True,
+            "mode": PUBLICATION_MODE,
+            "owner_signature_authorizes_one_publication": False,
+            "separate_publication_authorization_required": True,
             "overwrite_or_repair": False,
         },
     }
@@ -1641,8 +1664,10 @@ def _build_migration_event_plan_and_records(
     ledger_bytes = _ledger_bytes(records)
     terminal_head = records[-1].event_hash
     plan = {
-        "schema_version": "caerus_alpha_lab_migration_event_plan_v2",
         **identity_material,
+        # The plan wrapper has its own schema. The identity sub-hash above
+        # deliberately retains ca..._migration_plan_identity_v1.
+        "schema_version": "caerus_alpha_lab_migration_event_plan_v2",
         "plan_identity_sha256": plan_identity,
         "ordered_events": [_event_descriptor(item) for item in records],
         "expected_event_count": len(records),
@@ -1702,12 +1727,201 @@ def _records_from_plan_and_inventory(
     return list(records), _ledger_bytes(records)
 
 
+def migration_receipt_set_hash(inventory: Mapping[str, Any]) -> str:
+    """Hash every immutable source receipt and the exact canonical census."""
+
+    try:
+        material = {
+            "schema_version": "caerus_alpha_lab_migration_receipt_set_v1",
+            "source_receipts": inventory["source_receipts"],
+            "hypothesis_sources": inventory["hypothesis_sources"],
+            "census": _canonical_census(inventory),
+        }
+    except KeyError as exc:
+        raise ContractValidationError("migration inventory receipt set is incomplete") from exc
+    return canonical_hash(material)
+
+
+def publication_authorization_attestation_context_hash(
+    authorization: Mapping[str, Any],
+) -> str:
+    """Bind QS-003 to one plan, receipt set, path, and GENESIS creation."""
+
+    expected_fields = {
+        "schema_version",
+        "decision",
+        "owner",
+        "authorized_at",
+        "signed_migration_plan_sha256",
+        "migration_plan_sha256",
+        "plan_identity_sha256",
+        "canonical_ledger_path",
+        "expected_ledger_sha256",
+        "expected_event_count",
+        "expected_terminal_head",
+        "identity_activation_head_hash",
+        "fresh_receipt_set_sha256",
+        "publication_mode",
+        "overwrite_or_repair_allowed",
+        "active_registry_hash",
+        "externally_pinned_registry_hash",
+        "prior_ledger_head",
+        "trading_behavior_changed",
+        "promotion_performed",
+    }
+    if set(authorization) != expected_fields:
+        raise ContractValidationError("publication authorization schema is incomplete or mutable")
+    if authorization.get("schema_version") != PUBLICATION_AUTHORIZATION_SCHEMA:
+        raise ContractValidationError("publication authorization schema_version is invalid")
+    if authorization.get("decision") != "AUTHORIZE_CREATE_ONLY_GLOBAL_RESEARCH_LEDGER_PUBLICATION":
+        raise ContractValidationError("publication authorization decision is invalid")
+    if authorization.get("owner") != "Brett Olson":
+        raise ContractValidationError("publication authorization must name Brett Olson")
+    parse_datetime(str(authorization["authorized_at"]))
+    for field in (
+        "signed_migration_plan_sha256",
+        "migration_plan_sha256",
+        "plan_identity_sha256",
+        "expected_ledger_sha256",
+        "expected_terminal_head",
+        "identity_activation_head_hash",
+        "fresh_receipt_set_sha256",
+        "active_registry_hash",
+        "externally_pinned_registry_hash",
+    ):
+        require_sha256(str(authorization[field]), field)
+    if (
+        authorization["publication_mode"] != PUBLICATION_MODE
+        or authorization["overwrite_or_repair_allowed"] is not False
+        or authorization["prior_ledger_head"] != GENESIS_LEDGER_HEAD
+        or authorization["trading_behavior_changed"] is not False
+        or authorization["promotion_performed"] is not False
+    ):
+        raise ContractValidationError("publication authorization weakens create-only boundaries")
+    if authorization["active_registry_hash"] != authorization["externally_pinned_registry_hash"]:
+        raise ContractValidationError("publication authorization does not bind the active external pin")
+    if authorization["expected_terminal_head"] != authorization["identity_activation_head_hash"]:
+        raise ContractValidationError("publication authorization activation head is inconsistent")
+    if not isinstance(authorization["expected_event_count"], int) or authorization["expected_event_count"] < 1:
+        raise ContractValidationError("publication authorization event count is invalid")
+    path = Path(str(authorization["canonical_ledger_path"]))
+    if not path.is_absolute() or ".." in path.parts:
+        raise ContractValidationError("publication authorization path must be exact and absolute")
+    return canonical_hash(
+        {
+            "schema_version": "caerus_alpha_lab_publication_authorization_attestation_context_v1",
+            "authorization": dict(authorization),
+        }
+    )
+
+
+def build_publication_authorization(
+    *,
+    repo_root: Path,
+    inventory: Mapping[str, Any],
+    signed_plan: Mapping[str, Any],
+    identity_history: IdentityRegistryHistory,
+    authorized_at: datetime,
+) -> Dict[str, Any]:
+    """Build the exact QS-003 payload; this function performs no signing."""
+
+    if not isinstance(identity_history, IdentityRegistryHistory):
+        raise ContractValidationError("publication authorization requires pinned public history")
+    activation = IdentityActivationEvidence.from_signed_plan(
+        signed_plan, identity_history=identity_history
+    )
+    plan = activation.plan
+    _validate_canonical_census(inventory)
+    records, expected_bytes = _records_from_plan_and_inventory(
+        plan=plan, inventory=inventory
+    )
+    if hashlib.sha256(expected_bytes).hexdigest() != plan["expected_ledger_sha256"]:
+        raise ContractValidationError("publication authorization rebuilt bytes differ from plan")
+    if authorized_at.tzinfo is None or authorized_at.utcoffset() is None:
+        raise ContractValidationError("publication authorization timestamp must be timezone-aware")
+    if authorized_at < parse_datetime(str(plan["recorded_at"])):
+        raise ContractValidationError("publication authorization predates its migration plan")
+    canonical_path = repo_root.expanduser().resolve() / LEDGER_RELATIVE_PATH
+    result = {
+        "schema_version": PUBLICATION_AUTHORIZATION_SCHEMA,
+        "decision": "AUTHORIZE_CREATE_ONLY_GLOBAL_RESEARCH_LEDGER_PUBLICATION",
+        "owner": "Brett Olson",
+        "authorized_at": format_datetime(authorized_at),
+        "signed_migration_plan_sha256": canonical_hash(signed_plan),
+        "migration_plan_sha256": canonical_hash(plan),
+        "plan_identity_sha256": plan["plan_identity_sha256"],
+        "canonical_ledger_path": str(canonical_path),
+        "expected_ledger_sha256": plan["expected_ledger_sha256"],
+        "expected_event_count": len(records),
+        "expected_terminal_head": plan["expected_terminal_head"],
+        "identity_activation_head_hash": plan["identity_activation_head_hash"],
+        "fresh_receipt_set_sha256": migration_receipt_set_hash(inventory),
+        "publication_mode": PUBLICATION_MODE,
+        "overwrite_or_repair_allowed": False,
+        "active_registry_hash": identity_history.active_registry_hash,
+        "externally_pinned_registry_hash": identity_history.externally_pinned_registry_hash,
+        "prior_ledger_head": GENESIS_LEDGER_HEAD,
+        "trading_behavior_changed": False,
+        "promotion_performed": False,
+    }
+    publication_authorization_attestation_context_hash(result)
+    return result
+
+
+def verify_signed_publication_authorization(
+    value: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    inventory: Mapping[str, Any],
+    signed_plan: Mapping[str, Any],
+    identity_history: IdentityRegistryHistory,
+) -> Dict[str, Any]:
+    """Verify QS-003 against freshly rebuilt public migration evidence."""
+
+    expected_wrapper = {"schema_version", "authorization", "owner_attestation"}
+    if set(value) != expected_wrapper or value.get("schema_version") != SIGNED_PUBLICATION_AUTHORIZATION_SCHEMA:
+        raise ContractValidationError("signed publication authorization wrapper is invalid")
+    raw = value.get("authorization")
+    if not isinstance(raw, Mapping):
+        raise ContractValidationError("signed publication authorization lacks its payload")
+    authorization = dict(raw)
+    authorized_at = parse_datetime(str(authorization.get("authorized_at", "")))
+    expected = build_publication_authorization(
+        repo_root=repo_root,
+        inventory=inventory,
+        signed_plan=signed_plan,
+        identity_history=identity_history,
+        authorized_at=authorized_at,
+    )
+    if canonical_hash(expected) != canonical_hash(authorization):
+        raise ContractValidationError(
+            "publication authorization differs from fresh plan, receipts, path, or registry"
+        )
+    try:
+        attestation = ResearchAttestation.from_dict(value["owner_attestation"])
+        identity_history.verify(
+            attestation,
+            expected_role=IdentityRole.OWNER_RATIFIER,
+            artifact_sha256=canonical_hash(authorization),
+            ledger_head_hash=GENESIS_LEDGER_HEAD,
+            context_sha256=publication_authorization_attestation_context_hash(authorization),
+            recorded_at=authorized_at,
+            for_new_event=True,
+        )
+    except (KeyError, ContractValidationError) as exc:
+        raise ContractValidationError(
+            "publication authorization lacks a valid active-registry owner signature"
+        ) from exc
+    return authorization
+
+
 def publish_signed_migration_plan(
     *,
     repo_root: Path,
     data_root: Path,
     inventory: Mapping[str, Any],
     signed_plan: Mapping[str, Any],
+    publication_authorization: Mapping[str, Any],
     identity_history: IdentityRegistryHistory,
 ) -> Dict[str, Any]:
     """Create the canonical ledger exactly once from an active-registry signature."""
@@ -1736,12 +1950,32 @@ def publish_signed_migration_plan(
     if hashlib.sha256(expected_bytes).hexdigest() != plan["expected_ledger_sha256"]:
         raise ContractValidationError("rebuilt ledger bytes differ from the signed plan")
     activation.verify_legacy_records(records)
+    verified_authorization = verify_signed_publication_authorization(
+        publication_authorization,
+        repo_root=repo_root,
+        inventory=fresh_inventory,
+        signed_plan=signed_plan,
+        identity_history=identity_history,
+    )
     canonical_path = repo_root / LEDGER_RELATIVE_PATH
     if canonical_path.exists() or canonical_path.is_symlink():
         raise ContractValidationError(
             "canonical ledger already exists; create-only publication forbids repair or overwrite"
         )
-    canonical_path.parent.mkdir(parents=False, exist_ok=True)
+    ledger_directory = canonical_path.parent
+    if ledger_directory.exists():
+        if ledger_directory.is_symlink() or not ledger_directory.is_dir():
+            raise ResearchBoundaryError(
+                "canonical ledger directory must be a real directory, not a symlink"
+            )
+    else:
+        ledger_directory.mkdir(parents=False, exist_ok=False, mode=0o700)
+    try:
+        ledger_directory.resolve(strict=True).relative_to(data_root)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise ResearchBoundaryError(
+            "canonical ledger directory escapes the authoritative data root"
+        ) from exc
     with tempfile.TemporaryDirectory(prefix=".signed-ledger-", dir=str(data_root)) as directory:
         scratch = Path(directory) / "research_events.v1.jsonl"
         descriptor = os.open(str(scratch), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -1774,12 +2008,14 @@ def publish_signed_migration_plan(
     return {
         "schema_version": "caerus_alpha_lab_authenticated_migration_publication_v1",
         "plan_identity_sha256": plan["plan_identity_sha256"],
-        "signed_plan_sha256": canonical_hash(plan),
+        "migration_plan_sha256": canonical_hash(plan),
+        "signed_migration_plan_sha256": canonical_hash(signed_plan),
+        "publication_authorization_sha256": canonical_hash(verified_authorization),
         "published_event_count": len(records),
         "identity_activation_head_hash": plan["identity_activation_head_hash"],
         "ledger_sha256": plan["expected_ledger_sha256"],
         "legacy_import_identity_status": "LEGACY_IMPORTED_UNAUTHENTICATED",
-        "publication_mode": "CREATE_ONLY_ATOMIC_HARD_LINK",
+        "publication_mode": PUBLICATION_MODE,
         "promotion_performed": False,
         "trading_behavior_changed": False,
     }
@@ -1791,6 +2027,7 @@ def bootstrap_inventory(
     data_root: Path,
     inventory: Mapping[str, Any],
     signed_plan: Mapping[str, Any],
+    publication_authorization: Mapping[str, Any],
     identity_history: IdentityRegistryHistory,
 ) -> Dict[str, Any]:
     """Compatibility name for the strict signed create-only publisher."""
@@ -1800,6 +2037,7 @@ def bootstrap_inventory(
         data_root=data_root,
         inventory=inventory,
         signed_plan=signed_plan,
+        publication_authorization=publication_authorization,
         identity_history=identity_history,
     )
 
@@ -1812,6 +2050,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--emit-migration-plan", action="store_true")
     parser.add_argument("--migration-definition", type=Path)
     parser.add_argument("--signed-migration-plan", type=Path)
+    parser.add_argument("--signed-publication-authorization", type=Path)
     parser.add_argument("--identity-registry", type=Path, action="append")
     parser.add_argument("--identity-trust-anchor", type=Path)
     parser.add_argument("--identity-registry-pin")
@@ -1852,15 +2091,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             raise ContractValidationError(
                 "--emit-migration-plan and --write are mutually exclusive"
             )
-        if args.migration_definition is None or args.identity_registry_pin is None:
+        if (
+            args.migration_definition is None
+            or not args.identity_registry
+            or args.identity_trust_anchor is None
+            or args.identity_registry_pin is None
+        ):
             raise ContractValidationError(
-                "--emit-migration-plan requires --migration-definition and --identity-registry-pin"
+                "--emit-migration-plan requires --migration-definition, full --identity-registry history, "
+                "--identity-trust-anchor, and the separately supplied --identity-registry-pin"
             )
+        history = _load_identity_history(
+            registry_paths=args.identity_registry,
+            trust_anchor_path=args.identity_trust_anchor,
+            external_pin=args.identity_registry_pin,
+        )
         plan = build_migration_event_plan(
             inventory=inventory,
             migration_definition=_load_json(args.migration_definition),
-            active_registry_hash=args.identity_registry_pin,
-            externally_pinned_registry_hash=args.identity_registry_pin,
+            active_registry_hash=history.active_registry_hash,
+            externally_pinned_registry_hash=history.externally_pinned_registry_hash,
         )
         print(canonical_json(plan))
         return 0
@@ -1869,12 +2119,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     if (
         args.signed_migration_plan is None
+        or args.signed_publication_authorization is None
         or not args.identity_registry
         or args.identity_trust_anchor is None
         or args.identity_registry_pin is None
     ):
         raise ContractValidationError(
-            "--write requires --signed-migration-plan, --identity-registry, "
+            "--write requires --signed-migration-plan, --signed-publication-authorization, --identity-registry, "
             "--identity-trust-anchor, and --identity-registry-pin"
         )
     history = _load_identity_history(
@@ -1887,6 +2138,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         data_root=args.data_root,
         inventory=inventory,
         signed_plan=_load_json(args.signed_migration_plan),
+        publication_authorization=_load_json(args.signed_publication_authorization),
         identity_history=history,
     )
     print(canonical_json(report))

@@ -89,7 +89,10 @@ def _reject_private_material(value: Any, *, path: str = "$") -> None:
 
 
 def load_identity_bundle(
-    *, bundle_path: Path, external_registry_pin: str
+    *,
+    bundle_path: Path,
+    external_registry_pin: str,
+    external_trust_anchor_path: Path,
 ) -> tuple[IdentityRegistryHistory, IdentityActivationEvidence]:
     """Load public registry history and verified signed activation evidence."""
 
@@ -106,24 +109,28 @@ def load_identity_bundle(
     anchor_raw = raw["identity_trust_anchor"]
     if not isinstance(anchor_raw, Mapping):
         raise ContractValidationError("identity bundle trust anchor is invalid")
-    anchor = IdentityTrustAnchor(
-        anchor_id=str(anchor_raw["anchor_id"]),
-        root_key_id=str(anchor_raw["root_key_id"]),
-        root_public_key_pem=str(anchor_raw["root_public_key_pem"]),
-        expected_registry_id=str(anchor_raw["expected_registry_id"]),
-        schema_version=str(
-            anchor_raw.get(
-                "schema_version", "caerus_alpha_lab_identity_trust_anchor_v1"
-            )
-        ),
-    )
+    embedded_anchor = IdentityTrustAnchor.from_dict(anchor_raw)
+    external_anchor_raw = strict_load_json_object(external_trust_anchor_path)
+    _reject_private_material(external_anchor_raw)
+    external_anchor = IdentityTrustAnchor.from_dict(external_anchor_raw)
+    if canonical_json(embedded_anchor.to_dict()) != canonical_json(external_anchor.to_dict()):
+        raise ContractValidationError(
+            "separately supplied trust anchor rejects identity bundle"
+        )
     registry_payloads = raw["identity_registries"]
     if not isinstance(registry_payloads, list) or not registry_payloads:
         raise ContractValidationError("identity bundle requires registry history")
-    registries = tuple(
-        IdentityRegistry.from_dict(item, trust_anchor=anchor)
-        for item in registry_payloads
-    )
+    parsed_registries = []
+    for item in registry_payloads:
+        if not isinstance(item, Mapping):
+            raise ContractValidationError("identity bundle registry is invalid")
+        registry = IdentityRegistry.from_dict(item, trust_anchor=external_anchor)
+        if canonical_json(item) != canonical_json(registry.to_dict()):
+            raise ContractValidationError(
+                "identity bundle registry is not in canonical complete form"
+            )
+        parsed_registries.append(registry)
+    registries = tuple(parsed_registries)
     history = IdentityRegistryHistory(
         registries=registries,
         active_registry_hash=external_registry_pin,
@@ -152,16 +159,23 @@ def open_authenticated_global_ledger(
     research_root: Path,
     identity_bundle: Optional[Path],
     identity_registry_pin: Optional[str],
+    identity_trust_anchor: Optional[Path],
 ) -> GlobalResearchLedger:
     """Open a canonical ledger only with pinned registry and signed activation."""
 
-    if identity_bundle is None or identity_registry_pin is None:
+    if (
+        identity_bundle is None
+        or identity_registry_pin is None
+        or identity_trust_anchor is None
+    ):
         raise ContractValidationError(
-            "canonical research ledger requires --identity-bundle and "
-            "--identity-registry-pin"
+            "canonical research ledger requires --identity-bundle, "
+            "--identity-trust-anchor, and --identity-registry-pin"
         )
     history, activation = load_identity_bundle(
-        bundle_path=identity_bundle, external_registry_pin=identity_registry_pin
+        bundle_path=identity_bundle,
+        external_registry_pin=identity_registry_pin,
+        external_trust_anchor_path=identity_trust_anchor,
     )
     ledger = GlobalResearchLedger(
         ledger_path,

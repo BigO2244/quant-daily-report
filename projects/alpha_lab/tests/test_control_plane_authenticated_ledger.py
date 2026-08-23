@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from projects.alpha_lab.control_plane.authenticated_ledger import (
     EVENT_ATTESTATION_SCHEMA,
     IDENTITY_BUNDLE_SCHEMA,
+    load_identity_bundle,
     strict_load_json_object_bytes,
     strict_load_json_object,
 )
@@ -354,6 +356,7 @@ def _signed_migration_plan(
         "externally_pinned_registry_hash": registry.registry_hash,
         "publication_contract": {"mode": "test_create_only"},
         "ordered_events": descriptors,
+        "expected_event_count": len(records),
         "expected_terminal_head": terminal_head,
         "identity_activation_head_hash": terminal_head,
         "expected_ledger_sha256": _ledger_sha256(ledger.store.path),
@@ -657,6 +660,8 @@ def test_authenticated_recovery_appends_only_with_detached_event_attestation(
         anchor=anchor,
         signed_plan=signed_plan,
     )
+    trust_anchor_path = data_root / "identity" / "root-trust-anchor.json"
+    _write_json(trust_anchor_path, anchor.to_dict())
 
     with pytest.raises(ContractValidationError, match="missing detached event attestation"):
         control_plane_main(
@@ -672,6 +677,8 @@ def test_authenticated_recovery_appends_only_with_detached_event_attestation(
                 str(repo_root),
                 "--identity-bundle",
                 str(identity_bundle),
+                "--identity-trust-anchor",
+                str(trust_anchor_path),
                 "--identity-registry-pin",
                 registry.registry_hash,
                 "--at",
@@ -703,6 +710,8 @@ def test_authenticated_recovery_appends_only_with_detached_event_attestation(
                 str(repo_root),
                 "--identity-bundle",
                 str(identity_bundle),
+                "--identity-trust-anchor",
+                str(trust_anchor_path),
                 "--identity-registry-pin",
                 registry.registry_hash,
                 "--event-attestation",
@@ -728,3 +737,64 @@ def test_authenticated_recovery_appends_only_with_detached_event_attestation(
     ).store.read_all()
     assert records[-1].schema_version == "caerus_alpha_lab_event_v2"
     assert records[-1].event_attestation["identity_id"] == "research.author"
+
+
+def test_identity_bundle_rejects_substituted_external_root(tmp_path):
+    repo_root, data_root = _repo(tmp_path)
+    registry, anchor, signers = _registry()
+    ledger = _seed_legacy_ledger(data_root, _spec())
+    signed_plan = _signed_migration_plan(
+        ledger=ledger, registry=registry, signer=signers["owner"]
+    )
+    bundle = data_root / "identity" / "bundle.json"
+    _identity_bundle(bundle, registry=registry, anchor=anchor, signed_plan=signed_plan)
+    wrong_private = Ed25519PrivateKey.generate()
+    wrong_anchor = IdentityTrustAnchor(
+        anchor_id=anchor.anchor_id,
+        root_key_id=anchor.root_key_id,
+        root_public_key_pem=wrong_private.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8"),
+        expected_registry_id=anchor.expected_registry_id,
+    )
+    wrong_path = repo_root / "protected-wrong-anchor.json"
+    _write_json(wrong_path, wrong_anchor.to_dict())
+    with pytest.raises(ContractValidationError, match="trust anchor rejects"):
+        load_identity_bundle(
+            bundle_path=bundle,
+            external_registry_pin=registry.registry_hash,
+            external_trust_anchor_path=wrong_path,
+        )
+
+
+def test_identity_bundle_rejects_unsigned_schema_extensions(tmp_path):
+    repo_root, data_root = _repo(tmp_path)
+    registry, anchor, signers = _registry()
+    ledger = _seed_legacy_ledger(data_root, _spec())
+    signed_plan = _signed_migration_plan(
+        ledger=ledger, registry=registry, signer=signers["owner"]
+    )
+    bundle = data_root / "identity" / "bundle.json"
+    _identity_bundle(bundle, registry=registry, anchor=anchor, signed_plan=signed_plan)
+    anchor_path = repo_root / "protected-root-anchor.json"
+    _write_json(anchor_path, anchor.to_dict())
+    raw = strict_load_json_object(bundle)
+
+    changed_registry = copy.deepcopy(raw)
+    changed_registry["identity_registries"][0]["unsigned_extension"] = True
+    changed_wrapper = copy.deepcopy(raw)
+    changed_wrapper["signed_migration_plan"]["unsigned_extension"] = True
+    changed_plan = copy.deepcopy(raw)
+    changed_plan["signed_migration_plan"]["plan"]["unsigned_extension"] = True
+    for index, changed in enumerate(
+        (changed_registry, changed_wrapper, changed_plan), start=1
+    ):
+        changed_path = data_root / "identity" / "changed-{}.json".format(index)
+        _write_json(changed_path, changed)
+        with pytest.raises(ContractValidationError):
+            load_identity_bundle(
+                bundle_path=changed_path,
+                external_registry_pin=registry.registry_hash,
+                external_trust_anchor_path=anchor_path,
+            )

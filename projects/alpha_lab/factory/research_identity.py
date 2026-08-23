@@ -63,6 +63,8 @@ class IdentityTrustAnchor:
     schema_version: str = "caerus_alpha_lab_identity_trust_anchor_v1"
 
     def __post_init__(self) -> None:
+        if self.schema_version != "caerus_alpha_lab_identity_trust_anchor_v1":
+            raise ContractValidationError("identity trust-anchor schema is invalid")
         _require_identifier(self.anchor_id, "anchor_id", _IDENTITY_ID)
         _require_identifier(self.root_key_id, "root_key_id", _KEY_ID)
         _require_identifier(self.expected_registry_id, "expected_registry_id", _IDENTITY_ID)
@@ -75,6 +77,40 @@ class IdentityTrustAnchor:
             raise ContractValidationError("trust-anchor public key PEM is invalid") from exc
         if not isinstance(public_key, Ed25519PublicKey):
             raise ContractValidationError("trust-anchor key must use Ed25519")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return the complete public trust anchor with no secret material."""
+
+        return {
+            "schema_version": self.schema_version,
+            "anchor_id": self.anchor_id,
+            "root_key_id": self.root_key_id,
+            "root_public_key_pem": self.root_public_key_pem,
+            "expected_registry_id": self.expected_registry_id,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "IdentityTrustAnchor":
+        expected = {
+            "schema_version",
+            "anchor_id",
+            "root_key_id",
+            "root_public_key_pem",
+            "expected_registry_id",
+        }
+        if (
+            set(value) != expected
+            or value.get("schema_version")
+            != "caerus_alpha_lab_identity_trust_anchor_v1"
+        ):
+            raise ContractValidationError("identity trust-anchor schema is invalid")
+        return cls(
+            schema_version=str(value["schema_version"]),
+            anchor_id=str(value["anchor_id"]),
+            root_key_id=str(value["root_key_id"]),
+            root_public_key_pem=str(value["root_public_key_pem"]),
+            expected_registry_id=str(value["expected_registry_id"]),
+        )
 
 
 @dataclass(frozen=True)
@@ -92,6 +128,8 @@ class RegistryRelease:
     schema_version: str = "caerus_alpha_lab_identity_registry_release_v2"
 
     def __post_init__(self) -> None:
+        if self.schema_version != "caerus_alpha_lab_identity_registry_release_v2":
+            raise ContractValidationError("registry release schema_version is invalid")
         _require_identifier(self.registry_id, "registry_id", _IDENTITY_ID)
         require_sha256(self.registry_hash, "registry_hash")
         if not isinstance(self.version, int) or self.version < 1:
@@ -127,6 +165,37 @@ class RegistryRelease:
             "previous_registry_hash": self.previous_registry_hash,
             "previous_release_hash": self.previous_release_hash,
         }
+
+    @classmethod
+    def prepare_signed_payload(
+        cls,
+        *,
+        registry_id: str,
+        registry_hash: str,
+        version: int,
+        released_at: datetime,
+        root_key_id: str,
+        previous_registry_hash: Optional[str] = None,
+        previous_release_hash: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build the exact root-signing payload through the release contract.
+
+        The placeholder is never emitted as a release and is used only so the
+        same field validation and canonical payload implementation serves both
+        preparation and final verification.
+        """
+
+        placeholder = cls(
+            registry_id=registry_id,
+            registry_hash=registry_hash,
+            version=version,
+            released_at=released_at,
+            root_key_id=root_key_id,
+            signature_b64=base64.b64encode(b"\x00" * 64).decode("ascii"),
+            previous_registry_hash=previous_registry_hash,
+            previous_release_hash=previous_release_hash,
+        )
+        return placeholder.signed_payload()
 
     @property
     def release_hash(self) -> str:
@@ -244,6 +313,8 @@ class IdentityKey:
     schema_version: str = "caerus_alpha_lab_identity_key_v1"
 
     def __post_init__(self) -> None:
+        if self.schema_version != "caerus_alpha_lab_identity_key_v1":
+            raise ContractValidationError("identity key schema_version is invalid")
         _require_identifier(self.identity_id, "identity_id", _IDENTITY_ID)
         _require_identifier(self.subject_id, "subject_id", _IDENTITY_ID)
         _require_identifier(self.key_id, "key_id", _KEY_ID)
@@ -328,6 +399,8 @@ class ResearchAttestation:
     schema_version: str = "caerus_alpha_lab_research_attestation_v1"
 
     def __post_init__(self) -> None:
+        if self.schema_version != "caerus_alpha_lab_research_attestation_v1":
+            raise ContractValidationError("attestation schema_version is invalid")
         _require_identifier(self.identity_id, "identity_id", _IDENTITY_ID)
         _require_identifier(self.key_id, "key_id", _KEY_ID)
         if not isinstance(self.role, IdentityRole):
@@ -364,18 +437,39 @@ class ResearchAttestation:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "ResearchAttestation":
-        return cls(
-            identity_id=str(value["identity_id"]),
-            key_id=str(value["key_id"]),
-            role=IdentityRole(value["role"]),
-            artifact_sha256=str(value["artifact_sha256"]),
-            ledger_head_hash=str(value["ledger_head_hash"]),
-            context_sha256=str(value["context_sha256"]),
-            attested_at=parse_datetime(str(value["attested_at"])),
-            signature_b64=str(value["signature_b64"]),
-            registry_hash=str(value["registry_hash"]),
-            schema_version=str(value.get("schema_version", "caerus_alpha_lab_research_attestation_v1")),
-        )
+        expected_fields = {
+            "schema_version",
+            "identity_id",
+            "key_id",
+            "role",
+            "artifact_sha256",
+            "ledger_head_hash",
+            "context_sha256",
+            "attested_at",
+            "registry_hash",
+            "signature_b64",
+        }
+        if set(value) != expected_fields:
+            raise ContractValidationError(
+                "attestation fields are incomplete or mutable"
+            )
+        if value.get("schema_version") != "caerus_alpha_lab_research_attestation_v1":
+            raise ContractValidationError("attestation schema_version is invalid")
+        try:
+            return cls(
+                identity_id=str(value["identity_id"]),
+                key_id=str(value["key_id"]),
+                role=IdentityRole(value["role"]),
+                artifact_sha256=str(value["artifact_sha256"]),
+                ledger_head_hash=str(value["ledger_head_hash"]),
+                context_sha256=str(value["context_sha256"]),
+                attested_at=parse_datetime(str(value["attested_at"])),
+                signature_b64=str(value["signature_b64"]),
+                registry_hash=str(value["registry_hash"]),
+                schema_version=str(value["schema_version"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ContractValidationError("attestation payload is invalid") from exc
 
 
 class IdentityRegistry:
@@ -535,19 +629,32 @@ class IdentityRegistry:
                 if release_raw is not None
                 else None
             )
-            return cls(
+            registry = cls(
                 registry_id=str(value["registry_id"]),
                 keys=keys,
                 issued_at=parse_datetime(str(value["issued_at"])),
                 release=release,
                 trust_anchor=trust_anchor,
             )
+            if canonical_json(value) != canonical_json(registry.to_dict()):
+                raise ContractValidationError(
+                    "identity registry payload is not in canonical complete form"
+                )
+            return registry
+        except ContractValidationError:
+            raise
         except (KeyError, TypeError, ValueError) as exc:
             raise ContractValidationError("identity registry payload is invalid") from exc
 
     @property
     def registry_hash(self) -> str:
         return canonical_hash(self.directory_dict())
+
+    @property
+    def keys(self) -> tuple[IdentityKey, ...]:
+        """Immutable public key records in this directory release."""
+
+        return self._keys
 
     @property
     def is_anchored(self) -> bool:
@@ -837,6 +944,12 @@ class IdentityRegistryHistory:
     def registry_hash(self) -> str:
         return self.active_registry_hash
 
+    @property
+    def registries(self) -> tuple[IdentityRegistry, ...]:
+        """Contiguous signed releases in version order."""
+
+        return self._ordered
+
     def resolve(self, registry_hash: str) -> IdentityRegistry:
         try:
             return self._registries[registry_hash]
@@ -889,6 +1002,84 @@ class IdentityRegistryHistory:
         registry = self.resolve(registry_hash or self.active_registry_hash)
         return registry.subject_id_for(identity_id=identity_id, key_id=key_id)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Export one complete, externally pinned public registry history."""
+
+        active = self.resolve(self.active_registry_hash)
+        assert active.trust_anchor is not None
+        return {
+            "schema_version": "caerus_alpha_lab_identity_registry_history_v1",
+            "active_registry_hash": self.active_registry_hash,
+            "externally_pinned_registry_hash": self.externally_pinned_registry_hash,
+            "trust_anchor": active.trust_anchor.to_dict(),
+            "registries": [registry.to_dict() for registry in self._ordered],
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        value: Mapping[str, Any],
+        *,
+        externally_supplied_pin: Optional[str] = None,
+        externally_supplied_trust_anchor: Optional[IdentityTrustAnchor] = None,
+    ) -> "IdentityRegistryHistory":
+        """Load full public history and optionally require a separate pin."""
+
+        expected = {
+            "schema_version",
+            "active_registry_hash",
+            "externally_pinned_registry_hash",
+            "trust_anchor",
+            "registries",
+        }
+        if (
+            set(value) != expected
+            or value.get("schema_version")
+            != "caerus_alpha_lab_identity_registry_history_v1"
+        ):
+            raise ContractValidationError("identity registry-history schema is invalid")
+        anchor_raw = value.get("trust_anchor")
+        registries_raw = value.get("registries")
+        if not isinstance(anchor_raw, Mapping):
+            raise ContractValidationError("identity registry history lacks a trust anchor")
+        if not isinstance(registries_raw, list) or not registries_raw or not all(
+            isinstance(item, Mapping) for item in registries_raw
+        ):
+            raise ContractValidationError("identity registry history lacks signed releases")
+        active = str(value["active_registry_hash"])
+        declared_pin = str(value["externally_pinned_registry_hash"])
+        if externally_supplied_pin is not None:
+            require_sha256(externally_supplied_pin, "externally_supplied_pin")
+            if externally_supplied_pin != declared_pin or externally_supplied_pin != active:
+                raise ContractValidationError(
+                    "separately supplied external pin rejects registry history"
+                )
+        anchor = IdentityTrustAnchor.from_dict(anchor_raw)
+        if (
+            externally_supplied_trust_anchor is not None
+            and canonical_hash(externally_supplied_trust_anchor.to_dict())
+            != canonical_hash(anchor.to_dict())
+        ):
+            raise ContractValidationError(
+                "separately supplied trust anchor rejects registry history"
+            )
+        registries = tuple(
+            IdentityRegistry.from_dict(item, trust_anchor=anchor)
+            for item in registries_raw
+        )
+        history = cls(
+            registries=registries,
+            active_registry_hash=active,
+            externally_pinned_registry_hash=declared_pin,
+        )
+        # Exercise canonical serialization so no tolerated input ambiguity can
+        # survive into a signing or handoff ceremony.
+        if canonical_hash(history.to_dict()) != canonical_hash(value):
+            raise ContractValidationError(
+                "identity registry history is not in canonical complete form"
+            )
+        return history
+
 
 class IdentityActivationEvidence:
     """Verified signed evidence for one legacy-to-authenticated cutover.
@@ -923,7 +1114,11 @@ class IdentityActivationEvidence:
         *,
         identity_history: IdentityRegistryHistory,
     ) -> "IdentityActivationEvidence":
-        if value.get("schema_version") != "caerus_alpha_lab_signed_migration_plan_v1":
+        if (
+            set(value) != {"schema_version", "plan", "owner_attestation"}
+            or value.get("schema_version")
+            != "caerus_alpha_lab_signed_migration_plan_v1"
+        ):
             raise ContractValidationError("signed migration plan wrapper is invalid")
         plan = value.get("plan")
         if not isinstance(plan, Mapping):
@@ -951,6 +1146,20 @@ class IdentityActivationEvidence:
             "externally_pinned_registry_hash",
             "publication_contract",
         )
+        expected_plan_fields = set(identity_fields).union(
+            {
+                "plan_identity_sha256",
+                "ordered_events",
+                "expected_event_count",
+                "expected_terminal_head",
+                "identity_activation_head_hash",
+                "expected_ledger_sha256",
+            }
+        )
+        if set(plan) != expected_plan_fields:
+            raise ContractValidationError(
+                "migration event plan fields are incomplete or mutable"
+            )
         try:
             identity_material = {key: plan[key] for key in identity_fields}
         except KeyError as exc:
@@ -981,6 +1190,8 @@ class IdentityActivationEvidence:
             )
         if len({str(item["event_id"]) for item in events}) != len(events):
             raise ContractValidationError("migration event plan has duplicate event IDs")
+        if plan.get("expected_event_count") != len(events):
+            raise ContractValidationError("migration event plan count is inconsistent")
         previous: Optional[str] = None
         for item in events:
             require_non_empty(str(item["event_id"]), "event_id")

@@ -122,6 +122,7 @@ def _canonical_ledger(
     *,
     identity_bundle: Optional[Path],
     identity_registry_pin: Optional[str],
+    identity_trust_anchor: Optional[Path],
 ) -> GlobalResearchLedger:
     if ledger_path is None:
         raise ContractValidationError("--ledger is required for decision-grade lifecycle work")
@@ -135,6 +136,7 @@ def _canonical_ledger(
         research_root=data_root,
         identity_bundle=identity_bundle,
         identity_registry_pin=identity_registry_pin,
+        identity_trust_anchor=identity_trust_anchor,
     )
 
 
@@ -225,6 +227,7 @@ def _parser() -> argparse.ArgumentParser:
 
     def add_identity_arguments(command: argparse.ArgumentParser) -> None:
         command.add_argument("--identity-bundle", type=Path)
+        command.add_argument("--identity-trust-anchor", type=Path)
         command.add_argument("--identity-registry-pin")
 
     def add_event_attestation_arguments(command: argparse.ArgumentParser) -> None:
@@ -293,6 +296,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 args.ledger,
                 identity_bundle=args.identity_bundle,
                 identity_registry_pin=args.identity_registry_pin,
+                identity_trust_anchor=args.identity_trust_anchor,
             )
             if draft.get("research_verdict") == "EVIDENCE_READY_FOR_OWNER_REVIEW"
             else None
@@ -319,6 +323,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 args.ledger,
                 identity_bundle=args.identity_bundle,
                 identity_registry_pin=args.identity_registry_pin,
+                identity_trust_anchor=args.identity_trust_anchor,
             )
             if candidate.research_verdict.value == "EVIDENCE_READY_FOR_OWNER_REVIEW"
             else None
@@ -337,6 +342,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 args.ledger,
                 identity_bundle=args.identity_bundle,
                 identity_registry_pin=args.identity_registry_pin,
+                identity_trust_anchor=args.identity_trust_anchor,
             )
             if any(
                 item.research_verdict.value == "EVIDENCE_READY_FOR_OWNER_REVIEW"
@@ -369,6 +375,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             args.ledger,
             identity_bundle=args.identity_bundle,
             identity_registry_pin=args.identity_registry_pin,
+            identity_trust_anchor=args.identity_trust_anchor,
         )
         event_attestations = load_event_attestations(args.event_attestation)
         result = reconcile_finalized_evaluator_bundle(
@@ -391,6 +398,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             args.ledger,
             identity_bundle=args.identity_bundle,
             identity_registry_pin=args.identity_registry_pin,
+            identity_trust_anchor=args.identity_trust_anchor,
         )
         event_attestations = load_event_attestations(args.event_attestation)
         phase = EvaluationPhase(args.phase)

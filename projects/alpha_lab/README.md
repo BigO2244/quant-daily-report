@@ -55,6 +55,8 @@ the frozen test executed, say `RUN EXPERIMENT`.
   authoritative GCP paths.
 - `CONTROL_PLANE.md` — end-to-end research, licensed-data, Shadow checkpoint,
   and CIO Paper-nomination workflow.
+- `RESEARCH_SIGNING_CEREMONY.md` — public-only registry, detached attestation,
+  migration/QS-003 publication, and signed-projection operator workflow.
 - `control_plane/` — generic evaluator contract, lifecycle assessor, paid-data
   requests, and deterministic CIO queue generation.
 
@@ -122,10 +124,17 @@ Shadow activation, registry changes, or promotions.
 
 ```bash
 python -m projects.alpha_lab.control_plane.cli build-queue \
-  --candidate /path/to/sealed_candidate_snapshot.json
+  --candidate /path/to/sealed_candidate_snapshot.json \
+  --ledger /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
+  --identity-bundle /protected-review/control_plane_identity_bundle.json \
+  --identity-trust-anchor /protected-pin/root_trust_anchor.json \
+  --identity-registry-pin <active-registry-hash> \
+  --repo-root /mnt/disks/alpha-lab/alpha-lab-project
 ```
 
 Persisted queue bundles must be built on the authoritative GCP research root.
+The trust anchor and registry pin are supplied separately; public copies inside
+the identity bundle cannot authenticate themselves.
 See `CONTROL_PLANE.md` for the lifecycle, adapter contract, data-request packet,
 and Paper nomination gates.
 

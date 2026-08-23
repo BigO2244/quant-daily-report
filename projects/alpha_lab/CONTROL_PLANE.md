@@ -75,10 +75,19 @@ be used to override the research strategy registry or roadmap.
 Create a draft from `templates/CANDIDATE_SNAPSHOT.json`, omit
 `source_snapshot_hash`, and seal it:
 
+Every control-plane command that opens the canonical ledger requires three
+independent public trust inputs: the ceremony-built identity bundle, the
+protected root trust-anchor file, and the active registry hash copied from
+protected external state. The root and pin embedded in a bundle never trust
+themselves.
+
 ```bash
 python -m projects.alpha_lab.control_plane.cli seal-candidate \
   --draft /path/to/candidate_draft.json \
   --ledger /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
+  --identity-bundle /protected-review/control_plane_identity_bundle.json \
+  --identity-trust-anchor /protected-pin/root_trust_anchor.json \
+  --identity-registry-pin <active-registry-hash> \
   --repo-root /mnt/disks/alpha-lab/alpha-lab-project \
   > /path/to/sealed_candidate_response.json
 ```
@@ -141,6 +150,9 @@ python -m projects.alpha_lab.control_plane.cli reconcile-evaluator-bundle \
   --bundle /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/control_plane/evaluator_runs/<HYP-ID>/<date>/<bundle-id> \
   --spec /mnt/disks/alpha-lab/alpha-lab-project/projects/alpha_lab/experiments/evaluator_specs/<HYP-ID>.json \
   --ledger /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
+  --identity-bundle /protected-review/control_plane_identity_bundle.json \
+  --identity-trust-anchor /protected-pin/root_trust_anchor.json \
+  --identity-registry-pin <active-registry-hash> \
   --repo-root /mnt/disks/alpha-lab/alpha-lab-project
 ```
 
@@ -166,6 +178,9 @@ python -m projects.alpha_lab.control_plane.cli run-evaluator \
   --phase DISCOVERY \
   --trial-id FAM-YYYY-NNN-T001 \
   --ledger /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
+  --identity-bundle /protected-review/control_plane_identity_bundle.json \
+  --identity-trust-anchor /protected-pin/root_trust_anchor.json \
+  --identity-registry-pin <active-registry-hash> \
   --write \
   --repo-root /mnt/disks/alpha-lab/alpha-lab-project
 ```
@@ -214,10 +229,26 @@ python -m projects.alpha_lab.factory.import_research_ledger \
 ```
 
 A canonical write additionally requires `--write` and an owner-ratified
-migration manifest bound to the exact audited source receipts. The importer
+migration plan bound to the exact audited source receipts, plus the separately
+owner-signed QS-003 publication authorization. The latter binds the signed-plan
+hash, canonical path, expected ledger bytes/head, fresh receipt-set hash,
+create-only mode, active registry/pin, timestamp, and prior `GENESIS`. The importer
 classifies the current 66 data gates as attempts, the eight evaluated variants
 as trials, the eight return grids as robustness children, and imports no
 challenge event.
+
+Use the complete public-only external-signer workflow rather than assembling
+those artifacts manually:
+
+```bash
+python -m projects.alpha_lab.factory.ceremony --help
+```
+
+`registry`, `attestation`, `migration`, `publication`, and `projection`
+subcommands prepare exact canonical signing bytes and finalize detached
+signatures with immediate public-key verification. They never accept a private
+key. `publication publish` remains dry-run unless `--write` is explicit, and a
+write still fails outside canonical GCP. See `RESEARCH_SIGNING_CEREMONY.md`.
 
 ## Licensed-data workflow
 
@@ -244,6 +275,9 @@ Build a queue from one or more sealed snapshots:
 python -m projects.alpha_lab.control_plane.cli build-queue \
   --candidate /path/to/candidate_snapshot.json \
   --ledger /mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
+  --identity-bundle /protected-review/control_plane_identity_bundle.json \
+  --identity-trust-anchor /protected-pin/root_trust_anchor.json \
+  --identity-registry-pin <active-registry-hash> \
   --repo-root /mnt/disks/alpha-lab/alpha-lab-project
 ```
 
@@ -256,6 +290,9 @@ cd /mnt/disks/alpha-lab/alpha-lab-project
   -m projects.alpha_lab.control_plane.cli build-queue \
   --candidate-dir outputs/research/alpha_lab/control_plane/candidate_snapshots \
   --ledger outputs/research/alpha_lab/ledger/research_events.v1.jsonl \
+  --identity-bundle /protected-review/control_plane_identity_bundle.json \
+  --identity-trust-anchor /protected-pin/root_trust_anchor.json \
+  --identity-registry-pin <active-registry-hash> \
   --write \
   --repo-root .
 ```

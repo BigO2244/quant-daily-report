@@ -3,6 +3,7 @@
   "status": "UNSIGNED_NOT_AUTHORIZED",
   "owner": "Brett Olson",
   "decision": "PENDING_PERSONAL_RATIFICATION",
+  "recorded_at": "SUPPLY_EXPLICIT_CANONICAL_UTC_AT_CEREMONY_PREPARATION",
   "private_key_material_present": false,
   "family_mappings": {
     "HYP-2026-001": "FAM-2026-001",
@@ -79,6 +80,7 @@
     ]
   },
   "required_unresolved_sentinels": {
+    "HYP-2026-001.primary_variant_id": "UNRESOLVED_LEGACY_ABLATION_REFERENCE_PRIMARY_VARIANT",
     "HYP-2026-009.primary_variant_id": "UNRESOLVED_LEGACY_PRIMARY_VARIANT",
     "HYP-2026-010.benchmark": "UNRESOLVED_LEGACY_PRIMARY_BENCHMARK"
   },
@@ -113,7 +115,8 @@
     "mode": "CREATE_ONLY_ATOMIC_HARD_LINK",
     "overwrite_or_repair_allowed": false,
     "authorized": false,
-    "authorization_rule": "Only Brett's valid detached signature over the exact completed canonical event plan authorizes one create-only publication."
+    "signed_publication_authorization_sha256": "REQUIRED_AFTER_MIGRATION_PLAN_IS_SIGNED",
+    "authorization_rule": "The migration-plan signature ratifies legacy semantics but never authorizes publication. A distinct Brett-signed QS-003 artifact must bind the signed-plan hash, exact canonical path, expected ledger bytes and head, fresh receipt-set hash, create-only mode, authorization timestamp, active registry and external pin, and prior GENESIS before one publication."
   },
   "owner_attestation": null
 }
