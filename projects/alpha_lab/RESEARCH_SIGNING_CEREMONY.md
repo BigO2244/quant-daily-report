@@ -228,7 +228,7 @@ absence record, fixed `/usr/bin/git` identity, and scanner identity. Expansion
 includes ignored files beneath a reported untracked directory. Comparison is
 exact and its semantic hash excludes only the capture timestamp.
 
-Handoff tool version 1.3 keeps the receipt writer privileged but never runs Git
+Handoff tool version 1.4 keeps the receipt writer privileged but never runs Git
 as root. It opens the canonical repository directory without following links,
 requires that directory to have a non-root owner and group, and launches only
 the fixed `/usr/bin/git` children as that exact numeric UID/GID with all
@@ -251,6 +251,13 @@ interpretation, but it is parsed with only the checkout owner's authority—not
 root authority—and its work-tree/fsmonitor redirections are overridden. The
 receipt and semantic hash record the exact Git inspection UID, GID, empty
 supplementary group set, and proven top-level path.
+
+For a deleted tracked path, a missing leaf or missing descriptor-relative
+intermediate directory produces the same canonical `absent` record with the
+original Git path and status. Only `ENOENT` has that meaning. An intermediate
+symlink, non-directory, FIFO, other special object, permission failure, or
+unexpected traversal error fails closed; the repeated Git and material scans
+still reject a parent-directory disappearance race.
 
 Do not add `safe.directory`, including a command-scoped exact path, wildcard,
 prefix, persistent config entry, or value derived from `SUDO_UID`. That approach

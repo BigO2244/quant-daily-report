@@ -492,6 +492,61 @@ def test_dirty_snapshot_overrides_worktree_redirect_and_fsmonitor_hook(
     assert receipt["git"]["top_level"] == str(repo)
 
 
+def test_dirty_snapshot_records_nested_file_under_deleted_parent_as_absent(
+    tmp_path: Path,
+) -> None:
+    repo = _git_repo(tmp_path)
+    nested = repo / "quant_research_agent"
+    nested.mkdir()
+    tracked = nested / "requirements.txt"
+    tracked.write_text("legacy dependency\n")
+    subprocess.run(["/usr/bin/git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "commit", "-qm", "nested"],
+        check=True,
+    )
+    shutil.rmtree(nested)
+
+    receipt = _dirty_snapshot(
+        repo_root=repo.absolute(), output=(tmp_path / "deleted-parent.json").absolute()
+    )
+
+    assert {
+        "path": "quant_research_agent/requirements.txt",
+        "status": " D",
+        "type": "absent",
+    } in receipt["records"]
+
+
+@pytest.mark.parametrize("intermediate_kind", ["symlink", "file", "fifo"])
+def test_dirty_record_rejects_unsafe_intermediate_component(
+    tmp_path: Path, intermediate_kind: str,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    intermediate = root / "nested"
+    if intermediate_kind == "symlink":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "tracked.txt").write_text("outside\n")
+        intermediate.symlink_to(outside, target_is_directory=True)
+    elif intermediate_kind == "file":
+        intermediate.write_text("not a directory\n")
+    else:
+        os.mkfifo(intermediate)
+    root_fd = handoff._open_dir(root.absolute())
+    try:
+        with pytest.raises(handoff.HandoffError, match="unsafe intermediate"):
+            handoff._read_path_record(
+                root_fd,
+                ("nested", "tracked.txt"),
+                path="nested/tracked.txt",
+                status_code=" D",
+            )
+    finally:
+        os.close(root_fd)
+
+
 def test_dirty_snapshot_expands_untracked_and_exact_compare(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path)
     (repo / ".gitignore").write_text("*.secret\n")
@@ -616,6 +671,38 @@ def test_dirty_snapshot_rejects_content_race_with_unchanged_porcelain(
         _dirty_snapshot(
             repo_root=repo.absolute(),
             output=(tmp_path / "content-race.json").absolute(),
+        )
+
+
+def test_dirty_snapshot_rejects_parent_disappearance_race(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    repo = _git_repo(tmp_path)
+    nested = repo / "nested"
+    nested.mkdir()
+    tracked = nested / "tracked.txt"
+    tracked.write_text("old\n")
+    subprocess.run(["/usr/bin/git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "commit", "-qm", "nested"],
+        check=True,
+    )
+    tracked.write_text("dirty\n")
+    original = handoff._read_path_record
+    removed = False
+
+    def racing(root_fd, parts, *, path, status_code):
+        nonlocal removed
+        if path == "nested/tracked.txt" and not removed:
+            removed = True
+            shutil.rmtree(nested)
+        return original(root_fd, parts, path=path, status_code=status_code)
+
+    monkeypatch.setattr(handoff, "_read_path_record", racing)
+    with pytest.raises(handoff.HandoffError, match="changed during dirty scan"):
+        _dirty_snapshot(
+            repo_root=repo.absolute(),
+            output=(tmp_path / "parent-race.json").absolute(),
         )
 
 

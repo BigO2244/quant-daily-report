@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 
-VERSION = "1.3"
+VERSION = "1.4"
 TRANSFER_SCHEMA = "caerus_alpha_lab_gate_a_protected_transfer_v1"
 DIRTY_SCHEMA = "caerus_alpha_lab_dirty_snapshot_v2"
 SEMANTIC_SCHEMA = "caerus_alpha_lab_dirty_snapshot_semantic_v2"
@@ -858,7 +858,22 @@ def _read_path_record(root_fd: int, parts: tuple[str, ...], *, path: str, status
     parent = os.dup(root_fd)
     try:
         for part in parts[:-1]:
-            child = os.open(part, DIR_FLAGS, dir_fd=parent)
+            try:
+                child = os.open(part, DIR_FLAGS, dir_fd=parent)
+            except FileNotFoundError:
+                # A tracked nested path whose complete parent was deleted is
+                # one absent material record, not a scanner failure.  Git's
+                # bracketing porcelain calls still detect a concurrent change
+                # into or out of this state.
+                return {
+                    "path": path,
+                    "status": status_code,
+                    "type": "absent",
+                }
+            except OSError as exc:
+                raise HandoffError(
+                    f"dirty path has an unsafe intermediate component: {path}"
+                ) from exc
             os.close(parent)
             parent = child
         try:
