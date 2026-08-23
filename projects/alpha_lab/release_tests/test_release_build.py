@@ -20,6 +20,56 @@ def _canonical(value) -> bytes:
     return gate._canonical_bytes(value)
 
 
+def _fake_network(namespace: str = "net:[4026532260]") -> dict:
+    return {
+        "mechanism": "systemd_private_network_loopback_only_v1",
+        "current_network_namespace": namespace,
+        "interfaces": ["lo"],
+        "proc_net_dev_interfaces": ["lo"],
+        "ipv4_nonlocal_route_count": 0,
+        "ipv6_nonlocal_route_count": 0,
+        "ipv4_connect_address": "1.1.1.1",
+        "ipv6_connect_address": "2606:4700:4700::1111",
+        "connect_port": 53,
+        "ipv4_connect_errno": 101,
+        "ipv6_connect_errno": 101,
+        "outbound_connect_blocked": True,
+    }
+
+
+def _install_network_probe(monkeypatch, *, interfaces=None, proc=None, errnos=None) -> None:
+    monkeypatch.setattr(gate.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        gate.os,
+        "readlink",
+        lambda path: "net:[4026532260]" if path == "/proc/self/ns/net" else None,
+    )
+    monkeypatch.setattr(
+        gate.socket, "if_nameindex", lambda: [(1, "lo")] if interfaces is None else interfaces
+    )
+    payloads = {
+        "/proc/net/dev": (
+            "Inter-| Receive | Transmit\n"
+            " face |bytes packets errs drop fifo frame compressed multicast|"
+            "bytes packets errs drop fifo colls carrier compressed\n"
+            " lo: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+        ),
+        "/proc/net/route": (
+            "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n"
+        ),
+        "/proc/net/ipv6_route": (
+            "00000000000000000000000000000000 00 "
+            "00000000000000000000000000000000 00 "
+            "00000000000000000000000000000000 00000000 00000000 00000000 "
+            "00200200 lo\n"
+        ),
+    }
+    payloads.update(proc or {})
+    monkeypatch.setattr(gate, "_read_network_proc", lambda path: payloads[path])
+    results = iter(errnos or (101, 101))
+    monkeypatch.setattr(gate, "_literal_connect_errno", lambda *_args: next(results))
+
+
 def _fake_base_runtime() -> dict:
     def file_record(path: str) -> dict:
         return {
@@ -40,7 +90,6 @@ def _fake_base_runtime() -> dict:
         },
         "reviewed_tools": {
             "git": file_record("/usr/bin/git"),
-            "unshare": file_record("/usr/bin/unshare"),
         },
         "stdlib_roots": [],
         "protected_ancestor_census": [],
@@ -216,6 +265,23 @@ def _sealed_payload(tmp_path: Path):
         inputs=inputs, records=records, runtime_evidence={}, source_store={}
     )
     return release, manifest
+
+
+def _minimal_release_inputs(tmp_path: Path, *, content_addressed: bool) -> gate.ReleaseInputs:
+    source = gate.SourceBundle(
+        archive_path=tmp_path / "input/source.tar", archive_bytes=0,
+        archive_sha256="a" * 64, archive_records=(), archive_directories=(),
+        source_manifest={}, source_manifest_bytes=b"{}",
+        source_manifest_sha256="b" * 64, file_manifest=(),
+        file_manifest_bytes=b"[]", file_manifest_sha256="c" * 64,
+    )
+    return gate.ReleaseInputs(
+        source=source, release_input={}, release_input_bytes=b"{}",
+        release_input_sha256="d" * 64, wheelhouse=tmp_path / "wheelhouse",
+        release_parent=tmp_path / "release-parent", repo_root=tmp_path / "repo",
+        lock_bytes=b"", wheel_manifest_bytes=b"",
+        builder_origin={"content_addressed": content_addressed},
+    )
 
 
 def _bootstrap_packet(tmp_path: Path):
@@ -695,6 +761,41 @@ def test_wrong_authorization_hash_never_creates_release_parent(tmp_path: Path) -
     assert not missing_parent.exists()
 
 
+def test_dry_build_proves_network_without_creating_release_parent(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    inputs = _minimal_release_inputs(tmp_path, content_addressed=False)
+    monkeypatch.setattr(gate, "_network_isolation_contract", _fake_network)
+    result = gate.build_release(
+        inputs, write=False, authorized_release_input_sha256=None
+    )
+    assert result["schema_version"] == "caerus_alpha_lab_release_build_plan_v2"
+    assert result["network_isolation"] == _fake_network()
+    assert not inputs.release_parent.exists()
+
+
+def test_write_network_failure_precedes_content_address_creation(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    inputs = _minimal_release_inputs(tmp_path, content_addressed=True)
+    temporary_parent = tmp_path / "temporary"
+    temporary_parent.mkdir()
+
+    def reject_network():
+        raise gate.ReleaseBuildError("inherited network isolation unavailable")
+
+    monkeypatch.setattr(gate, "_network_isolation_contract", reject_network)
+    with pytest.raises(gate.ReleaseBuildError, match="network isolation unavailable"):
+        gate.build_release(
+            inputs,
+            write=True,
+            authorized_release_input_sha256=inputs.release_input_sha256,
+            interpreter=Path(sys._base_executable).resolve(),
+            temporary_parent=temporary_parent,
+        )
+    assert not inputs.release_parent.exists()
+
+
 def test_independent_verifier_must_execute_from_bound_bootstrap() -> None:
     origin = {
         "modules": [
@@ -749,7 +850,7 @@ def test_sanitized_environment_removes_inherited_secrets_and_plugins(tmp_path: P
     assert (tmp_path / "home").is_dir()
 
 
-def test_command_prefix_is_applied_to_the_process(monkeypatch, tmp_path: Path) -> None:
+def test_command_runs_without_a_substitutable_prefix(monkeypatch, tmp_path: Path) -> None:
     captured = {}
 
     def fake_run(command, **kwargs):
@@ -757,18 +858,119 @@ def test_command_prefix_is_applied_to_the_process(monkeypatch, tmp_path: Path) -
         return subprocess.CompletedProcess(command, 0, stdout="ok")
 
     monkeypatch.setattr(gate.subprocess, "run", fake_run)
-    gate._run_command(
-        ["python", "test.py"], cwd=tmp_path, environment={}, prefix=["unshare", "--net", "--"]
-    )
-    assert captured["command"] == ["unshare", "--net", "--", "python", "test.py"]
+    gate._run_command(["python", "test.py"], cwd=tmp_path, environment={})
+    assert captured["command"] == ["python", "test.py"]
 
 
 def test_network_isolation_fails_closed_off_linux(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
     with pytest.raises(gate.ReleaseBuildError, match="requires Linux"):
-        gate._network_isolation_contract(
-            Path("/usr/bin/python3"), cwd=tmp_path, environment={}
-        )
+        gate._network_isolation_contract()
+
+
+def test_network_isolation_fails_closed_for_root(monkeypatch) -> None:
+    monkeypatch.setattr(gate.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(gate.os, "geteuid", lambda: 0)
+    with pytest.raises(gate.ReleaseBuildError, match="must be non-root"):
+        gate._network_isolation_contract()
+
+
+def test_network_isolation_proves_exact_inherited_private_namespace(monkeypatch) -> None:
+    _install_network_probe(monkeypatch)
+    calls = []
+    results = iter((101, 101))
+
+    def connect_errno(family, address):
+        calls.append((family, address))
+        return next(results)
+
+    monkeypatch.setattr(gate, "_literal_connect_errno", connect_errno)
+    assert gate._network_isolation_contract() == _fake_network()
+    assert calls == [
+        (gate.socket.AF_INET, ("1.1.1.1", 53)),
+        (gate.socket.AF_INET6, ("2606:4700:4700::1111", 53, 0, 0)),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ipv4_connect_address", "8.8.8.8"),
+        ("ipv6_connect_address", "2606:4700:4700::1001"),
+        ("connect_port", 443),
+        ("ipv4_connect_errno", 13),
+        ("ipv4_nonlocal_route_count", False),
+        ("interfaces", ["lo", "ens4"]),
+    ],
+)
+def test_network_isolation_receipt_rejects_semantic_drift(field, value) -> None:
+    record = _fake_network()
+    record[field] = value
+    with pytest.raises(gate.ReleaseBuildError, match="proof evidence drift"):
+        gate._verify_network_isolation_record(record)
+
+
+def test_network_isolation_receipt_rejects_extra_fields() -> None:
+    record = {**_fake_network(), "unshare": "/usr/bin/unshare"}
+    with pytest.raises(gate.ReleaseBuildError, match="schema drift"):
+        gate._verify_network_isolation_record(record)
+
+
+def test_network_isolation_rejects_malformed_namespace_identity(monkeypatch) -> None:
+    _install_network_probe(monkeypatch)
+    monkeypatch.setattr(gate.os, "readlink", lambda _path: "not-a-namespace")
+    with pytest.raises(gate.ReleaseBuildError, match="not established"):
+        gate._network_isolation_contract()
+
+
+def test_network_isolation_rejects_host_interface_from_socket_census(monkeypatch) -> None:
+    _install_network_probe(monkeypatch, interfaces=[(1, "lo"), (2, "ens4")])
+    with pytest.raises(gate.ReleaseBuildError, match="non-loopback interface"):
+        gate._network_isolation_contract()
+
+
+def test_network_isolation_rejects_host_interface_from_proc(monkeypatch) -> None:
+    proc_dev = (
+        "Inter-| Receive | Transmit\n"
+        " face |bytes packets errs drop fifo frame compressed multicast|"
+        "bytes packets errs drop fifo colls carrier compressed\n"
+        " lo: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+        " ens4: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+    )
+    _install_network_probe(monkeypatch, proc={"/proc/net/dev": proc_dev})
+    with pytest.raises(gate.ReleaseBuildError, match="/proc/net/dev"):
+        gate._network_isolation_contract()
+
+
+def test_network_isolation_rejects_ipv4_route(monkeypatch) -> None:
+    route = (
+        "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n"
+        "lo 00000000 00000000 0001 0 0 0 00000000 0 0 0\n"
+    )
+    _install_network_probe(monkeypatch, proc={"/proc/net/route": route})
+    with pytest.raises(gate.ReleaseBuildError, match="non-loopback route"):
+        gate._network_isolation_contract()
+
+
+def test_network_isolation_rejects_ipv6_non_loopback_route(monkeypatch) -> None:
+    route = (
+        "00000000000000000000000000000000 00 "
+        "00000000000000000000000000000000 00 "
+        "00000000000000000000000000000000 00000000 00000000 00000000 "
+        "00200200 ens4\n"
+    )
+    _install_network_probe(monkeypatch, proc={"/proc/net/ipv6_route": route})
+    with pytest.raises(gate.ReleaseBuildError, match="non-loopback route"):
+        gate._network_isolation_contract()
+
+
+@pytest.mark.parametrize("errnos", [(0, 101), (101, 0), (13, 101), (101, 13)])
+def test_network_isolation_requires_exact_enetunreach_for_both_families(
+    monkeypatch, errnos,
+) -> None:
+    _install_network_probe(monkeypatch, errnos=errnos)
+    with pytest.raises(gate.ReleaseBuildError, match="ENETUNREACH"):
+        gate._network_isolation_contract()
 
 
 def test_wrong_runtime_target_fails_closed() -> None:
@@ -786,7 +988,7 @@ def test_wrong_runtime_target_fails_closed() -> None:
         },
         "python_implementation": "CPython",
         "python_version": "3.10.12",
-        "reviewed_tools": {"git": "/usr/bin/git", "unshare": "/usr/bin/unshare"},
+        "reviewed_tools": {"git": "/usr/bin/git"},
         "stdlib_paths": ["/usr/lib/python3.10"],
     }
     with pytest.raises(gate.ReleaseBuildError, match="architecture drift"):
@@ -841,9 +1043,6 @@ def test_base_runtime_receipt_detects_external_stdlib_drift(tmp_path: Path) -> N
     git = tmp_path / "git"
     git.write_bytes(b"git")
     git.chmod(0o755)
-    unshare = tmp_path / "unshare"
-    unshare.write_bytes(b"unshare")
-    unshare.chmod(0o755)
     identity = {
         "base_executable": str(executable),
         "base_exec_prefix": str(tmp_path),
@@ -852,7 +1051,7 @@ def test_base_runtime_receipt_detects_external_stdlib_drift(tmp_path: Path) -> N
         "operating_system": {
             "id": "ubuntu", "receipt_path": str(os_release), "version_id": "22.04"
         },
-        "reviewed_tools": {"git": str(git), "unshare": str(unshare)},
+        "reviewed_tools": {"git": str(git)},
         "stdlib_paths": [str(stdlib)],
     }
     before = gate._base_runtime_receipt(identity, production_seal=False)
@@ -904,6 +1103,7 @@ def test_atlas_gate_e_receipt_binds_runtime_and_complete_site_packages(
         },
         "site_packages_absolute_path": str(site),
         "site_packages_relative_path": str(site.relative_to(release)),
+        "network_isolation": _fake_network(),
     }
     manifest = gate._build_manifest_payload(
         inputs=inputs, records=records, runtime_evidence=runtime, source_store={}
@@ -914,6 +1114,8 @@ def test_atlas_gate_e_receipt_binds_runtime_and_complete_site_packages(
         built_manifest_sha256=manifest_hash,
     )
     assert receipt["schema_version"] == gate.ATLAS_GATE_E_RUNTIME_RECEIPT_SCHEMA
+    assert receipt["network_isolation"] == _fake_network()
+    assert set(receipt["base_runtime"]["reviewed_tools"]) == {"git"}
     assert receipt["python"]["single_link"] is True
     assert receipt["site_packages"]["records"] == [
         {
@@ -1089,6 +1291,7 @@ def test_fake_runtime_build_writes_ready_then_real_verifier_reopens_chain(
                 "locked_distributions": {},
             },
             "entire_release_unchanged": True,
+            "network_isolation": _fake_network(),
             "pytest_passed": 355, "pytest_skipped": 2,
             "site_packages_absolute_path": str(site),
             "site_packages_relative_path": str(site.relative_to(release_dir)),
@@ -1100,6 +1303,7 @@ def test_fake_runtime_build_writes_ready_then_real_verifier_reopens_chain(
     )
     monkeypatch.setattr(gate, "_verify_runtime_evidence", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(gate, "_verify_executing_builder_is_bound", lambda _origin: None)
+    monkeypatch.setattr(gate, "_network_isolation_contract", _fake_network)
     temporary_parent = tmp_path.parent / f"{tmp_path.name}-temporary"
     temporary_parent.mkdir()
     copied_interpreter = temporary_parent / "python"
@@ -1336,7 +1540,7 @@ def test_ceremony_checks_readonly_tcb_before_any_release_python(
     )
     monkeypatch.setattr(gate, "_production_seal_control", fake_seal)
     monkeypatch.setattr(gate, "_validate_ceremony_arguments", lambda *_a, **_k: None)
-    monkeypatch.setattr(gate, "_network_isolation_contract", lambda *_a, **_k: ({}, ()))
+    monkeypatch.setattr(gate, "_network_isolation_contract", _fake_network)
     def fake_ceremony_command(*_args, maps_receipt_fd: int, **_kwargs):
         os.write(
             maps_receipt_fd,
@@ -1368,6 +1572,8 @@ def test_ceremony_checks_readonly_tcb_before_any_release_python(
         success_files[0].read_bytes(), label="test Gate E success", object_required=True
     )
     assert success["status"] == "PASS"
+    assert success["schema_version"] == "caerus_alpha_lab_gate_e_ceremony_success_v2"
+    assert success["network_isolation"] == _fake_network()
     assert success["post_execution_rescan_passed"] is True
     assert success["approved_output_root"] == str(output)
     assert success["output_delta"]["created_record_count"] == 1
@@ -1415,7 +1621,7 @@ def test_ceremony_postscan_drift_never_writes_success_receipt(
         gate, "_production_seal_control", lambda *_a, **_k: {"status": "PASS"}
     )
     monkeypatch.setattr(gate, "_validate_ceremony_arguments", lambda *_a, **_k: None)
-    monkeypatch.setattr(gate, "_network_isolation_contract", lambda *_a, **_k: ({}, ()))
+    monkeypatch.setattr(gate, "_network_isolation_contract", _fake_network)
     def fake_ceremony_command(*_args, maps_receipt_fd: int, **_kwargs):
         os.write(
             maps_receipt_fd,

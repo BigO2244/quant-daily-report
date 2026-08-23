@@ -113,9 +113,11 @@ the production launcher requires an administrator-established read-only system
 image, release, and bootstrap hierarchy before any Gate E Python starts. A
 different principal alone is not accepted. It re-verifies the external Python,
 every stdlib descendant, mapped shared objects, OS receipt, reviewed
-`/usr/bin/git` and `/usr/bin/unshare`, and substitutable ancestors immediately
-before use and again after execution. Atlas must consume the v2 Gate E receipt
-and v1 external-base-runtime receipt directly; a caller-derived dependency or
+`/usr/bin/git`, and substitutable ancestors immediately before use and again
+after execution. The inherited systemd private-network proof replaces the
+former inner `unshare` launcher; `unshare` is not in the reviewed runtime TCB.
+Atlas must consume the v3 Gate E receipt and v2 external-base-runtime receipt
+directly; a caller-derived dependency or
 runtime hash is not an alternative authority. Ceremony output is uncertified
 unless the command succeeds, the complete postscan matches the prescan, and the
 launcher emits the create-only Gate E success receipt.

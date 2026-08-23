@@ -407,8 +407,10 @@ shell is therefore not a Gate A production environment.
 One concrete Ubuntu 22.04 handoff is an administrator-reviewed transient
 systemd unit that creates the mount boundary before executing Python. The
 administrator must replace the principal and paths, use direct argv (no shell),
-and preserve the command exit status. `ReadOnlyPaths=/` is the default; Gate A
-construction receives only the two explicit writable exceptions. The code's
+and preserve the command exit status. `PrivateNetwork=yes` must be established
+by systemd before Python starts. `ReadOnlyPaths=/` is the default; Gate A
+construction receives only the two explicit writable exceptions. There is no
+writable `/proc` exception. The code's
 per-object `fstatvfs` census remains authoritative and rejects a writable
 nested mount even if the unit configuration was intended to be read-only:
 
@@ -416,6 +418,7 @@ nested mount even if the unit configuration was intended to be read-only:
 sudo systemd-run --wait --pipe --collect \
   --property=User=<APPROVED_NONROOT_GATE_PRINCIPAL> \
   --property=NoNewPrivileges=yes \
+  --property=PrivateNetwork=yes \
   --property=ReadOnlyPaths=/ \
   --property="ReadWritePaths=$RELEASE_PARENT $GATE_A_TEMP_PARENT" \
   /usr/bin/python3.10 -I -S -B "$GATE_A_BUILDER" build \
@@ -434,8 +437,12 @@ path read-only. If this launcher or its unit policy is not independently
 approved and recorded, Gate A stops; the Python tool does not silently
 substitute a weaker control.
 
-First run the non-mutating preflight and default dry build inside that
-administrator-established environment:
+First run the non-mutating preflight and default dry build in separate
+administrator-established units with the exact `User`, `NoNewPrivileges`,
+`PrivateNetwork`, and `ReadOnlyPaths` controls above. Neither unit has a
+`ReadWritePaths` exception. Both commands prove the inherited private network
+and fail before any content-addressed source or release directory can be
+created if that proof is absent:
 
 ```bash
 python3.10 -I -S -B "$GATE_A_BUILDER" preflight \
@@ -474,34 +481,63 @@ python3.10 -I -S -B "$GATE_A_BUILDER" build \
   --authorized-release-input-sha256 <EXACT_RELEASE_INPUT_SHA256>
 ```
 
-The build is create-only and content-addressed. It copies the verified source
-and wheels, extracts the source file-only with descriptor-relative no-follow
-operations, creates a copied venv, installs with `--no-index` and
-`--require-hashes`, and executes dependency validation, `pip check`, the exact
-357-test inventory, and the 355-pass/2-DuckDB-skip suite inside a proven Linux
-user/network namespace. It binds all 25 locked distributions, the explicit
-`pip`/`setuptools` venv bootstrap allowance, the external base interpreter and
-complete stdlib-tree identities, and the sealed app/venv/wheel/lock tree.
+The build is create-only and content-addressed. Before opening or creating the
+release parent, write mode re-proves the inherited private network after exact
+authorization and content-addressed-bootstrap validation. It copies the
+verified source and wheels, extracts the source file-only with
+descriptor-relative no-follow operations, creates a copied venv, installs with
+`--no-index` and `--require-hashes`, and executes dependency validation, `pip
+check`, the exact 357-test inventory, and the 355-pass/2-DuckDB-skip suite
+inside the inherited systemd private network namespace. The build runtime
+proves that state again immediately before creating the venv. It binds all 25
+locked distributions, the explicit `pip`/`setuptools` venv bootstrap allowance,
+the external base interpreter and complete stdlib-tree identities, and the
+sealed app/venv/wheel/lock tree.
 Caches, JUnit output, and temporary state remain outside the release.
 CPython's redundant Linux `venv/lib64 -> lib` compatibility alias is removed
 descriptor-relatively immediately after venv creation; an absent link is
 accepted, while any different `lib64` object or target fails. The sealed release
 therefore contains no symlink exception for this target-platform artifact.
 
+The strict network record uses mechanism
+`systemd_private_network_loopback_only_v1`. It requires Linux, a current
+`/proc/self/ns/net` identity, exactly `lo` from `socket.if_nameindex()`, exactly
+`lo` in `/proc/net/dev`, no IPv4 route rows, no IPv6 route whose interface is
+other than `lo`, and `connect_ex` result 101 (`ENETUNREACH`) for both fixed
+reachable numeric literals `1.1.1.1:53` and
+`[2606:4700:4700::1111]:53`. The addresses and port are fields in the strict
+receipt, and DNS is never used. `/proc/1/ns/net` is deliberately not read: the
+approved nonroot systemd unit receives `EACCES` for that host-process link.
+`/sys/class/net` is also deliberately not evidence: with Ubuntu systemd 249,
+`PrivateNetwork=yes` can leave the host interface names visible through that
+sysfs view even though the process's namespace-aware socket and `/proc/net/*`
+views contain only loopback. A malformed namespace or `/proc` record fails
+closed.
+
 The external-runtime receipt also binds Ubuntu's OS-release bytes, every shared
-object loaded by the interpreter, the exact single-link `/usr/bin/git` and
-`/usr/bin/unshare` binaries, every substitutable path ancestor, and the full
+object loaded by the interpreter, the exact single-link `/usr/bin/git` binary,
+every substitutable path ancestor, and the full
 canonical record list for each stdlib and platstdlib root. Every external
 regular record includes bytes, SHA-256, mode, owner UID/GID, link count,
 per-object filesystem-read-only evidence, and the ACL-aware effective-write
 result; directory records include the corresponding owner, mode, link, mount,
 and write-denial facts. Symlinks, hard links, sockets, FIFOs, and device nodes
 are forbidden in the external executable surface. The versioned
-`caerus_alpha_lab_atlas_gate_e_runtime_receipt_v2` inside
+`caerus_alpha_lab_atlas_gate_e_runtime_receipt_v3` inside
 `verification_receipt.json` is the direct Atlas provenance surface. It binds
 the release-input, build, and built-manifest identities; copied Python bytes;
 the canonical complete site-packages subtree; lock, wheel-manifest, and
-installed-distribution closure; and the release/app/venv owner and mode census.
+installed-distribution closure; the strict build-time `network_isolation`
+record; and the release/app/venv owner and mode census. The reviewed runtime
+tool set is exactly `{git}`; `unshare` is not in the reviewed runtime TCB.
+The corresponding strict schemas are
+`caerus_alpha_lab_built_runtime_manifest_v4`,
+`caerus_alpha_lab_release_verification_receipt_v4`,
+`caerus_alpha_lab_sealed_release_verification_v4`,
+`caerus_alpha_lab_external_base_runtime_receipt_v2`, and
+`caerus_alpha_lab_atlas_gate_e_runtime_receipt_v3`.
+The dry build plan and input preflight are v2 because they now carry the live
+network proof; the successful ceremony receipt is likewise v2.
 `READY.verification_receipt_sha256` binds that whole receipt, while independent
 verification reports the exact `READY` SHA-256. No caller-derived runtime hash
 is an alternative authority.
@@ -511,10 +547,22 @@ before durable `READY` leaves an unreferenced directory that is never repaired,
 deleted, or reused automatically. An existing valid address is idempotently
 verified; any incomplete or divergent collision fails closed.
 
-Verify the finished release independently before any later ceremony invocation:
+Verify the finished release independently before any later ceremony invocation.
+Run verification in its own transient systemd unit with `User=<approved
+nonroot>`, `NoNewPrivileges=yes`, `PrivateNetwork=yes`, `ReadOnlyPaths=/`, and
+only a dedicated empty temporary root in `ReadWritePaths`; set `TMPDIR` to that
+root before Python starts. Verification freshly repeats the complete
+loopback-only namespace proof before invoking the copied runtime:
 
 ```bash
-python3.10 -I -S -B "$GATE_A_BUILDER" verify \
+sudo systemd-run --wait --pipe --collect \
+  --property=User=<APPROVED_NONROOT_GATE_PRINCIPAL> \
+  --property=NoNewPrivileges=yes \
+  --property=PrivateNetwork=yes \
+  --property=ReadOnlyPaths=/ \
+  --property="ReadWritePaths=$GATE_A_VERIFY_TEMP_ROOT" \
+  --setenv="TMPDIR=$GATE_A_VERIFY_TEMP_ROOT" \
+  /usr/bin/python3.10 -I -S -B "$GATE_A_BUILDER" verify \
   --release-dir /approved/release/parent/releases/sha256/<EXACT_RELEASE_INPUT_SHA256>
 ```
 
@@ -558,6 +606,7 @@ system runtime, source inputs, and all ancestors remain read-only:
 sudo systemd-run --wait --pipe --collect \
   --property=User=<APPROVED_NONROOT_GATE_E_PRINCIPAL> \
   --property=NoNewPrivileges=yes \
+  --property=PrivateNetwork=yes \
   --property=ReadOnlyPaths=/ \
   --property="ReadWritePaths=$CEREMONY_OUTPUT_ROOT $GATE_E_TEMP_ROOT" \
   --setenv="TMPDIR=$GATE_E_TEMP_ROOT" \
@@ -583,8 +632,9 @@ a complete release and external-runtime verification before execution.
 The same immutable system image must contain every library that can be loaded
 later; the ceremony child creates a final `/proc/self/maps` receipt in its
 `finally` boundary. The parent creates an anonymous open file description and
-passes only its descriptor through `unshare`; the child never opens a receipt
-path, and the parent verifies the same pinned descriptor after exit. A
+passes only its descriptor directly to the already-isolated child; the child
+never opens a receipt path, and the parent verifies the same pinned descriptor
+after exit. A
 same-principal process therefore cannot substitute a named receipt between
 child exit and verification. Every external mapped path must already be an exact file in
 the sealed shared-object receipt or complete stdlib manifest. A late DSO absent
@@ -602,13 +652,16 @@ approved output-root path, the complete canonical before/after output manifests
 create-only path/record delta. Symlinks, hard-linked regular files, and special
 entries fail the output scan; modifying or removing preexisting workspace state
 also fails. Consumers must rehash the referenced output manifest and pin the
-success-receipt bytes before treating an output as certified. Until this exact
+`caerus_alpha_lab_gate_e_ceremony_success_v2` receipt bytes before treating an
+output as certified. The receipt includes the ceremony's fresh strict network
+proof. Until this exact
 Ubuntu/read-only image handoff is proven, Gate A/Gate E remain external
 blockers.
 
 The launcher executes only `projects.alpha_lab.factory.ceremony`, uses the
 exact app and interpreter paths from `READY`, forbids relative paths and
-publication `--write`, applies OS-level network isolation, and re-verifies the
+publication `--write`, validates the inherited OS-level network isolation
+before any ceremony verification or child launch, and re-verifies the
 sealed release and external runtime after the command. Outputs must be
 create-only and beneath the
 separately approved, preexisting no-symlink ceremony-output root, which must be

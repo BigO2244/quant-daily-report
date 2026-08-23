@@ -14,13 +14,13 @@ separate Gate A operator action.
 from __future__ import annotations
 
 import argparse
-import errno
 import hashlib
 import importlib.util
 import json
 import os
 import platform
 import re
+import socket
 import stat
 import subprocess
 import sys
@@ -57,17 +57,20 @@ else:  # Exact direct-file bootstrap: `python -I -S -B /.../release_build.py`.
 
 SOURCE_SCHEMA = "caerus_alpha_lab_clean_release_source_v1"
 RELEASE_INPUT_SCHEMA = "caerus_alpha_lab_clean_release_input_v1"
-BUILT_RUNTIME_SCHEMA = "caerus_alpha_lab_built_runtime_manifest_v3"
-VERIFICATION_RECEIPT_SCHEMA = "caerus_alpha_lab_release_verification_receipt_v3"
+BUILT_RUNTIME_SCHEMA = "caerus_alpha_lab_built_runtime_manifest_v4"
+VERIFICATION_RECEIPT_SCHEMA = "caerus_alpha_lab_release_verification_receipt_v4"
 READY_SCHEMA = "caerus_alpha_lab_release_ready_v1"
 SOURCE_READY_SCHEMA = "caerus_alpha_lab_source_ready_v1"
-VERIFY_SCHEMA = "caerus_alpha_lab_sealed_release_verification_v3"
+VERIFY_SCHEMA = "caerus_alpha_lab_sealed_release_verification_v4"
 ATLAS_GATE_E_RUNTIME_RECEIPT_SCHEMA = (
-    "caerus_alpha_lab_atlas_gate_e_runtime_receipt_v2"
+    "caerus_alpha_lab_atlas_gate_e_runtime_receipt_v3"
 )
 EXTERNAL_BASE_RUNTIME_RECEIPT_SCHEMA = (
-    "caerus_alpha_lab_external_base_runtime_receipt_v1"
+    "caerus_alpha_lab_external_base_runtime_receipt_v2"
 )
+NETWORK_IPV4_CONNECT_ADDRESS = "1.1.1.1"
+NETWORK_IPV6_CONNECT_ADDRESS = "2606:4700:4700::1111"
+NETWORK_CONNECT_PORT = 53
 FILE_MANIFEST_SCHEMA = "canonical-json-sorted-file-and-symlink-records-v1"
 LOCK_RELATIVE_PATH = Path(
     "projects/alpha_lab/release/phase1-cp310-linux-x86_64.lock"
@@ -1222,11 +1225,9 @@ def _validate_temporary_parent(path: Path, *, protected_roots: Sequence[Path]) -
 
 def _run_command(
     command: Sequence[str], *, cwd: Path, environment: Mapping[str, str],
-    prefix: Sequence[str] = (),
 ) -> subprocess.CompletedProcess[str]:
-    effective_command = [*prefix, *command]
     result = subprocess.run(
-        effective_command,
+        list(command),
         cwd=str(cwd),
         env=dict(environment),
         text=True,
@@ -1304,77 +1305,174 @@ finally:
     ]
 
 
-def _network_isolation_contract(
-    python_path: Path, *, cwd: Path, environment: Mapping[str, str]
-) -> Tuple[Mapping[str, Any], Tuple[str, ...]]:
-    """Prove and return a fail-closed Linux user+network namespace prefix."""
+def _read_network_proc(path: str) -> str:
+    try:
+        with open(path, encoding="ascii") as stream:
+            return stream.read()
+    except (OSError, UnicodeError) as exc:
+        raise ReleaseBuildError(f"cannot read network-isolation evidence: {path}") from exc
+
+
+def _proc_net_dev_interfaces(payload: str) -> list[str]:
+    lines = payload.splitlines()
+    if len(lines) < 2 or "Inter-|" not in lines[0] or "face |" not in lines[1]:
+        raise ReleaseBuildError("/proc/net/dev schema drift")
+    interfaces: list[str] = []
+    for raw in lines[2:]:
+        if not raw.strip():
+            continue
+        if raw.count(":") != 1:
+            raise ReleaseBuildError("/proc/net/dev row is malformed")
+        name, counters = raw.split(":", 1)
+        name = name.strip()
+        fields = counters.split()
+        if (
+            not re.fullmatch(r"[A-Za-z0-9_.-]+", name)
+            or len(fields) != 16
+            or any(not field.isdecimal() for field in fields)
+            or name in interfaces
+        ):
+            raise ReleaseBuildError("/proc/net/dev row is malformed")
+        interfaces.append(name)
+    return sorted(interfaces)
+
+
+def _ipv4_nonlocal_route_count(payload: str) -> int:
+    lines = payload.splitlines()
+    expected_header = [
+        "Iface", "Destination", "Gateway", "Flags", "RefCnt", "Use",
+        "Metric", "Mask", "MTU", "Window", "IRTT",
+    ]
+    if not lines or lines[0].split() != expected_header:
+        raise ReleaseBuildError("/proc/net/route schema drift")
+    count = 0
+    for raw in lines[1:]:
+        if not raw.strip():
+            continue
+        fields = raw.split()
+        if (
+            len(fields) != 11
+            or not re.fullmatch(r"[A-Za-z0-9_.-]+", fields[0])
+            or any(
+                not re.fullmatch(r"[0-9A-Fa-f]{8}", fields[index])
+                for index in (1, 2, 7)
+            )
+            or not re.fullmatch(r"[0-9A-Fa-f]{4}", fields[3])
+            or any(not field.isdecimal() for field in fields[4:7] + fields[8:])
+        ):
+            raise ReleaseBuildError("/proc/net/route row is malformed")
+        count += 1
+    return count
+
+
+def _ipv6_nonlocal_route_count(payload: str) -> int:
+    count = 0
+    for raw in payload.splitlines():
+        if not raw.strip():
+            continue
+        fields = raw.split()
+        if (
+            len(fields) != 10
+            or any(
+                not re.fullmatch(r"[0-9A-Fa-f]{32}", fields[index])
+                for index in (0, 2, 4)
+            )
+            or any(
+                not re.fullmatch(r"[0-9A-Fa-f]{2}", fields[index])
+                for index in (1, 3)
+            )
+            or any(
+                not re.fullmatch(r"[0-9A-Fa-f]{8}", fields[index])
+                for index in (5, 6, 7, 8)
+            )
+            or not re.fullmatch(r"[A-Za-z0-9_.-]+", fields[9])
+        ):
+            raise ReleaseBuildError("/proc/net/ipv6_route row is malformed")
+        if fields[9] != "lo":
+            count += 1
+    return count
+
+
+def _literal_connect_errno(family: int, address: Any) -> int:
+    connection = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        connection.settimeout(0.25)
+        return connection.connect_ex(address)
+    finally:
+        connection.close()
+
+
+def _network_isolation_contract() -> Mapping[str, Any]:
+    """Prove the inherited systemd private network before trusted work."""
 
     if platform.system() != "Linux":
         raise ReleaseBuildError("Gate A requires Linux OS-level network isolation")
-    utility = Path("/usr/bin/unshare")
-    utility_fd, utility_stat = _open_regular_path(utility)
-    digest = hashlib.sha256()
-    total = 0
+    if os.geteuid() == 0:
+        raise ReleaseBuildError("Gate A network-isolated runtime must be non-root")
     try:
-        while True:
-            chunk = os.read(utility_fd, 1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-            total += len(chunk)
-    finally:
-        os.close(utility_fd)
-    if not utility_stat.st_mode & 0o111:
-        raise ReleaseBuildError("network-isolation utility is not executable")
-    try:
-        parent_namespace = os.readlink("/proc/self/ns/net")
+        current_namespace = os.readlink("/proc/self/ns/net")
     except OSError as exc:
-        raise ReleaseBuildError("cannot identify the parent Linux network namespace") from exc
-    prefix = (
-        str(utility), "--user", "--map-root-user", "--net", "--",
+        raise ReleaseBuildError("cannot identify the Linux network namespace") from exc
+    if not re.fullmatch(r"net:\[[0-9]+\]", current_namespace):
+        raise ReleaseBuildError("inherited private network namespace is not established")
+    try:
+        indexed_interfaces = socket.if_nameindex()
+    except OSError as exc:
+        raise ReleaseBuildError("cannot enumerate namespace network interfaces") from exc
+    if not isinstance(indexed_interfaces, list):
+        raise ReleaseBuildError("namespace interface census is malformed")
+    interfaces = []
+    for item in indexed_interfaces:
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise ReleaseBuildError("namespace interface census is malformed")
+        index, name = item
+        if (
+            not isinstance(index, int)
+            or index <= 0
+            or not isinstance(name, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.-]+", name)
+        ):
+            raise ReleaseBuildError("namespace interface census is malformed")
+        interfaces.append(name)
+    interfaces.sort()
+    if interfaces != ["lo"]:
+        raise ReleaseBuildError("private network namespace contains a non-loopback interface")
+    proc_interfaces = _proc_net_dev_interfaces(_read_network_proc("/proc/net/dev"))
+    if proc_interfaces != ["lo"]:
+        raise ReleaseBuildError("/proc/net/dev contains a non-loopback interface")
+    ipv4_route_count = _ipv4_nonlocal_route_count(
+        _read_network_proc("/proc/net/route")
     )
-    probe = r"""
-import json,os,socket,sys
-parent=sys.argv[1]
-current=os.readlink('/proc/self/ns/net')
-if current == parent:
-    raise SystemExit(91)
-blocked=False
-try:
-    socket.create_connection(('1.1.1.1', 53), timeout=0.25)
-except OSError:
-    blocked=True
-if not blocked:
-    raise SystemExit(92)
-print(json.dumps({'child_network_namespace':current,'outbound_connect_blocked':True},sort_keys=True,separators=(',',':')))
-"""
-    result = _run_command(
-        [str(python_path), "-I", "-B", "-c", probe, parent_namespace],
-        cwd=cwd,
-        environment=environment,
-        prefix=prefix,
+    ipv6_route_count = _ipv6_nonlocal_route_count(
+        _read_network_proc("/proc/net/ipv6_route")
     )
-    evidence = _strict_json(
-        result.stdout.strip().encode("utf-8"), label="network-isolation proof"
+    if ipv4_route_count or ipv6_route_count:
+        raise ReleaseBuildError("private namespace contains a non-loopback route")
+    ipv4_errno = _literal_connect_errno(
+        socket.AF_INET, (NETWORK_IPV4_CONNECT_ADDRESS, NETWORK_CONNECT_PORT)
     )
-    if not isinstance(evidence, Mapping) or evidence.get(
-        "outbound_connect_blocked"
-    ) is not True or evidence.get("child_network_namespace") == parent_namespace:
-        raise ReleaseBuildError("OS-level network-isolation proof failed")
-    return (
-        {
-            "mechanism": "linux_user_and_network_namespace_v1",
-            "parent_network_namespace": parent_namespace,
-            "probe": evidence,
-            "utility": {
-                "bytes": total,
-                "mode": format(stat.S_IMODE(utility_stat.st_mode), "04o"),
-                "path": str(utility),
-                "sha256": digest.hexdigest(),
-            },
-        },
-        prefix,
+    ipv6_errno = _literal_connect_errno(
+        socket.AF_INET6,
+        (NETWORK_IPV6_CONNECT_ADDRESS, NETWORK_CONNECT_PORT, 0, 0),
     )
+    if ipv4_errno != 101 or ipv6_errno != 101:
+        raise ReleaseBuildError("private namespace outbound connect did not fail ENETUNREACH")
+    evidence = {
+        "mechanism": "systemd_private_network_loopback_only_v1",
+        "current_network_namespace": current_namespace,
+        "interfaces": interfaces,
+        "proc_net_dev_interfaces": proc_interfaces,
+        "ipv4_nonlocal_route_count": ipv4_route_count,
+        "ipv6_nonlocal_route_count": ipv6_route_count,
+        "ipv4_connect_address": NETWORK_IPV4_CONNECT_ADDRESS,
+        "ipv6_connect_address": NETWORK_IPV6_CONNECT_ADDRESS,
+        "connect_port": NETWORK_CONNECT_PORT,
+        "ipv4_connect_errno": ipv4_errno,
+        "ipv6_connect_errno": ipv6_errno,
+        "outbound_connect_blocked": True,
+    }
+    _verify_network_isolation_record(evidence)
+    return evidence
 
 
 _NETWORK_GUARD = b"""\
@@ -1390,7 +1488,7 @@ sys.addaudithook(_caerus_no_network)
 
 def _runtime_identity(
     python_path: Path, *, cwd: Path, environment: Mapping[str, str],
-    prefix: Sequence[str] = (), exercise_ceremony: bool = False,
+    exercise_ceremony: bool = False,
 ) -> Mapping[str, Any]:
     script = r"""
 import importlib, importlib.metadata as m, json, os, platform, sys, sysconfig
@@ -1414,14 +1512,14 @@ with open('/proc/self/maps',encoding='utf-8') as stream:
         if len(fields)==6 and fields[5].startswith('/'): shared.add(fields[5])
 venv_root=os.path.realpath(sys.prefix)
 shared={path for path in shared if os.path.realpath(path)!=os.path.realpath(sys.executable) and not os.path.realpath(path).startswith(venv_root+os.sep)}
-print(json.dumps({'python_version':platform.python_version(),'python_implementation':platform.python_implementation(),'architecture':platform.machine(),'libc':list(platform.libc_ver()),'operating_system':{'id':os_release.get('ID'),'version_id':os_release.get('VERSION_ID'),'receipt_path':os_release_path},'executable':sys.executable,'base_executable':getattr(sys,'_base_executable',None),'base_prefix':sys.base_prefix,'base_exec_prefix':sys.base_exec_prefix,'stdlib_paths':sorted(set([paths['stdlib'],paths['platstdlib']])),'loaded_shared_objects':sorted(shared),'reviewed_tools':{'git':'/usr/bin/git','unshare':'/usr/bin/unshare'},'distributions':dict(sorted(d.items()))},sort_keys=True,separators=(',',':')))
+print(json.dumps({'python_version':platform.python_version(),'python_implementation':platform.python_implementation(),'architecture':platform.machine(),'libc':list(platform.libc_ver()),'operating_system':{'id':os_release.get('ID'),'version_id':os_release.get('VERSION_ID'),'receipt_path':os_release_path},'executable':sys.executable,'base_executable':getattr(sys,'_base_executable',None),'base_prefix':sys.base_prefix,'base_exec_prefix':sys.base_exec_prefix,'stdlib_paths':sorted(set([paths['stdlib'],paths['platstdlib']])),'loaded_shared_objects':sorted(shared),'reviewed_tools':{'git':'/usr/bin/git'},'distributions':dict(sorted(d.items()))},sort_keys=True,separators=(',',':')))
 """
     result = _run_command(
         [
             str(python_path), "-I", "-B", "-c", script,
             "1" if exercise_ceremony else "0",
         ], cwd=cwd,
-        environment=environment, prefix=prefix,
+        environment=environment,
     )
     parsed = _strict_json(result.stdout.strip().encode("utf-8"), label="runtime identity")
     if not isinstance(parsed, Mapping):
@@ -1759,12 +1857,10 @@ def _base_runtime_receipt(
             _external_file_receipt(path, production_seal=production_seal)
         )
     reviewed_tools = identity.get("reviewed_tools")
-    if not isinstance(reviewed_tools, Mapping) or set(reviewed_tools) != {
-        "git", "unshare"
-    }:
+    if not isinstance(reviewed_tools, Mapping) or set(reviewed_tools) != {"git"}:
         raise ReleaseBuildError("reviewed external-tool identity drift")
     tool_receipts: Dict[str, Mapping[str, Any]] = {}
-    for name in ("git", "unshare"):
+    for name in ("git",):
         tool_path = _normalize_absolute_path(
             str(reviewed_tools[name]), label=f"reviewed {name} executable"
         )
@@ -1832,9 +1928,7 @@ def _validate_runtime_target(identity: Mapping[str, Any], python_path: Path) -> 
         raise ReleaseBuildError("release glibc drift")
     if identity.get("executable") != str(python_path):
         raise ReleaseBuildError("release interpreter path drift")
-    if identity.get("reviewed_tools") != {
-        "git": "/usr/bin/git", "unshare": "/usr/bin/unshare"
-    }:
+    if identity.get("reviewed_tools") != {"git": "/usr/bin/git"}:
         raise ReleaseBuildError("release reviewed external-tool path drift")
 
 
@@ -1912,6 +2006,7 @@ def _execute_runtime_build(
     *, release_dir: Path, inputs: ReleaseInputs, interpreter: Path,
     temporary_root: Path,
 ) -> Mapping[str, Any]:
+    network_isolation = _network_isolation_contract()
     app = release_dir / "app"
     venv = release_dir / "venv"
     wheelhouse = release_dir / "wheelhouse"
@@ -1933,9 +2028,6 @@ def _execute_runtime_build(
         python_path, cwd=app, environment=environment
     )
     _validate_runtime_target(identity_before, python_path)
-    network_isolation, namespace_prefix = _network_isolation_contract(
-        python_path, cwd=app, environment=environment
-    )
     site_script = (
         "import json,sysconfig; print(json.dumps(sysconfig.get_paths()['purelib']))"
     )
@@ -1943,7 +2035,6 @@ def _execute_runtime_build(
         [str(python_path), "-I", "-B", "-c", site_script],
         cwd=app,
         environment=environment,
-        prefix=namespace_prefix,
     )
     site_packages = Path(json.loads(site_result.stdout.strip()))
     try:
@@ -1964,7 +2055,6 @@ def _execute_runtime_build(
         ],
         cwd=app,
         environment=environment,
-        prefix=namespace_prefix,
     )
     dependency = _run_command(
         _isolated_module_command(
@@ -1975,7 +2065,6 @@ def _execute_runtime_build(
         ),
         cwd=app,
         environment=environment,
-        prefix=namespace_prefix,
     )
     dependency_result = _strict_json(
         dependency.stdout.strip().encode("utf-8"), label="dependency validation output"
@@ -1988,7 +2077,6 @@ def _execute_runtime_build(
         [str(python_path), "-B", "-m", "pip", "check"],
         cwd=app,
         environment=environment,
-        prefix=namespace_prefix,
     )
     sys_path_script = (
         "import json,os,sys; app=sys.argv[1]; sys.path.insert(0,app); "
@@ -1999,7 +2087,6 @@ def _execute_runtime_build(
         [str(python_path), "-I", "-B", "-c", sys_path_script, str(app)],
         cwd=app,
         environment=environment,
-        prefix=namespace_prefix,
     )
     sys_path = _strict_json(
         sys_path_result.stdout.strip().encode("utf-8"), label="release sys.path"
@@ -2028,7 +2115,6 @@ def _execute_runtime_build(
         ),
         cwd=app,
         environment=environment,
-        prefix=namespace_prefix,
     )
     test_node_ids = tuple(
         line.strip()
@@ -2052,7 +2138,6 @@ def _execute_runtime_build(
         ),
         cwd=app,
         environment=environment,
-        prefix=namespace_prefix,
     )
     summary = re.search(r"(\d+) passed, (\d+) skipped in ", tests.stdout)
     if summary is None or tuple(map(int, summary.groups())) != (
@@ -2117,7 +2202,7 @@ def _execute_runtime_build(
             "release validation mutated inputs or left unexpected release state"
         )
     identity = _runtime_identity(
-        python_path, cwd=app, environment=environment, prefix=namespace_prefix,
+        python_path, cwd=app, environment=environment,
         exercise_ceremony=True,
     )
     _validate_runtime_target(identity, python_path)
@@ -2381,12 +2466,14 @@ def _atlas_gate_e_runtime_receipt(
     if base_runtime.get("schema_version") != EXTERNAL_BASE_RUNTIME_RECEIPT_SCHEMA:
         raise ReleaseBuildError("Atlas Gate E external-runtime receipt schema drift")
     tool_records = base_runtime.get("reviewed_tools")
-    if not isinstance(tool_records, Mapping) or set(tool_records) != {
-        "git", "unshare"
-    } or tool_records["git"].get("path") != "/usr/bin/git" or tool_records[
-        "unshare"
-    ].get("path") != "/usr/bin/unshare":
+    if (
+        not isinstance(tool_records, Mapping)
+        or set(tool_records) != {"git"}
+        or tool_records["git"].get("path") != "/usr/bin/git"
+    ):
         raise ReleaseBuildError("Atlas Gate E reviewed tool identities are missing")
+    network_isolation = evidence.get("network_isolation")
+    _verify_network_isolation_record(network_isolation)
     release_identity = _directory_identity(release_dir)
     if allow_pending_release_root_seal and release_identity["mode"] in {"0700", "0755"}:
         # The receipt must be serialized before its containing metadata can be
@@ -2456,6 +2543,7 @@ def _atlas_gate_e_runtime_receipt(
                 "single_link": True,
             },
         },
+        "network_isolation": network_isolation,
         "base_runtime": base_runtime,
         "seal_evidence": {
             "accepted_production_controls": [
@@ -2530,37 +2618,36 @@ def _verify_sealed_app_matches_source(release_dir: Path, source: SourceBundle) -
 
 def _verify_network_isolation_record(record: Any) -> None:
     if not isinstance(record, Mapping) or set(record) != {
-        "mechanism", "parent_network_namespace", "probe", "utility"
-    } or record.get("mechanism") != "linux_user_and_network_namespace_v1":
+        "mechanism", "current_network_namespace", "interfaces",
+        "proc_net_dev_interfaces", "ipv4_nonlocal_route_count",
+        "ipv6_nonlocal_route_count", "ipv4_connect_address",
+        "ipv6_connect_address", "connect_port", "ipv4_connect_errno",
+        "ipv6_connect_errno", "outbound_connect_blocked",
+    } or record.get("mechanism") != "systemd_private_network_loopback_only_v1":
         raise ReleaseBuildError("network-isolation evidence schema drift")
-    probe = record.get("probe")
-    if not isinstance(probe, Mapping) or set(probe) != {
-        "child_network_namespace", "outbound_connect_blocked"
-    } or probe.get("outbound_connect_blocked") is not True:
+    if (
+        not re.fullmatch(
+            r"net:\[[0-9]+\]", str(record.get("current_network_namespace", ""))
+        )
+        or record.get("interfaces") != ["lo"]
+        or record.get("proc_net_dev_interfaces") != ["lo"]
+        or type(record.get("ipv4_nonlocal_route_count")) is not int
+        or record.get("ipv4_nonlocal_route_count") != 0
+        or type(record.get("ipv6_nonlocal_route_count")) is not int
+        or record.get("ipv6_nonlocal_route_count") != 0
+        or record.get("ipv4_connect_address") != NETWORK_IPV4_CONNECT_ADDRESS
+        or record.get("ipv6_connect_address") != NETWORK_IPV6_CONNECT_ADDRESS
+        or record.get("connect_port") != NETWORK_CONNECT_PORT
+        or record.get("ipv4_connect_errno") != 101
+        or record.get("ipv6_connect_errno") != 101
+        or record.get("outbound_connect_blocked") is not True
+    ):
         raise ReleaseBuildError("network-isolation proof evidence drift")
-    utility = record.get("utility")
-    if not isinstance(utility, Mapping) or set(utility) != {
-        "bytes", "mode", "path", "sha256"
-    }:
-        raise ReleaseBuildError("network-isolation utility evidence drift")
-    utility_path = _normalize_absolute_path(
-        str(utility.get("path")), label="network-isolation utility"
-    )
-    actual_bytes, actual_sha256 = _hash_regular_path(utility_path)
-    descriptor, metadata = _open_regular_path(utility_path)
-    os.close(descriptor)
-    if utility != {
-        "bytes": actual_bytes,
-        "mode": format(stat.S_IMODE(metadata.st_mode), "04o"),
-        "path": str(utility_path),
-        "sha256": actual_sha256,
-    } or not metadata.st_mode & 0o111:
-        raise ReleaseBuildError("network-isolation utility identity drift")
 
 
 def _verify_runtime_evidence(
     evidence: Any, *, release_dir: Path, dependency_result: Mapping[str, Any]
-) -> None:
+) -> Mapping[str, Any]:
     expected_fields = {
         "base_runtime", "dependency_validation", "distribution_closure",
         "entire_release_unchanged",
@@ -2617,12 +2704,9 @@ def _verify_runtime_evidence(
         environment = _sanitized_environment(
             temporary_root=Path(temporary), venv_bin=python_path.parent
         )
-        actual_network, namespace_prefix = _network_isolation_contract(
-            python_path, cwd=app, environment=environment
-        )
+        actual_network = _network_isolation_contract()
         actual_identity = _runtime_identity(
             python_path, cwd=app, environment=environment,
-            prefix=namespace_prefix,
             exercise_ceremony=True,
         )
         _validate_runtime_target(actual_identity, python_path)
@@ -2636,8 +2720,7 @@ def _verify_runtime_evidence(
     if _base_runtime_receipt(actual_identity) != evidence.get("base_runtime"):
         raise ReleaseBuildError("external base interpreter or stdlib identity drift")
     _verify_network_isolation_record(evidence.get("network_isolation"))
-    if actual_network.get("utility") != evidence["network_isolation"].get("utility"):
-        raise ReleaseBuildError("current network-isolation implementation drift")
+    return actual_network
 
 
 def _verify_sealed_release(
@@ -2740,8 +2823,9 @@ def _verify_sealed_release(
         "wheelhouse_verified"
     ):
         raise ReleaseBuildError("sealed dependency validation failed")
+    current_network_isolation: Mapping[str, Any] | None = None
     if verify_runtime:
-        _verify_runtime_evidence(
+        current_network_isolation = _verify_runtime_evidence(
             manifest.get("runtime_evidence"),
             release_dir=release_dir,
             dependency_result=dependency_result,
@@ -2752,6 +2836,7 @@ def _verify_sealed_release(
         "atlas_gate_e_runtime_receipt",
         "source_store", "dependency_validation", "pytest_passed",
         "pytest_skipped", "pip_check_passed", "network_forbidden",
+        "network_isolation",
         "release_tree_unchanged", "source_and_venv_unchanged",
         "sealed_runtime_verified_before_ready",
     }
@@ -2782,6 +2867,10 @@ def _verify_sealed_release(
         != manifest["runtime_evidence"]["pytest_skipped"]
         or receipt.get("pip_check_passed") is not True
         or receipt.get("network_forbidden") is not True
+        or receipt.get("network_isolation")
+        != manifest["runtime_evidence"]["network_isolation"]
+        or receipt.get("network_isolation")
+        != expected_gate_e_receipt["network_isolation"]
         or receipt.get("release_tree_unchanged") is not True
         or receipt.get("source_and_venv_unchanged") is not True
         or receipt.get("sealed_runtime_verified_before_ready") is not True
@@ -2796,6 +2885,7 @@ def _verify_sealed_release(
         "schema_version": VERIFY_SCHEMA,
         "status": "PASS" if verify_runtime else "METADATA_PASS",
         "runtime_verified": verify_runtime,
+        "network_isolation": current_network_isolation,
         "release_dir": str(release_dir),
         "release_input_sha256": ready["release_input_sha256"],
         "build_identity_sha256": ready["build_identity_sha256"],
@@ -2822,12 +2912,12 @@ def build_release(
     interpreter: Path = Path("/usr/bin/python3"), temporary_parent: Path = Path("/tmp"),
     fault_at: Optional[str] = None,
     runtime_executor: Callable[..., Mapping[str, Any]] = _execute_runtime_build,
-    runtime_verifier: Callable[..., None] = _verify_runtime_evidence,
+    runtime_verifier: Callable[..., Any] = _verify_runtime_evidence,
 ) -> Mapping[str, Any]:
     release_dir = inputs.release_parent / "releases/sha256" / inputs.release_input_sha256
     source_dir = inputs.release_parent / "sources/sha256" / inputs.source.archive_sha256
     plan = {
-        "schema_version": "caerus_alpha_lab_release_build_plan_v1",
+        "schema_version": "caerus_alpha_lab_release_build_plan_v2",
         "status": "DRY_RUN_VERIFIED" if not write else "WRITE_REQUESTED",
         "release_input_sha256": inputs.release_input_sha256,
         "release_dir": str(release_dir),
@@ -2836,7 +2926,7 @@ def build_release(
         "write": write,
     }
     if not write:
-        return plan
+        return {**plan, "network_isolation": _network_isolation_contract()}
     if (
         authorized_release_input_sha256 is None
         or authorized_release_input_sha256 != inputs.release_input_sha256
@@ -2865,6 +2955,7 @@ def build_release(
     os.close(interpreter_fd)
     if not interpreter_stat.st_mode & 0o111:
         raise ReleaseBuildError("release interpreter is not executable")
+    _network_isolation_contract()
     parent_fd = _open_absolute_directory(inputs.release_parent, create_missing=True)
     try:
         source_store = _materialize_source_store(parent_fd, inputs, fault_at=fault_at)
@@ -2964,6 +3055,7 @@ def build_release(
         "pytest_skipped": runtime_evidence["pytest_skipped"],
         "pip_check_passed": True,
         "network_forbidden": True,
+        "network_isolation": runtime_evidence["network_isolation"],
         "release_tree_unchanged": runtime_evidence["entire_release_unchanged"],
         "source_and_venv_unchanged": runtime_evidence["source_and_venv_unchanged"],
         "sealed_runtime_verified_before_ready": True,
@@ -3126,7 +3218,7 @@ def _identity_from_base_runtime_receipt(receipt: Mapping[str, Any]) -> Mapping[s
         or not isinstance(os_release, Mapping)
         or not isinstance(shared, list)
         or not isinstance(tools, Mapping)
-        or set(tools) != {"git", "unshare"}
+        or set(tools) != {"git"}
         or not isinstance(stdlib, list)
     ):
         raise ReleaseBuildError("external base-runtime receipt content drift")
@@ -3332,6 +3424,7 @@ def _verify_ceremony_child_maps(
 def run_ceremony(
     release_dir: Path, ceremony_arguments: Sequence[str], *, approved_output_root: Path
 ) -> int:
+    ceremony_network_isolation = _network_isolation_contract()
     # This first pass is deliberately metadata-only: calling the copied Python
     # before confirming the external TCB seal would execute the very stdlib
     # whose trust is still being established.
@@ -3371,9 +3464,6 @@ def run_ceremony(
             temporary_root=temporary_root, venv_bin=python_path.parent
         )
         environment["CAERUS_CEREMONY_OUTPUT_ROOT"] = str(approved_output_root)
-        _network_evidence, prefix = _network_isolation_contract(
-            python_path, cwd=app, environment=environment
-        )
         execution_error: BaseException | None = None
         child_maps_error: BaseException | None = None
         child_maps: Mapping[str, Any] | None = None
@@ -3382,15 +3472,12 @@ def run_ceremony(
             child_maps_fd = child_maps_file.fileno()
             try:
                 result = subprocess.run(
-                    [
-                        *prefix,
-                        *_isolated_ceremony_command(
-                            python_path,
-                            app,
-                            ceremony_arguments,
-                            maps_receipt_fd=child_maps_fd,
-                        ),
-                    ],
+                    _isolated_ceremony_command(
+                        python_path,
+                        app,
+                        ceremony_arguments,
+                        maps_receipt_fd=child_maps_fd,
+                    ),
                     cwd=str(app),
                     env=environment,
                     check=False,
@@ -3434,7 +3521,7 @@ def run_ceremony(
     output_delta = _ceremony_output_delta(output_before, output_after)
     if result.returncode == 0:
         success = {
-            "schema_version": "caerus_alpha_lab_gate_e_ceremony_success_v1",
+            "schema_version": "caerus_alpha_lab_gate_e_ceremony_success_v2",
             "status": "PASS",
             "release_input_sha256": verified["release_input_sha256"],
             "ready_sha256": verified["ready_sha256"],
@@ -3449,6 +3536,7 @@ def run_ceremony(
             ),
             "post_execution_rescan_passed": True,
             "returncode": 0,
+            "network_isolation": ceremony_network_isolation,
             "ceremony_child_maps": child_maps,
             "ceremony_child_maps_sha256": _sha256(_canonical_bytes(child_maps)),
             "approved_output_root": str(approved_output_root),
@@ -3559,12 +3647,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             inputs = _inputs_from_arguments(arguments)
             if arguments.command == "preflight":
                 result = {
-                    "schema_version": "caerus_alpha_lab_release_input_preflight_v1",
+                    "schema_version": "caerus_alpha_lab_release_input_preflight_v2",
                     "status": "PASS",
                     "release_input_sha256": inputs.release_input_sha256,
                     "source_archive_sha256": inputs.source.archive_sha256,
                     "wheel_count": inputs.release_input["dependencies"]["wheel_count"],
                     "builder_origin": inputs.builder_origin,
+                    "network_isolation": _network_isolation_contract(),
                     "write": False,
                 }
             else:
