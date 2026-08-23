@@ -109,9 +109,16 @@ release source commit.
 Atlas consumes the versioned `atlas_gate_e_runtime_receipt` nested in Alpha's
 immutable verification receipt and checks its chain through the independently
 pinned `READY` bytes. Same-owner read-only modes are explicitly insufficient:
-the production launcher also requires a different non-writing principal or a
-read-only mount and re-verifies the external Python, stdlib/shared-library, and
-reviewed `/usr/bin/git` identities immediately before use.
+the production launcher requires an administrator-established read-only system
+image, release, and bootstrap hierarchy before any Gate E Python starts. A
+different principal alone is not accepted. It re-verifies the external Python,
+every stdlib descendant, mapped shared objects, OS receipt, reviewed
+`/usr/bin/git` and `/usr/bin/unshare`, and substitutable ancestors immediately
+before use and again after execution. Atlas must consume the v2 Gate E receipt
+and v1 external-base-runtime receipt directly; a caller-derived dependency or
+runtime hash is not an alternative authority. Ceremony output is uncertified
+unless the command succeeds, the complete postscan matches the prescan, and the
+launcher emits the create-only Gate E success receipt.
 
 After an isolated direct-file `release_build verify`, invoke the reviewed
 content-addressed builder only through the sealed public-only launcher:

@@ -57,13 +57,16 @@ else:  # Exact direct-file bootstrap: `python -I -S -B /.../release_build.py`.
 
 SOURCE_SCHEMA = "caerus_alpha_lab_clean_release_source_v1"
 RELEASE_INPUT_SCHEMA = "caerus_alpha_lab_clean_release_input_v1"
-BUILT_RUNTIME_SCHEMA = "caerus_alpha_lab_built_runtime_manifest_v2"
-VERIFICATION_RECEIPT_SCHEMA = "caerus_alpha_lab_release_verification_receipt_v2"
+BUILT_RUNTIME_SCHEMA = "caerus_alpha_lab_built_runtime_manifest_v3"
+VERIFICATION_RECEIPT_SCHEMA = "caerus_alpha_lab_release_verification_receipt_v3"
 READY_SCHEMA = "caerus_alpha_lab_release_ready_v1"
 SOURCE_READY_SCHEMA = "caerus_alpha_lab_source_ready_v1"
-VERIFY_SCHEMA = "caerus_alpha_lab_sealed_release_verification_v2"
+VERIFY_SCHEMA = "caerus_alpha_lab_sealed_release_verification_v3"
 ATLAS_GATE_E_RUNTIME_RECEIPT_SCHEMA = (
-    "caerus_alpha_lab_atlas_gate_e_runtime_receipt_v1"
+    "caerus_alpha_lab_atlas_gate_e_runtime_receipt_v2"
+)
+EXTERNAL_BASE_RUNTIME_RECEIPT_SCHEMA = (
+    "caerus_alpha_lab_external_base_runtime_receipt_v1"
 )
 FILE_MANIFEST_SCHEMA = "canonical-json-sorted-file-and-symlink-records-v1"
 LOCK_RELATIVE_PATH = Path(
@@ -1255,6 +1258,52 @@ def _isolated_module_command(
     ]
 
 
+def _isolated_ceremony_command(
+    python_path: Path, app: Path, arguments: Sequence[str], *, maps_receipt_fd: int,
+) -> list[str]:
+    """Run the fixed ceremony module and create its final mmap census."""
+
+    bootstrap = r"""
+import json, os, runpy, sys
+app=sys.argv.pop(1)
+maps_receipt_fd=int(sys.argv.pop(1))
+module='projects.alpha_lab.factory.ceremony'
+sys.path.insert(0,app)
+sys.argv[0]=module
+try:
+    runpy.run_module(module,run_name='__main__')
+finally:
+    shared=set()
+    with open('/proc/self/maps',encoding='utf-8') as stream:
+        for raw in stream:
+            fields=raw.rstrip('\n').split(None,5)
+            if len(fields)==6 and fields[5].startswith('/'):
+                shared.add(fields[5])
+    venv_root=os.path.realpath(sys.prefix)
+    executable=os.path.realpath(sys.executable)
+    shared=sorted(
+        path for path in shared
+        if os.path.realpath(path)!=executable
+        and not os.path.realpath(path).startswith(venv_root+os.sep)
+    )
+    payload=json.dumps(
+        {
+            'schema_version':'caerus_alpha_lab_ceremony_child_maps_v1',
+            'external_mapped_paths':shared,
+        },
+        sort_keys=True,separators=(',',':'),ensure_ascii=False,
+    ).encode('utf-8')
+    offset=0
+    while offset < len(payload):
+        offset += os.write(maps_receipt_fd,payload[offset:])
+    os.fsync(maps_receipt_fd)
+"""
+    return [
+        str(python_path), "-I", "-B", "-c", bootstrap, str(app),
+        str(maps_receipt_fd), *arguments,
+    ]
+
+
 def _network_isolation_contract(
     python_path: Path, *, cwd: Path, environment: Mapping[str, str]
 ) -> Tuple[Mapping[str, Any], Tuple[str, ...]]:
@@ -1341,10 +1390,13 @@ sys.addaudithook(_caerus_no_network)
 
 def _runtime_identity(
     python_path: Path, *, cwd: Path, environment: Mapping[str, str],
-    prefix: Sequence[str] = (),
+    prefix: Sequence[str] = (), exercise_ceremony: bool = False,
 ) -> Mapping[str, Any]:
     script = r"""
-import importlib.metadata as m, json, os, platform, sys, sysconfig
+import importlib, importlib.metadata as m, json, os, platform, sys, sysconfig
+if sys.argv[1]=='1':
+    sys.path.insert(0,os.getcwd())
+    importlib.import_module('projects.alpha_lab.factory.ceremony')
 norm=lambda x: __import__('re').sub(r'[-_.]+','-',x).lower()
 d={norm(x.metadata['Name']):x.version for x in m.distributions()}
 paths=sysconfig.get_paths()
@@ -1362,10 +1414,13 @@ with open('/proc/self/maps',encoding='utf-8') as stream:
         if len(fields)==6 and fields[5].startswith('/'): shared.add(fields[5])
 venv_root=os.path.realpath(sys.prefix)
 shared={path for path in shared if os.path.realpath(path)!=os.path.realpath(sys.executable) and not os.path.realpath(path).startswith(venv_root+os.sep)}
-print(json.dumps({'python_version':platform.python_version(),'python_implementation':platform.python_implementation(),'architecture':platform.machine(),'libc':list(platform.libc_ver()),'operating_system':{'id':os_release.get('ID'),'version_id':os_release.get('VERSION_ID'),'receipt_path':os_release_path},'executable':sys.executable,'base_executable':getattr(sys,'_base_executable',None),'base_prefix':sys.base_prefix,'base_exec_prefix':sys.base_exec_prefix,'stdlib_paths':sorted(set([paths['stdlib'],paths['platstdlib']])),'loaded_shared_objects':sorted(shared),'reviewed_tools':{'git':'/usr/bin/git'},'distributions':dict(sorted(d.items()))},sort_keys=True,separators=(',',':')))
+print(json.dumps({'python_version':platform.python_version(),'python_implementation':platform.python_implementation(),'architecture':platform.machine(),'libc':list(platform.libc_ver()),'operating_system':{'id':os_release.get('ID'),'version_id':os_release.get('VERSION_ID'),'receipt_path':os_release_path},'executable':sys.executable,'base_executable':getattr(sys,'_base_executable',None),'base_prefix':sys.base_prefix,'base_exec_prefix':sys.base_exec_prefix,'stdlib_paths':sorted(set([paths['stdlib'],paths['platstdlib']])),'loaded_shared_objects':sorted(shared),'reviewed_tools':{'git':'/usr/bin/git','unshare':'/usr/bin/unshare'},'distributions':dict(sorted(d.items()))},sort_keys=True,separators=(',',':')))
 """
     result = _run_command(
-        [str(python_path), "-I", "-B", "-c", script], cwd=cwd,
+        [
+            str(python_path), "-I", "-B", "-c", script,
+            "1" if exercise_ceremony else "0",
+        ], cwd=cwd,
         environment=environment, prefix=prefix,
     )
     parsed = _strict_json(result.stdout.strip().encode("utf-8"), label="runtime identity")
@@ -1374,57 +1429,288 @@ print(json.dumps({'python_version':platform.python_version(),'python_implementat
     return parsed
 
 
-def _scan_external_tree_fd(
-    root_fd: int, *, prefix: Tuple[str, ...] = ()
-) -> list[Dict[str, Any]]:
-    """Hash a trusted host runtime tree without following links."""
+def _filesystem_readonly(descriptor: int) -> bool:
+    readonly_flag = getattr(os, "ST_RDONLY", getattr(stat, "ST_RDONLY", 1))
+    return bool(os.fstatvfs(descriptor).f_flag & readonly_flag)
 
+
+def _effective_writable_at(parent_fd: int, name: str) -> bool:
+    try:
+        return os.access(
+            name,
+            os.W_OK,
+            dir_fd=parent_fd,
+            effective_ids=True,
+            follow_symlinks=False,
+        )
+    except (NotImplementedError, TypeError) as exc:
+        raise ReleaseBuildError(
+            "platform cannot perform ACL-aware descriptor-relative write check"
+        ) from exc
+
+
+def _directory_seal_record(
+    descriptor: int, *, path: str, effective_writable: bool,
+    production_seal: bool,
+) -> Dict[str, Any]:
+    metadata = os.fstat(descriptor)
+    readonly = _filesystem_readonly(descriptor)
+    record = {
+        "path": path,
+        "type": "directory",
+        "mode": format(stat.S_IMODE(metadata.st_mode), "04o"),
+        "uid": metadata.st_uid,
+        "gid": metadata.st_gid,
+        "nlink": metadata.st_nlink,
+        "filesystem_readonly": readonly,
+        "effective_principal_writable": effective_writable,
+    }
+    if production_seal and (not readonly or effective_writable):
+        raise ReleaseBuildError(
+            f"external runtime directory is not on a read-only filesystem: {path}"
+        )
+    return record
+
+
+def _scan_external_tree_fd(
+    root_fd: int, *, prefix: Tuple[str, ...] = (), production_seal: bool = True,
+    exclude_root_names: set[str] | None = None,
+) -> list[Dict[str, Any]]:
+    """Census a host-runtime tree using stable, no-follow descriptors.
+
+    Production receipts are valid only inside an administrator-established
+    read-only mount/image.  Symlinks, hard-linked files, and special entries
+    are rejected because they broaden the executable TCB beyond the receipt.
+    """
+
+    root_before = os.fstat(root_fd)
+    if not stat.S_ISDIR(root_before.st_mode):
+        raise ReleaseBuildError("external runtime root is not a directory")
     records: list[Dict[str, Any]] = []
     for name in _directory_names(root_fd):
+        if not prefix and name in (exclude_root_names or set()):
+            continue
         metadata = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
         relative = "/".join(prefix + (name,))
-        mode = format(stat.S_IMODE(metadata.st_mode), "04o")
+        if stat.S_ISLNK(metadata.st_mode):
+            raise ReleaseBuildError(
+                f"external runtime symlink is forbidden: {relative}"
+            )
         if stat.S_ISDIR(metadata.st_mode):
             child = os.open(name, _READ_DIR_FLAGS, dir_fd=root_fd)
             try:
-                records.append({"path": relative, "type": "directory", "mode": mode})
-                records.extend(_scan_external_tree_fd(child, prefix=prefix + (name,)))
+                opened = os.fstat(child)
+                if (opened.st_dev, opened.st_ino) != (
+                    metadata.st_dev, metadata.st_ino
+                ):
+                    raise ReleaseBuildError(
+                        f"external runtime directory raced while opening: {relative}"
+                    )
+                records.append(
+                    _directory_seal_record(
+                        child,
+                        path=relative,
+                        effective_writable=_effective_writable_at(root_fd, name),
+                        production_seal=production_seal,
+                    )
+                )
+                records.extend(
+                    _scan_external_tree_fd(
+                        child,
+                        prefix=prefix + (name,),
+                        production_seal=production_seal,
+                        exclude_root_names=exclude_root_names,
+                    )
+                )
+                after = os.fstat(child)
+                if (
+                    opened.st_dev,
+                    opened.st_ino,
+                    opened.st_mtime_ns,
+                    opened.st_ctime_ns,
+                ) != (
+                    after.st_dev,
+                    after.st_ino,
+                    after.st_mtime_ns,
+                    after.st_ctime_ns,
+                ):
+                    raise ReleaseBuildError(
+                        f"external runtime directory changed during census: {relative}"
+                    )
             finally:
                 os.close(child)
         elif stat.S_ISREG(metadata.st_mode):
-            total, digest, _ = _hash_open_file(root_fd, name)
-            records.append(
-                {
-                    "path": relative,
-                    "type": "file",
-                    "mode": mode,
-                    "bytes": total,
-                    "sha256": digest,
-                }
-            )
-        elif stat.S_ISLNK(metadata.st_mode):
-            records.append(
-                {
-                    "path": relative,
-                    "type": "symlink",
-                    "mode": mode,
-                    "target": os.readlink(name, dir_fd=root_fd),
-                }
-            )
+            descriptor = os.open(name, _READ_FILE_FLAGS, dir_fd=root_fd)
+            try:
+                before = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(before.st_mode)
+                    or before.st_nlink != 1
+                    or (before.st_dev, before.st_ino)
+                    != (metadata.st_dev, metadata.st_ino)
+                ):
+                    raise ReleaseBuildError(
+                        f"external runtime file is raced or hard-linked: {relative}"
+                    )
+                digest = hashlib.sha256()
+                total = 0
+                while True:
+                    chunk = os.read(descriptor, 1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    total += len(chunk)
+                after = os.fstat(descriptor)
+                if (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_size,
+                    before.st_mtime_ns,
+                    before.st_ctime_ns,
+                ) != (
+                    after.st_dev,
+                    after.st_ino,
+                    after.st_size,
+                    after.st_mtime_ns,
+                    after.st_ctime_ns,
+                ) or total != before.st_size:
+                    raise ReleaseBuildError(
+                        f"external runtime file changed during census: {relative}"
+                    )
+                readonly = _filesystem_readonly(descriptor)
+                writable = _effective_writable_at(root_fd, name)
+                if production_seal and (not readonly or writable):
+                    raise ReleaseBuildError(
+                        f"external runtime file is not on a read-only filesystem: {relative}"
+                    )
+                records.append(
+                    {
+                        "path": relative,
+                        "type": "file",
+                        "mode": format(stat.S_IMODE(before.st_mode), "04o"),
+                        "uid": before.st_uid,
+                        "gid": before.st_gid,
+                        "nlink": before.st_nlink,
+                        "filesystem_readonly": readonly,
+                        "effective_principal_writable": writable,
+                        "bytes": total,
+                        "sha256": digest.hexdigest(),
+                    }
+                )
+            finally:
+                os.close(descriptor)
         else:
             raise ReleaseBuildError(
                 f"unsupported base-runtime filesystem entry: {relative}"
             )
+    root_after = os.fstat(root_fd)
+    if (
+        root_before.st_dev,
+        root_before.st_ino,
+        root_before.st_mtime_ns,
+        root_before.st_ctime_ns,
+    ) != (
+        root_after.st_dev,
+        root_after.st_ino,
+        root_after.st_mtime_ns,
+        root_after.st_ctime_ns,
+    ):
+        raise ReleaseBuildError("external runtime root changed during census")
     return sorted(records, key=lambda record: str(record["path"]))
 
 
-def _base_runtime_receipt(identity: Mapping[str, Any]) -> Mapping[str, Any]:
+def _external_file_receipt(
+    path: Path, *, production_seal: bool,
+) -> Mapping[str, Any]:
+    descriptor, before = _open_regular_path(path)
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+        after = os.fstat(descriptor)
+        readonly = _filesystem_readonly(descriptor)
+    finally:
+        os.close(descriptor)
+    if (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    ) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ) or total != before.st_size:
+        raise ReleaseBuildError(f"external runtime file changed while hashing: {path}")
+    parent = _open_absolute_directory(path.parent)
+    try:
+        writable = _effective_writable_at(parent, path.name)
+    finally:
+        os.close(parent)
+    if production_seal and (not readonly or writable):
+        raise ReleaseBuildError(
+            f"external runtime file is not on a read-only filesystem: {path}"
+        )
+    return {
+        "path": str(path),
+        "type": "file",
+        "bytes": total,
+        "sha256": digest.hexdigest(),
+        "mode": format(stat.S_IMODE(before.st_mode), "04o"),
+        "uid": before.st_uid,
+        "gid": before.st_gid,
+        "nlink": before.st_nlink,
+        "filesystem_readonly": readonly,
+        "effective_principal_writable": writable,
+    }
+
+
+def _ancestor_seal_census(
+    paths: Sequence[Path], *, production_seal: bool,
+) -> list[Mapping[str, Any]]:
+    values: set[str] = {"/"}
+    for path in paths:
+        current = path if path.is_dir() else path.parent
+        values.add(str(current))
+        values.update(str(parent) for parent in current.parents)
+    records: list[Mapping[str, Any]] = []
+    for value in sorted(values):
+        path = Path(value)
+        descriptor = os.open("/", _READ_DIR_FLAGS) if value == "/" else _open_absolute_directory(path)
+        try:
+            writable = os.access(path, os.W_OK, effective_ids=True)
+            records.append(
+                _directory_seal_record(
+                    descriptor,
+                    path=value,
+                    effective_writable=writable,
+                    production_seal=production_seal,
+                )
+            )
+        finally:
+            os.close(descriptor)
+    return records
+
+
+def _base_runtime_receipt(
+    identity: Mapping[str, Any], *, production_seal: bool = True,
+) -> Mapping[str, Any]:
+    if production_seal and os.geteuid() == 0:
+        raise ReleaseBuildError("external runtime seal must be verified as non-root")
     base_executable = _normalize_absolute_path(
         str(identity.get("base_executable")), label="base interpreter"
     )
-    executable_bytes, executable_sha256 = _hash_regular_path(base_executable)
-    executable_fd, executable_stat = _open_regular_path(base_executable)
-    os.close(executable_fd)
+    base_record = _external_file_receipt(
+        base_executable, production_seal=production_seal
+    )
     stdlib_values = identity.get("stdlib_paths")
     if not isinstance(stdlib_values, list) or not stdlib_values:
         raise ReleaseBuildError("runtime did not report its external stdlib roots")
@@ -1433,16 +1719,25 @@ def _base_runtime_receipt(identity: Mapping[str, Any]) -> Mapping[str, Any]:
         path = _normalize_absolute_path(str(raw_path), label="stdlib root")
         descriptor = _open_absolute_directory(path)
         try:
-            records = _scan_external_tree_fd(descriptor)
-            root_mode = format(stat.S_IMODE(os.fstat(descriptor).st_mode), "04o")
+            root_writable = os.access(path, os.W_OK, effective_ids=True)
+            root_record = _directory_seal_record(
+                descriptor,
+                path=str(path),
+                effective_writable=root_writable,
+                production_seal=production_seal,
+            )
+            records = _scan_external_tree_fd(
+                descriptor, production_seal=production_seal
+            )
         finally:
             os.close(descriptor)
         stdlib_receipts.append(
             {
                 "path": str(path),
+                "root": root_record,
                 "record_count": len(records),
                 "records_sha256": _sha256(_canonical_bytes(records)),
-                "root_mode": root_mode,
+                "records": records,
             }
         )
     operating_system = identity.get("operating_system")
@@ -1451,59 +1746,64 @@ def _base_runtime_receipt(identity: Mapping[str, Any]) -> Mapping[str, Any]:
     os_release_path = _normalize_absolute_path(
         str(operating_system.get("receipt_path")), label="OS release receipt"
     )
-    os_release_bytes = _read_regular_path(os_release_path)
+    os_release_record = _external_file_receipt(
+        os_release_path, production_seal=production_seal
+    )
     shared_values = identity.get("loaded_shared_objects")
     if not isinstance(shared_values, list) or not shared_values:
         raise ReleaseBuildError("runtime loaded shared-object identity is missing")
     shared_receipts = []
     for raw_path in shared_values:
         path = _normalize_absolute_path(str(raw_path), label="loaded shared object")
-        size, digest = _hash_regular_path(path)
-        descriptor, metadata = _open_regular_path(path)
-        os.close(descriptor)
         shared_receipts.append(
-            {
-                "bytes": size,
-                "mode": format(stat.S_IMODE(metadata.st_mode), "04o"),
-                "path": str(path),
-                "sha256": digest,
-            }
+            _external_file_receipt(path, production_seal=production_seal)
         )
     reviewed_tools = identity.get("reviewed_tools")
-    if not isinstance(reviewed_tools, Mapping) or set(reviewed_tools) != {"git"}:
+    if not isinstance(reviewed_tools, Mapping) or set(reviewed_tools) != {
+        "git", "unshare"
+    }:
         raise ReleaseBuildError("reviewed external-tool identity drift")
-    git_path = _normalize_absolute_path(
-        str(reviewed_tools["git"]), label="reviewed Git executable"
-    )
-    git_bytes, git_sha256 = _hash_regular_path(git_path)
-    git_descriptor, git_metadata = _open_regular_path(git_path)
-    os.close(git_descriptor)
+    tool_receipts: Dict[str, Mapping[str, Any]] = {}
+    for name in ("git", "unshare"):
+        tool_path = _normalize_absolute_path(
+            str(reviewed_tools[name]), label=f"reviewed {name} executable"
+        )
+        tool_receipts[name] = _external_file_receipt(
+            tool_path, production_seal=production_seal
+        )
+    protected_paths = [
+        base_executable,
+        os_release_path,
+        *(Path(str(item["path"])) for item in shared_receipts),
+        *(Path(str(item["path"])) for item in tool_receipts.values()),
+        *(Path(str(item["path"])) for item in stdlib_receipts),
+    ]
     return {
-        "base_executable": {
-            "bytes": executable_bytes,
-            "mode": format(stat.S_IMODE(executable_stat.st_mode), "04o"),
-            "path": str(base_executable),
-            "sha256": executable_sha256,
-        },
+        "schema_version": EXTERNAL_BASE_RUNTIME_RECEIPT_SCHEMA,
+        "base_executable": base_record,
         "base_exec_prefix": identity.get("base_exec_prefix"),
         "base_prefix": identity.get("base_prefix"),
         "loaded_shared_objects": shared_receipts,
         "operating_system_release": {
-            "bytes": len(os_release_bytes),
+            **os_release_record,
             "id": operating_system.get("id"),
-            "path": str(os_release_path),
-            "sha256": _sha256(os_release_bytes),
             "version_id": operating_system.get("version_id"),
         },
-        "reviewed_tools": {
-            "git": {
-                "bytes": git_bytes,
-                "mode": format(stat.S_IMODE(git_metadata.st_mode), "04o"),
-                "path": str(git_path),
-                "sha256": git_sha256,
-            }
-        },
+        "reviewed_tools": tool_receipts,
         "stdlib_roots": stdlib_receipts,
+        "protected_ancestor_census": _ancestor_seal_census(
+            protected_paths, production_seal=production_seal
+        ),
+        "production_seal_policy": {
+            "mechanism": "administrator_established_read_only_runtime_image_v1",
+            "established_before_python_start": True,
+            "filesystem_readonly_required": True,
+            "different_principal_alone_accepted": False,
+            "external_owner_outside_attacker_model": True,
+            "lazy_loaded_objects_confined_to_read_only_image": True,
+            "per_object_mount_check": True,
+            "post_execution_rescan_required": True,
+        },
     }
 
 
@@ -1532,7 +1832,9 @@ def _validate_runtime_target(identity: Mapping[str, Any], python_path: Path) -> 
         raise ReleaseBuildError("release glibc drift")
     if identity.get("executable") != str(python_path):
         raise ReleaseBuildError("release interpreter path drift")
-    if identity.get("reviewed_tools") != {"git": "/usr/bin/git"}:
+    if identity.get("reviewed_tools") != {
+        "git": "/usr/bin/git", "unshare": "/usr/bin/unshare"
+    }:
         raise ReleaseBuildError("release reviewed external-tool path drift")
 
 
@@ -1581,6 +1883,31 @@ def _validate_distribution_closure(
     }
 
 
+def _remove_redundant_venv_lib64_link(venv: Path) -> None:
+    """Normalize CPython's Linux ``lib64 -> lib`` compatibility link.
+
+    The venv uses ``lib/pythonX.Y`` for its installed closure.  Removing this
+    redundant alias lets the sealed release preserve the stronger no-symlink
+    Gate E tree contract rather than broadening it for a compatibility path.
+    Any different object or target is unexpected and fails closed.
+    """
+
+    descriptor = _open_absolute_directory(venv)
+    try:
+        try:
+            metadata = os.stat("lib64", dir_fd=descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if not stat.S_ISLNK(metadata.st_mode) or os.readlink(
+            "lib64", dir_fd=descriptor
+        ) != "lib":
+            raise ReleaseBuildError("venv lib64 compatibility entry is not exact")
+        os.unlink("lib64", dir_fd=descriptor)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _execute_runtime_build(
     *, release_dir: Path, inputs: ReleaseInputs, interpreter: Path,
     temporary_root: Path,
@@ -1594,6 +1921,7 @@ def _execute_runtime_build(
         cwd=app,
         environment=base_env,
     )
+    _remove_redundant_venv_lib64_link(venv)
     python_path = venv / "bin/python"
     metadata = os.lstat(python_path)
     if not stat.S_ISREG(metadata.st_mode):
@@ -1789,10 +2117,11 @@ def _execute_runtime_build(
             "release validation mutated inputs or left unexpected release state"
         )
     identity = _runtime_identity(
-        python_path, cwd=app, environment=environment, prefix=namespace_prefix
+        python_path, cwd=app, environment=environment, prefix=namespace_prefix,
+        exercise_ceremony=True,
     )
     _validate_runtime_target(identity, python_path)
-    for key in set(identity) - {"distributions"}:
+    for key in set(identity) - {"distributions", "loaded_shared_objects"}:
         if identity.get(key) != identity_before.get(key):
             raise ReleaseBuildError(f"release base runtime identity changed: {key}")
     distribution_closure = _validate_distribution_closure(identity, inputs.lock_bytes)
@@ -2049,9 +2378,15 @@ def _atlas_gate_e_runtime_receipt(
     base_runtime = evidence.get("base_runtime")
     if not isinstance(closure, Mapping) or not isinstance(base_runtime, Mapping):
         raise ReleaseBuildError("Atlas Gate E dependency/base-runtime evidence is missing")
-    git_record = base_runtime.get("reviewed_tools", {}).get("git")
-    if not isinstance(git_record, Mapping) or git_record.get("path") != "/usr/bin/git":
-        raise ReleaseBuildError("Atlas Gate E reviewed Git identity is missing")
+    if base_runtime.get("schema_version") != EXTERNAL_BASE_RUNTIME_RECEIPT_SCHEMA:
+        raise ReleaseBuildError("Atlas Gate E external-runtime receipt schema drift")
+    tool_records = base_runtime.get("reviewed_tools")
+    if not isinstance(tool_records, Mapping) or set(tool_records) != {
+        "git", "unshare"
+    } or tool_records["git"].get("path") != "/usr/bin/git" or tool_records[
+        "unshare"
+    ].get("path") != "/usr/bin/unshare":
+        raise ReleaseBuildError("Atlas Gate E reviewed tool identities are missing")
     release_identity = _directory_identity(release_dir)
     if allow_pending_release_root_seal and release_identity["mode"] in {"0700", "0755"}:
         # The receipt must be serialized before its containing metadata can be
@@ -2123,13 +2458,19 @@ def _atlas_gate_e_runtime_receipt(
         },
         "base_runtime": base_runtime,
         "seal_evidence": {
-            "accepted_production_controls": ["different_principal", "read_only_mount"],
+            "accepted_production_controls": [
+                "administrator_established_read_only_runtime_image_v1"
+            ],
             "ancestor_census": ancestors,
             "app": app_identity,
+            "different_principal_alone_accepted": False,
             "files_read_only": True,
+            "mandatory_os_read_only_runtime_image": True,
             "mode_census": dict(sorted(mode_census.items())),
+            "post_execution_rescan_required": True,
+            "pre_python_admin_control_required": True,
             "release": release_identity,
-            "requires_gate_e_effective_uid_different_from_release_owner": True,
+            "requires_gate_e_effective_uid_different_from_release_owner": False,
             "reverified_immediately": True,
             "same_user_adversarial_seal": False,
             "site_packages_no_links": True,
@@ -2248,6 +2589,10 @@ def _verify_runtime_evidence(
         or not isinstance(evidence.get("temporary_parent"), str)
     ):
         raise ReleaseBuildError("sealed runtime result evidence drift")
+    # Confirm the complete external Python/system TCB before launching the
+    # copied venv interpreter.  The read-only image itself must have been
+    # established by an administrator before this verifier process started.
+    _verify_external_base_runtime_receipt(evidence.get("base_runtime"))
     inventory = evidence.get("test_inventory")
     if not isinstance(inventory, Mapping) or set(inventory) != {
         "collected", "node_ids_sha256", "skipped_node_ids"
@@ -2278,6 +2623,7 @@ def _verify_runtime_evidence(
         actual_identity = _runtime_identity(
             python_path, cwd=app, environment=environment,
             prefix=namespace_prefix,
+            exercise_ceremony=True,
         )
         _validate_runtime_target(actual_identity, python_path)
     if actual_identity != evidence.get("runtime_identity"):
@@ -2294,7 +2640,9 @@ def _verify_runtime_evidence(
         raise ReleaseBuildError("current network-isolation implementation drift")
 
 
-def verify_sealed_release(release_dir: Path) -> Mapping[str, Any]:
+def _verify_sealed_release(
+    release_dir: Path, *, verify_runtime: bool,
+) -> Mapping[str, Any]:
     release_dir = _normalize_absolute_path(str(release_dir), label="release directory")
     root = _open_absolute_directory(release_dir)
     try:
@@ -2392,11 +2740,12 @@ def verify_sealed_release(release_dir: Path) -> Mapping[str, Any]:
         "wheelhouse_verified"
     ):
         raise ReleaseBuildError("sealed dependency validation failed")
-    _verify_runtime_evidence(
-        manifest.get("runtime_evidence"),
-        release_dir=release_dir,
-        dependency_result=dependency_result,
-    )
+    if verify_runtime:
+        _verify_runtime_evidence(
+            manifest.get("runtime_evidence"),
+            release_dir=release_dir,
+            dependency_result=dependency_result,
+        )
     expected_receipt_fields = {
         "schema_version", "status", "release_input_sha256",
         "build_identity_sha256", "built_runtime_manifest_sha256",
@@ -2445,7 +2794,8 @@ def verify_sealed_release(release_dir: Path) -> Mapping[str, Any]:
         raise ReleaseBuildError("sealed release input manifest drift")
     return {
         "schema_version": VERIFY_SCHEMA,
-        "status": "PASS",
+        "status": "PASS" if verify_runtime else "METADATA_PASS",
+        "runtime_verified": verify_runtime,
         "release_dir": str(release_dir),
         "release_input_sha256": ready["release_input_sha256"],
         "build_identity_sha256": ready["build_identity_sha256"],
@@ -2459,6 +2809,12 @@ def verify_sealed_release(release_dir: Path) -> Mapping[str, Any]:
             _canonical_bytes(expected_gate_e_receipt)
         ),
     }
+
+
+def verify_sealed_release(release_dir: Path) -> Mapping[str, Any]:
+    """Independently verify the complete sealed release, including runtime."""
+
+    return _verify_sealed_release(release_dir, verify_runtime=True)
 
 
 def build_release(
@@ -2718,6 +3074,8 @@ def _validate_ceremony_arguments(
         if output == approved_output_root or approved_output_root not in output.parents:
             raise ReleaseBuildError("ceremony output escapes its approved workspace")
         relative_parts = output.relative_to(approved_output_root).parts
+        if relative_parts[0] == ".gate_e_success":
+            raise ReleaseBuildError("ceremony output enters the Gate E receipt namespace")
         descriptor = _open_absolute_directory(approved_output_root)
         try:
             for part in relative_parts[:-1]:
@@ -2748,10 +3106,66 @@ def _validate_ceremony_arguments(
                 raise ReleaseBuildError("ceremony output enters a protected input directory")
 
 
+def _identity_from_base_runtime_receipt(receipt: Mapping[str, Any]) -> Mapping[str, Any]:
+    expected = {
+        "schema_version", "base_executable", "base_exec_prefix", "base_prefix",
+        "loaded_shared_objects", "operating_system_release", "reviewed_tools",
+        "stdlib_roots", "protected_ancestor_census", "production_seal_policy",
+    }
+    if set(receipt) != expected or receipt.get(
+        "schema_version"
+    ) != EXTERNAL_BASE_RUNTIME_RECEIPT_SCHEMA:
+        raise ReleaseBuildError("external base-runtime receipt schema drift")
+    base = receipt.get("base_executable")
+    os_release = receipt.get("operating_system_release")
+    shared = receipt.get("loaded_shared_objects")
+    tools = receipt.get("reviewed_tools")
+    stdlib = receipt.get("stdlib_roots")
+    if (
+        not isinstance(base, Mapping)
+        or not isinstance(os_release, Mapping)
+        or not isinstance(shared, list)
+        or not isinstance(tools, Mapping)
+        or set(tools) != {"git", "unshare"}
+        or not isinstance(stdlib, list)
+    ):
+        raise ReleaseBuildError("external base-runtime receipt content drift")
+    return {
+        "base_executable": base.get("path"),
+        "base_exec_prefix": receipt.get("base_exec_prefix"),
+        "base_prefix": receipt.get("base_prefix"),
+        "loaded_shared_objects": [item.get("path") for item in shared],
+        "operating_system": {
+            "id": os_release.get("id"),
+            "receipt_path": os_release.get("path"),
+            "version_id": os_release.get("version_id"),
+        },
+        "reviewed_tools": {name: tools[name].get("path") for name in sorted(tools)},
+        "stdlib_paths": [item.get("path") for item in stdlib],
+    }
+
+
+def _verify_external_base_runtime_receipt(receipt: Any) -> Mapping[str, Any]:
+    if not isinstance(receipt, Mapping):
+        raise ReleaseBuildError("external base-runtime receipt is missing")
+    actual = _base_runtime_receipt(
+        _identity_from_base_runtime_receipt(receipt), production_seal=True
+    )
+    if actual != receipt:
+        raise ReleaseBuildError("external base-runtime receipt or seal drift")
+    return actual
+
+
 def _production_seal_control(
-    release_dir: Path, *, builder_origin: Mapping[str, Any]
+    release_dir: Path, *, builder_origin: Mapping[str, Any],
+    base_runtime: Mapping[str, Any],
 ) -> Mapping[str, Any]:
-    """Prove the ceremony principal cannot substitute the verified runtime paths."""
+    """Confirm an administrator-established read-only Gate E TCB.
+
+    This function confirms, but cannot establish, the pre-Python trust
+    boundary.  The operator must enter the read-only runtime/release mount
+    namespace before launching this module.
+    """
 
     effective_uid = os.geteuid()
     if effective_uid == 0:
@@ -2760,182 +3174,304 @@ def _production_seal_control(
         str(builder_origin.get("expected_bootstrap_root")),
         label="content-addressed bootstrap root",
     )
-    release_parent = release_dir.parents[2]
-    release_parent_ancestors = tuple(
-        reversed(tuple(path for path in release_parent.parents if str(path) != "/"))
-    )
-    paths = (
-        *release_parent_ancestors,
-        release_parent,
-        release_dir.parents[1],
-        release_dir.parent,
-        release_dir,
-        release_dir / "app",
-        release_dir / "venv",
-        release_parent / "bootstrap",
-        release_parent / "bootstrap/sha256",
-        bootstrap_app.parent,
-        bootstrap_app,
-    )
-    readonly_flag = getattr(os, "ST_RDONLY", getattr(stat, "ST_RDONLY", 1))
-    readonly_mount = bool(os.statvfs(release_parent).f_flag & readonly_flag)
-    census = []
-    for path in paths:
-        identity = _directory_identity(path)
-        metadata = os.stat(path, follow_symlinks=False)
-        if not stat.S_ISDIR(metadata.st_mode):
-            raise ReleaseBuildError(f"Gate E protected path is not a directory: {path}")
-        writable = os.access(path, os.W_OK, effective_ids=True)
-        identity = {**identity, "effective_principal_writable": writable}
-        census.append(identity)
-        if not readonly_mount and (
-            identity["uid"] == effective_uid
-            or int(identity["mode"], 8) & 0o022
-            or writable
-        ):
-            raise ReleaseBuildError(
-                "Gate E requires a different non-writing principal or a read-only mount: "
-                f"{path}"
-            )
-    write_denial_census: list[Mapping[str, Any]] = []
-
-    def census_tree(root_path: Path) -> None:
-        root_fd = _open_absolute_directory(root_path)
+    external = _verify_external_base_runtime_receipt(base_runtime)
+    roots = (release_dir, bootstrap_app)
+    root_receipts: list[Mapping[str, Any]] = []
+    for root_path in roots:
+        descriptor = _open_absolute_directory(root_path)
         try:
-            def visit(parent_fd: int, prefix: Tuple[str, ...] = ()) -> None:
-                for name in _directory_names(parent_fd):
-                    before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-                    relative = "/".join(prefix + (name,))
-                    if stat.S_ISDIR(before.st_mode):
-                        child = os.open(name, _READ_DIR_FLAGS, dir_fd=parent_fd)
-                        try:
-                            opened = os.fstat(child)
-                            if (opened.st_dev, opened.st_ino) != (
-                                before.st_dev, before.st_ino
-                            ):
-                                raise ReleaseBuildError(
-                                    f"Gate E directory raced during ACL census: {relative}"
-                                )
-                            writable = os.access(
-                                name, os.W_OK, dir_fd=parent_fd,
-                                effective_ids=True, follow_symlinks=False,
-                            )
-                            write_denial_census.append(
-                                {
-                                    "absolute_path": str(root_path / relative),
-                                    "effective_principal_writable": writable,
-                                    "type": "directory",
-                                }
-                            )
-                            if writable and not readonly_mount:
-                                raise ReleaseBuildError(
-                                    f"Gate E principal can write protected directory: {root_path / relative}"
-                                )
-                            visit(child, prefix + (name,))
-                        finally:
-                            os.close(child)
-                    elif stat.S_ISREG(before.st_mode):
-                        descriptor = os.open(name, _READ_FILE_FLAGS, dir_fd=parent_fd)
-                        try:
-                            opened = os.fstat(descriptor)
-                            if (
-                                not stat.S_ISREG(opened.st_mode)
-                                or opened.st_nlink != 1
-                                or (opened.st_dev, opened.st_ino)
-                                != (before.st_dev, before.st_ino)
-                            ):
-                                raise ReleaseBuildError(
-                                    f"Gate E protected file is raced or linked: {relative}"
-                                )
-                            writable = os.access(
-                                name, os.W_OK, dir_fd=parent_fd,
-                                effective_ids=True, follow_symlinks=False,
-                            )
-                        finally:
-                            os.close(descriptor)
-                        write_denial_census.append(
-                            {
-                                "absolute_path": str(root_path / relative),
-                                "effective_principal_writable": writable,
-                                "type": "file",
-                            }
-                        )
-                        if writable and not readonly_mount:
-                            raise ReleaseBuildError(
-                                f"Gate E principal can write protected file: {root_path / relative}"
-                            )
-                    elif not stat.S_ISLNK(before.st_mode):
-                        raise ReleaseBuildError(
-                            f"Gate E protected tree contains special state: {relative}"
-                        )
-
-            visit(root_fd)
+            root_record = _directory_seal_record(
+                descriptor,
+                path=str(root_path),
+                effective_writable=os.access(root_path, os.W_OK, effective_ids=True),
+                production_seal=True,
+            )
+            records = _scan_external_tree_fd(descriptor, production_seal=True)
         finally:
-            os.close(root_fd)
-
-    census_tree(release_dir)
-    census_tree(bootstrap_app)
+            os.close(descriptor)
+        root_receipts.append(
+            {
+                "path": str(root_path),
+                "root": root_record,
+                "record_count": len(records),
+                "records_sha256": _sha256(_canonical_bytes(records)),
+            }
+        )
+    ancestors = _ancestor_seal_census(roots, production_seal=True)
     return {
         "effective_gid": os.getegid(),
         "effective_uid": effective_uid,
-        "mechanism": "read_only_mount" if readonly_mount else "different_principal",
-        "protected_directory_census": census,
-        "protected_tree_write_denial_count": len(write_denial_census),
-        "protected_tree_write_denial_sha256": _sha256(
-            _canonical_bytes(write_denial_census)
+        "external_base_runtime_receipt_sha256": _sha256(
+            _canonical_bytes(external)
         ),
-        "readonly_mount": readonly_mount,
+        "mechanism": "administrator_established_read_only_runtime_image_v1",
+        "pre_python_admin_control_required": True,
+        "protected_ancestor_census": ancestors,
+        "protected_roots": root_receipts,
+        "readonly_mount_required_per_object": True,
         "status": "PASS",
+    }
+
+
+def _ceremony_output_manifest(output_root: Path) -> Mapping[str, Any]:
+    descriptor = _open_absolute_directory(output_root)
+    try:
+        metadata = os.fstat(descriptor)
+        scanned = _scan_external_tree_fd(
+            descriptor,
+            production_seal=False,
+            exclude_root_names={".gate_e_success"},
+        )
+    finally:
+        os.close(descriptor)
+    records = [
+        {
+            key: value
+            for key, value in record.items()
+            if key not in {
+                "filesystem_readonly", "effective_principal_writable"
+            }
+        }
+        for record in scanned
+    ]
+    return {
+        "root": {
+            "path": str(output_root),
+            "type": "directory",
+            "mode": format(stat.S_IMODE(metadata.st_mode), "04o"),
+            "uid": metadata.st_uid,
+            "gid": metadata.st_gid,
+            "nlink": metadata.st_nlink,
+        },
+        "record_count": len(records),
+        "records": records,
+        "records_sha256": _sha256(_canonical_bytes(records)),
+    }
+
+
+def _ceremony_output_delta(
+    before: Mapping[str, Any], after: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    before_records = {str(item["path"]): item for item in before["records"]}
+    after_records = {str(item["path"]): item for item in after["records"]}
+    removed = sorted(set(before_records) - set(after_records))
+    modified = sorted(
+        path
+        for path in set(before_records) & set(after_records)
+        if before_records[path] != after_records[path]
+    )
+    if removed or modified:
+        raise ReleaseBuildError(
+            "ceremony modified or removed preexisting output-workspace state"
+        )
+    created = [
+        after_records[path]
+        for path in sorted(set(after_records) - set(before_records))
+    ]
+    return {
+        "created_record_count": len(created),
+        "created_records": created,
+        "created_records_sha256": _sha256(_canonical_bytes(created)),
+        "modified_paths": [],
+        "removed_paths": [],
+    }
+
+
+def _verify_ceremony_child_maps(
+    receipt_bytes: bytes, *, base_runtime: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    parsed = _strict_canonical_json(
+        receipt_bytes,
+        label="ceremony child mapped-object receipt",
+        object_required=True,
+    )
+    if set(parsed) != {"schema_version", "external_mapped_paths"} or parsed.get(
+        "schema_version"
+    ) != "caerus_alpha_lab_ceremony_child_maps_v1":
+        raise ReleaseBuildError("ceremony child mapped-object schema drift")
+    paths = parsed.get("external_mapped_paths")
+    if not isinstance(paths, list) or paths != sorted(set(paths)) or not all(
+        isinstance(path, str) for path in paths
+    ):
+        raise ReleaseBuildError("ceremony child mapped-object census is invalid")
+    allowed: set[str] = set()
+    for record in base_runtime.get("loaded_shared_objects", []):
+        if isinstance(record, Mapping):
+            allowed.add(str(record.get("path")))
+    base_record = base_runtime.get("base_executable")
+    if isinstance(base_record, Mapping):
+        allowed.add(str(base_record.get("path")))
+    for root in base_runtime.get("stdlib_roots", []):
+        if not isinstance(root, Mapping):
+            continue
+        root_path = _normalize_absolute_path(
+            str(root.get("path")), label="ceremony child stdlib root"
+        )
+        for record in root.get("records", []):
+            if isinstance(record, Mapping) and record.get("type") == "file":
+                relative = str(record.get("path"))
+                _safe_relative_parts(relative, label="ceremony child stdlib record")
+                allowed.add(str(root_path / relative))
+    normalized = []
+    for raw_path in paths:
+        path = _normalize_absolute_path(raw_path, label="ceremony child mapped object")
+        if str(path) not in allowed:
+            raise ReleaseBuildError(
+                f"ceremony child loaded an object outside the sealed TCB: {path}"
+            )
+        normalized.append(str(path))
+    return {
+        "schema_version": parsed["schema_version"],
+        "external_mapped_path_count": len(normalized),
+        "external_mapped_paths": normalized,
+        "external_mapped_paths_sha256": _sha256(_canonical_bytes(normalized)),
+        "all_paths_present_in_sealed_base_runtime": True,
     }
 
 
 def run_ceremony(
     release_dir: Path, ceremony_arguments: Sequence[str], *, approved_output_root: Path
 ) -> int:
+    # This first pass is deliberately metadata-only: calling the copied Python
+    # before confirming the external TCB seal would execute the very stdlib
+    # whose trust is still being established.
+    metadata_verified = _verify_sealed_release(release_dir, verify_runtime=False)
+    release_dir = Path(str(metadata_verified["release_dir"]))
+    base_runtime = metadata_verified["atlas_gate_e_runtime_receipt"]["base_runtime"]
+    seal_before = _production_seal_control(
+        release_dir,
+        builder_origin=metadata_verified["builder_origin"],
+        base_runtime=base_runtime,
+    )
     verified = verify_sealed_release(release_dir)
-    release_dir = Path(str(verified["release_dir"]))
+    if any(
+        verified.get(key) != metadata_verified.get(key)
+        for key in (
+            "release_input_sha256", "build_identity_sha256", "ready_sha256",
+            "app_path", "python_path", "record_count", "builder_origin",
+            "atlas_gate_e_runtime_receipt",
+            "atlas_gate_e_runtime_receipt_sha256",
+        )
+    ):
+        raise ReleaseBuildError("sealed release identity changed during Gate E handoff")
     app = Path(str(verified["app_path"]))
     python_path = Path(str(verified["python_path"]))
-    _production_seal_control(
-        release_dir,
-        builder_origin=verified["builder_origin"],
-    )
-    verified_after_seal = verify_sealed_release(release_dir)
-    if verified_after_seal != verified:
-        raise ReleaseBuildError("sealed release identity changed during Gate E handoff")
-    app = Path(str(verified_after_seal["app_path"]))
-    python_path = Path(str(verified_after_seal["python_path"]))
     _validate_ceremony_arguments(
         ceremony_arguments,
         release_dir=release_dir,
         approved_output_root=approved_output_root,
     )
+    output_before = _ceremony_output_manifest(approved_output_root)
     with tempfile.TemporaryDirectory(prefix="caerus-alpha-ceremony-") as temporary:
+        # This is disposable output state, not a trust decision. Resolving the
+        # platform temp alias (notably macOS /var -> /private/var) lets the
+        # later no-follow reader address the created directory exactly.
+        temporary_root = Path(temporary).resolve()
         environment = _sanitized_environment(
-            temporary_root=Path(temporary), venv_bin=python_path.parent
+            temporary_root=temporary_root, venv_bin=python_path.parent
         )
         environment["CAERUS_CEREMONY_OUTPUT_ROOT"] = str(approved_output_root)
         _network_evidence, prefix = _network_isolation_contract(
             python_path, cwd=app, environment=environment
         )
+        execution_error: BaseException | None = None
+        child_maps_error: BaseException | None = None
+        child_maps: Mapping[str, Any] | None = None
+        result: subprocess.CompletedProcess[Any] | None = None
+        with tempfile.TemporaryFile(dir=temporary_root) as child_maps_file:
+            child_maps_fd = child_maps_file.fileno()
+            try:
+                result = subprocess.run(
+                    [
+                        *prefix,
+                        *_isolated_ceremony_command(
+                            python_path,
+                            app,
+                            ceremony_arguments,
+                            maps_receipt_fd=child_maps_fd,
+                        ),
+                    ],
+                    cwd=str(app),
+                    env=environment,
+                    check=False,
+                    close_fds=True,
+                    pass_fds=(child_maps_fd,),
+                )
+            except BaseException as exc:
+                execution_error = exc
+            try:
+                os.lseek(child_maps_fd, 0, os.SEEK_SET)
+                chunks: list[bytes] = []
+                while True:
+                    chunk = os.read(child_maps_fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                child_maps = _verify_ceremony_child_maps(
+                    b"".join(chunks), base_runtime=base_runtime
+                )
+            except BaseException as exc:
+                child_maps_error = exc
+    post_verified = verify_sealed_release(release_dir)
+    seal_after = _production_seal_control(
+        release_dir,
+        builder_origin=post_verified["builder_origin"],
+        base_runtime=post_verified["atlas_gate_e_runtime_receipt"]["base_runtime"],
+    )
+    if post_verified != verified or seal_after != seal_before:
+        raise ReleaseBuildError(
+            "Gate E release or external runtime changed during ceremony execution"
+        )
+    if execution_error is not None:
+        raise execution_error
+    if child_maps_error is not None:
+        raise child_maps_error
+    if result is None:  # pragma: no cover - defensive type/runtime guard
+        raise ReleaseBuildError("ceremony subprocess produced no result")
+    if child_maps is None:  # pragma: no cover - defensive type/runtime guard
+        raise ReleaseBuildError("ceremony child mapped-object receipt is missing")
+    output_after = _ceremony_output_manifest(approved_output_root)
+    output_delta = _ceremony_output_delta(output_before, output_after)
+    if result.returncode == 0:
+        success = {
+            "schema_version": "caerus_alpha_lab_gate_e_ceremony_success_v1",
+            "status": "PASS",
+            "release_input_sha256": verified["release_input_sha256"],
+            "ready_sha256": verified["ready_sha256"],
+            "atlas_gate_e_runtime_receipt_sha256": verified[
+                "atlas_gate_e_runtime_receipt_sha256"
+            ],
+            "command_arguments_sha256": _sha256(
+                _canonical_bytes(list(ceremony_arguments))
+            ),
+            "production_seal_control_sha256": _sha256(
+                _canonical_bytes(seal_after)
+            ),
+            "post_execution_rescan_passed": True,
+            "returncode": 0,
+            "ceremony_child_maps": child_maps,
+            "ceremony_child_maps_sha256": _sha256(_canonical_bytes(child_maps)),
+            "approved_output_root": str(approved_output_root),
+            "output_manifest_before_sha256": _sha256(
+                _canonical_bytes(output_before)
+            ),
+            "output_manifest": output_after,
+            "output_manifest_sha256": _sha256(_canonical_bytes(output_after)),
+            "output_delta": output_delta,
+            "output_delta_sha256": _sha256(_canonical_bytes(output_delta)),
+        }
+        output_fd = _open_absolute_directory(approved_output_root)
         try:
-            result = subprocess.run(
-                [
-                    *prefix,
-                    *_isolated_module_command(
-                        python_path,
-                        app,
-                        "projects.alpha_lab.factory.ceremony",
-                        ceremony_arguments,
-                    ),
-                ],
-                cwd=str(app),
-                env=environment,
-                check=False,
-                close_fds=True,
+            success_fd = _open_or_create_child(output_fd, ".gate_e_success")
+        finally:
+            os.close(output_fd)
+        try:
+            success_name = _sha256(_canonical_bytes(success)) + ".json"
+            _write_exclusive(
+                success_fd, success_name, _canonical_bytes(success), 0o444
             )
         finally:
-            verify_sealed_release(release_dir)
+            os.close(success_fd)
     return result.returncode
 
 

@@ -20,6 +20,43 @@ def _canonical(value) -> bytes:
     return gate._canonical_bytes(value)
 
 
+def _fake_base_runtime() -> dict:
+    def file_record(path: str) -> dict:
+        return {
+            "path": path, "type": "file", "bytes": 1,
+            "sha256": "e" * 64, "mode": "0555", "uid": 0, "gid": 0,
+            "nlink": 1, "filesystem_readonly": True,
+            "effective_principal_writable": False,
+        }
+
+    return {
+        "schema_version": gate.EXTERNAL_BASE_RUNTIME_RECEIPT_SCHEMA,
+        "base_executable": file_record("/usr/bin/python3.10"),
+        "base_exec_prefix": "/usr", "base_prefix": "/usr",
+        "loaded_shared_objects": [],
+        "operating_system_release": {
+            **file_record("/usr/lib/os-release"),
+            "id": "ubuntu", "version_id": "22.04",
+        },
+        "reviewed_tools": {
+            "git": file_record("/usr/bin/git"),
+            "unshare": file_record("/usr/bin/unshare"),
+        },
+        "stdlib_roots": [],
+        "protected_ancestor_census": [],
+        "production_seal_policy": {
+            "mechanism": "administrator_established_read_only_runtime_image_v1",
+            "established_before_python_start": True,
+            "filesystem_readonly_required": True,
+            "different_principal_alone_accepted": False,
+            "external_owner_outside_attacker_model": True,
+            "lazy_loaded_objects_confined_to_read_only_image": True,
+            "per_object_mount_check": True,
+            "post_execution_rescan_required": True,
+        },
+    }
+
+
 def _git_tree_oid(files: dict[str, tuple[int, bytes]]) -> str:
     tree: dict[str, object] = {}
     for path, (mode, content) in files.items():
@@ -749,7 +786,7 @@ def test_wrong_runtime_target_fails_closed() -> None:
         },
         "python_implementation": "CPython",
         "python_version": "3.10.12",
-        "reviewed_tools": {"git": "/usr/bin/git"},
+        "reviewed_tools": {"git": "/usr/bin/git", "unshare": "/usr/bin/unshare"},
         "stdlib_paths": ["/usr/lib/python3.10"],
     }
     with pytest.raises(gate.ReleaseBuildError, match="architecture drift"):
@@ -762,6 +799,20 @@ def test_isolated_module_command_uses_fixed_bootstrap() -> None:
     )
     assert command[:4] == ["/release/venv/bin/python", "-I", "-B", "-c"]
     assert command[-3:] == ["/release/app", "pytest", "-q"]
+
+
+def test_linux_venv_lib64_compatibility_link_is_removed_exactly(
+    tmp_path: Path,
+) -> None:
+    venv = tmp_path / "venv"
+    (venv / "lib").mkdir(parents=True)
+    (venv / "lib64").symlink_to("lib")
+    gate._remove_redundant_venv_lib64_link(venv)
+    assert not (venv / "lib64").exists()
+    gate._remove_redundant_venv_lib64_link(venv)
+    (venv / "lib64").write_bytes(b"unexpected")
+    with pytest.raises(gate.ReleaseBuildError, match="not exact"):
+        gate._remove_redundant_venv_lib64_link(venv)
 
 
 def test_distribution_closure_records_bootstrap_and_rejects_extra() -> None:
@@ -790,6 +841,9 @@ def test_base_runtime_receipt_detects_external_stdlib_drift(tmp_path: Path) -> N
     git = tmp_path / "git"
     git.write_bytes(b"git")
     git.chmod(0o755)
+    unshare = tmp_path / "unshare"
+    unshare.write_bytes(b"unshare")
+    unshare.chmod(0o755)
     identity = {
         "base_executable": str(executable),
         "base_exec_prefix": str(tmp_path),
@@ -798,12 +852,12 @@ def test_base_runtime_receipt_detects_external_stdlib_drift(tmp_path: Path) -> N
         "operating_system": {
             "id": "ubuntu", "receipt_path": str(os_release), "version_id": "22.04"
         },
-        "reviewed_tools": {"git": str(git)},
+        "reviewed_tools": {"git": str(git), "unshare": str(unshare)},
         "stdlib_paths": [str(stdlib)],
     }
-    before = gate._base_runtime_receipt(identity)
+    before = gate._base_runtime_receipt(identity, production_seal=False)
     (stdlib / "module.py").write_bytes(b"two")
-    after = gate._base_runtime_receipt(identity)
+    after = gate._base_runtime_receipt(identity, production_seal=False)
     assert before != after
 
 
@@ -843,14 +897,7 @@ def test_atlas_gate_e_receipt_binds_runtime_and_complete_site_packages(
         wheel_manifest_bytes=b"{}", builder_origin={"content_addressed": True},
     )
     runtime = {
-        "base_runtime": {
-            "reviewed_tools": {
-                "git": {
-                    "bytes": 1, "mode": "0555", "path": "/usr/bin/git",
-                    "sha256": "e" * 64,
-                }
-            }
-        },
+        "base_runtime": _fake_base_runtime(),
         "distribution_closure": {
             "bootstrap_distributions": {"pip": "22.0.2"},
             "locked_distributions": {"demo": "1"},
@@ -1035,14 +1082,7 @@ def test_fake_runtime_build_writes_ready_then_real_verifier_reopens_chain(
         (release_dir / "venv/bin/python").chmod(0o755)
         (site / "demo.py").write_bytes(b"value=1\n")
         return {
-            "base_runtime": {
-                "reviewed_tools": {
-                    "git": {
-                        "bytes": 1, "mode": "0555", "path": "/usr/bin/git",
-                        "sha256": "e" * 64,
-                    }
-                }
-            },
+            "base_runtime": _fake_base_runtime(),
             "dependency_validation": dependency_result,
             "distribution_closure": {
                 "bootstrap_distributions": {"pip": "22.0.2"},
@@ -1136,7 +1176,21 @@ def test_ceremony_output_symlink_escape_is_rejected(tmp_path: Path) -> None:
         )
 
 
-def test_production_seal_rejects_same_owner_and_accepts_nonwriting_principal(
+def test_ceremony_output_cannot_enter_success_receipt_namespace(tmp_path: Path) -> None:
+    output_root = tmp_path / "ceremony-output"
+    output_root.mkdir()
+    with pytest.raises(gate.ReleaseBuildError, match="receipt namespace"):
+        gate._validate_ceremony_arguments(
+            [
+                "attestation", "prepare", "--output-dir",
+                str(output_root / ".gate_e_success/forged"),
+            ],
+            release_dir=Path("/mnt/disks/alpha-lab/releases/sha256/" + "a" * 64),
+            approved_output_root=output_root,
+        )
+
+
+def test_production_seal_requires_per_object_readonly_mount_and_acl_denial(
     tmp_path: Path, monkeypatch,
 ) -> None:
     release_parent = tmp_path / "release-parent"
@@ -1148,21 +1202,264 @@ def test_production_seal_rejects_same_owner_and_accepts_nonwriting_principal(
     bootstrap_app.mkdir(parents=True)
     (bootstrap_app / "builder.py").write_bytes(b"pass\n")
     origin = {"expected_bootstrap_root": str(bootstrap_app)}
-    with pytest.raises(gate.ReleaseBuildError, match="different non-writing principal"):
-        gate._production_seal_control(release, builder_origin=origin)
+    base_runtime = _fake_base_runtime()
+    monkeypatch.setattr(
+        gate, "_verify_external_base_runtime_receipt", lambda value: value
+    )
+    with pytest.raises(gate.ReleaseBuildError, match="read-only filesystem"):
+        gate._production_seal_control(
+            release, builder_origin=origin, base_runtime=base_runtime
+        )
     actual_uid = os.geteuid()
     actual_gid = os.getegid()
-    monkeypatch.setattr(gate.os, "geteuid", lambda: actual_uid + 1000)
-    monkeypatch.setattr(gate.os, "getegid", lambda: actual_gid + 1000)
+    monkeypatch.setattr(gate.os, "geteuid", lambda: max(1, actual_uid))
+    monkeypatch.setattr(gate.os, "getegid", lambda: max(1, actual_gid))
+    monkeypatch.setattr(gate, "_filesystem_readonly", lambda _fd: True)
     monkeypatch.setattr(gate.os, "access", lambda *_args, **_kwargs: False)
-    result = gate._production_seal_control(release, builder_origin=origin)
-    assert result["mechanism"] == "different_principal"
+    result = gate._production_seal_control(
+        release, builder_origin=origin, base_runtime=base_runtime
+    )
+    assert result["mechanism"] == "administrator_established_read_only_runtime_image_v1"
     assert result["status"] == "PASS"
     monkeypatch.setattr(
         gate.os, "access", lambda path, *_args, **_kwargs: str(path) == "python"
     )
-    with pytest.raises(gate.ReleaseBuildError, match="write protected file"):
-        gate._production_seal_control(release, builder_origin=origin)
+    with pytest.raises(gate.ReleaseBuildError, match="read-only filesystem"):
+        gate._production_seal_control(
+            release, builder_origin=origin, base_runtime=base_runtime
+        )
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "fifo"])
+def test_external_stdlib_scan_rejects_links_and_special_entries(
+    tmp_path: Path, kind: str,
+) -> None:
+    root = tmp_path / kind
+    root.mkdir()
+    target = root / "module.py"
+    target.write_bytes(b"value = 1\n")
+    if kind == "symlink":
+        (root / "alias.py").symlink_to(target)
+    elif kind == "hardlink":
+        os.link(target, root / "alias.py")
+    else:
+        os.mkfifo(root / "pipe")
+    descriptor = gate._open_absolute_directory(root)
+    try:
+        match = "symlink" if kind == "symlink" else (
+            "hard-linked" if kind == "hardlink" else "unsupported"
+        )
+        with pytest.raises(gate.ReleaseBuildError, match=match):
+            gate._scan_external_tree_fd(descriptor, production_seal=False)
+    finally:
+        os.close(descriptor)
+
+
+def test_external_stdlib_scan_requires_readonly_each_file(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    root = tmp_path / "stdlib"
+    root.mkdir()
+    (root / "module.py").write_bytes(b"value = 1\n")
+    monkeypatch.setattr(gate.os, "access", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        gate,
+        "_filesystem_readonly",
+        lambda descriptor: stat.S_ISDIR(os.fstat(descriptor).st_mode),
+    )
+    descriptor = gate._open_absolute_directory(root)
+    try:
+        with pytest.raises(gate.ReleaseBuildError, match="read-only filesystem"):
+            gate._scan_external_tree_fd(descriptor, production_seal=True)
+    finally:
+        os.close(descriptor)
+
+
+def test_external_stdlib_scan_rejects_acl_writable_child(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    root = tmp_path / "stdlib"
+    root.mkdir()
+    (root / "module.py").write_bytes(b"value = 1\n")
+    monkeypatch.setattr(gate, "_filesystem_readonly", lambda _descriptor: True)
+    monkeypatch.setattr(
+        gate,
+        "_effective_writable_at",
+        lambda _parent, name: name == "module.py",
+    )
+    descriptor = gate._open_absolute_directory(root)
+    try:
+        with pytest.raises(gate.ReleaseBuildError, match="read-only filesystem"):
+            gate._scan_external_tree_fd(descriptor, production_seal=True)
+    finally:
+        os.close(descriptor)
+
+
+def test_ceremony_checks_readonly_tcb_before_any_release_python(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    release = tmp_path / "release"
+    app = release / "app"
+    python = release / "venv/bin/python"
+    app.mkdir(parents=True)
+    python.parent.mkdir(parents=True)
+    output = tmp_path / "output"
+    output.mkdir()
+    calls: list[str] = []
+    base = _fake_base_runtime()
+    common = {
+        "release_dir": str(release), "release_input_sha256": "a" * 64,
+        "build_identity_sha256": "b" * 64, "ready_sha256": "c" * 64,
+        "app_path": str(app), "python_path": str(python), "record_count": 1,
+        "builder_origin": {"expected_bootstrap_root": str(tmp_path / "bootstrap")},
+        "atlas_gate_e_runtime_receipt": {"base_runtime": base},
+        "atlas_gate_e_runtime_receipt_sha256": "d" * 64,
+    }
+
+    def fake_verify(_release: Path, *, verify_runtime: bool):
+        calls.append("full_verify" if verify_runtime else "metadata_verify")
+        return {
+            **common,
+            "schema_version": gate.VERIFY_SCHEMA,
+            "status": "PASS" if verify_runtime else "METADATA_PASS",
+            "runtime_verified": verify_runtime,
+        }
+
+    def fake_seal(*_args, **_kwargs):
+        calls.append("seal")
+        return {"status": "PASS"}
+
+    monkeypatch.setattr(gate, "_verify_sealed_release", fake_verify)
+    monkeypatch.setattr(
+        gate, "verify_sealed_release",
+        lambda value: fake_verify(value, verify_runtime=True),
+    )
+    monkeypatch.setattr(gate, "_production_seal_control", fake_seal)
+    monkeypatch.setattr(gate, "_validate_ceremony_arguments", lambda *_a, **_k: None)
+    monkeypatch.setattr(gate, "_network_isolation_contract", lambda *_a, **_k: ({}, ()))
+    def fake_ceremony_command(*_args, maps_receipt_fd: int, **_kwargs):
+        os.write(
+            maps_receipt_fd,
+            _canonical({
+                "schema_version": "caerus_alpha_lab_ceremony_child_maps_v1",
+                "external_mapped_paths": [],
+            }),
+        )
+        return ["python"]
+
+    monkeypatch.setattr(gate, "_isolated_ceremony_command", fake_ceremony_command)
+
+    class Result:
+        returncode = 0
+
+    def fake_run(*_args, **_kwargs):
+        calls.append("run")
+        (output / "artifact.json").write_bytes(b"{}")
+        return Result()
+
+    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+    assert gate.run_ceremony(release, ["allowed"], approved_output_root=output) == 0
+    assert calls == [
+        "metadata_verify", "seal", "full_verify", "run", "full_verify", "seal"
+    ]
+    success_files = list((output / ".gate_e_success").glob("*.json"))
+    assert len(success_files) == 1
+    success = gate._strict_canonical_json(
+        success_files[0].read_bytes(), label="test Gate E success", object_required=True
+    )
+    assert success["status"] == "PASS"
+    assert success["post_execution_rescan_passed"] is True
+    assert success["approved_output_root"] == str(output)
+    assert success["output_delta"]["created_record_count"] == 1
+    assert success["output_delta"]["created_records"][0]["path"] == "artifact.json"
+
+
+def test_ceremony_postscan_drift_never_writes_success_receipt(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    release = tmp_path / "release"
+    app = release / "app"
+    python = release / "venv/bin/python"
+    app.mkdir(parents=True)
+    python.parent.mkdir(parents=True)
+    output = tmp_path / "output"
+    output.mkdir()
+    calls = 0
+    common = {
+        "release_dir": str(release), "release_input_sha256": "a" * 64,
+        "build_identity_sha256": "b" * 64, "ready_sha256": "c" * 64,
+        "app_path": str(app), "python_path": str(python), "record_count": 1,
+        "builder_origin": {"expected_bootstrap_root": str(tmp_path / "bootstrap")},
+        "atlas_gate_e_runtime_receipt": {"base_runtime": _fake_base_runtime()},
+        "atlas_gate_e_runtime_receipt_sha256": "d" * 64,
+    }
+
+    def fake_verify(_release: Path, *, verify_runtime: bool):
+        nonlocal calls
+        if verify_runtime:
+            calls += 1
+        return {
+            **common,
+            "ready_sha256": "f" * 64 if calls == 2 else common["ready_sha256"],
+            "schema_version": gate.VERIFY_SCHEMA,
+            "status": "PASS" if verify_runtime else "METADATA_PASS",
+            "runtime_verified": verify_runtime,
+        }
+
+    monkeypatch.setattr(gate, "_verify_sealed_release", fake_verify)
+    monkeypatch.setattr(
+        gate, "verify_sealed_release",
+        lambda value: fake_verify(value, verify_runtime=True),
+    )
+    monkeypatch.setattr(
+        gate, "_production_seal_control", lambda *_a, **_k: {"status": "PASS"}
+    )
+    monkeypatch.setattr(gate, "_validate_ceremony_arguments", lambda *_a, **_k: None)
+    monkeypatch.setattr(gate, "_network_isolation_contract", lambda *_a, **_k: ({}, ()))
+    def fake_ceremony_command(*_args, maps_receipt_fd: int, **_kwargs):
+        os.write(
+            maps_receipt_fd,
+            _canonical({
+                "schema_version": "caerus_alpha_lab_ceremony_child_maps_v1",
+                "external_mapped_paths": [],
+            }),
+        )
+        return ["python"]
+
+    monkeypatch.setattr(gate, "_isolated_ceremony_command", fake_ceremony_command)
+    monkeypatch.setattr(
+        gate.subprocess, "run",
+        lambda *_a, **_k: subprocess.CompletedProcess(["python"], 0),
+    )
+    with pytest.raises(gate.ReleaseBuildError, match="changed during ceremony"):
+        gate.run_ceremony(release, ["allowed"], approved_output_root=output)
+    assert not (output / ".gate_e_success").exists()
+
+
+def test_ceremony_child_maps_must_be_in_sealed_external_receipt(
+    tmp_path: Path,
+) -> None:
+    receipt_bytes = _canonical(
+        {
+            "schema_version": "caerus_alpha_lab_ceremony_child_maps_v1",
+            "external_mapped_paths": ["/usr/lib/liblate.so"],
+        }
+    )
+    with pytest.raises(gate.ReleaseBuildError, match="outside the sealed TCB"):
+        gate._verify_ceremony_child_maps(
+            receipt_bytes, base_runtime=_fake_base_runtime()
+        )
+    base = _fake_base_runtime()
+    base["loaded_shared_objects"] = [
+        {
+            **base["base_executable"],
+            "path": "/usr/lib/liblate.so",
+            "sha256": "f" * 64,
+        }
+    ]
+    verified = gate._verify_ceremony_child_maps(receipt_bytes, base_runtime=base)
+    assert verified["all_paths_present_in_sealed_base_runtime"] is True
+    assert verified["external_mapped_path_count"] == 1
 
 
 def test_underlying_ceremony_parser_disables_write_abbreviation() -> None:

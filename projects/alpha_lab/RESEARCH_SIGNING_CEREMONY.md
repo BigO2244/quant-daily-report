@@ -117,7 +117,49 @@ validator are at that exact content-addressed path and their bytes match the
 source file manifest. Never import the builder from a mutable legacy checkout,
 ambient `PYTHONPATH`, user site, or a stale VM module. Invoke the exact file
 with `-I -S -B`, which disables ambient Python paths, site initialization, and
-bytecode writes. First run the non-mutating preflight and default dry build:
+bytecode writes. The operating-system runtime is part of the trust boundary:
+an administrator must start the entire Gate A session inside a private mount
+namespace or immutable Ubuntu image in which `/`, `/usr`, `/lib`, `/lib64`, and
+every other system-runtime mount are read-only. The approved release parent,
+temporary parent, and input mounts may be separate, explicitly scoped mounts;
+only the release and temporary parents may be writable during construction.
+This control must exist before `python3.10`, the bootstrap, or the builder is
+started. The Python verifier only confirms it; it cannot establish trust in
+stdlib code that the current process has already imported. A normal mutable VM
+shell is therefore not a Gate A production environment.
+
+One concrete Ubuntu 22.04 handoff is an administrator-reviewed transient
+systemd unit that creates the mount boundary before executing Python. The
+administrator must replace the principal and paths, use direct argv (no shell),
+and preserve the command exit status. `ReadOnlyPaths=/` is the default; Gate A
+construction receives only the two explicit writable exceptions. The code's
+per-object `fstatvfs` census remains authoritative and rejects a writable
+nested mount even if the unit configuration was intended to be read-only:
+
+```bash
+sudo systemd-run --wait --pipe --collect \
+  --property=User=<APPROVED_NONROOT_GATE_PRINCIPAL> \
+  --property=NoNewPrivileges=yes \
+  --property=ReadOnlyPaths=/ \
+  --property="ReadWritePaths=$RELEASE_PARENT $GATE_A_TEMP_PARENT" \
+  /usr/bin/python3.10 -I -S -B "$GATE_A_BUILDER" build \
+  ...exact reviewed arguments... \
+  --temporary-parent "$GATE_A_TEMP_PARENT" \
+  --write \
+  --authorized-release-input-sha256 <EXACT_RELEASE_INPUT_SHA256>
+```
+
+Bootstrap materialization uses the same boundary with only
+`$RELEASE_PARENT` and its dedicated temporary parent writable. Preflight needs
+no writable exception. Full verification creates a sanitized temporary
+HOME/TMP/XDG tree, so its unit must provide one dedicated empty writable temp
+root, set `TMPDIR` to it before Python starts, and leave every release/system
+path read-only. If this launcher or its unit policy is not independently
+approved and recorded, Gate A stops; the Python tool does not silently
+substitute a weaker control.
+
+First run the non-mutating preflight and default dry build inside that
+administrator-established environment:
 
 ```bash
 python3.10 -I -S -B "$GATE_A_BUILDER" preflight \
@@ -165,11 +207,21 @@ user/network namespace. It binds all 25 locked distributions, the explicit
 `pip`/`setuptools` venv bootstrap allowance, the external base interpreter and
 complete stdlib-tree identities, and the sealed app/venv/wheel/lock tree.
 Caches, JUnit output, and temporary state remain outside the release.
+CPython's redundant Linux `venv/lib64 -> lib` compatibility alias is removed
+descriptor-relatively immediately after venv creation; an absent link is
+accepted, while any different `lib64` object or target fails. The sealed release
+therefore contains no symlink exception for this target-platform artifact.
 
 The external-runtime receipt also binds Ubuntu's OS-release bytes, every shared
-object loaded by the interpreter, and the exact single-link `/usr/bin/git`
-binary. The versioned
-`caerus_alpha_lab_atlas_gate_e_runtime_receipt_v1` inside
+object loaded by the interpreter, the exact single-link `/usr/bin/git` and
+`/usr/bin/unshare` binaries, every substitutable path ancestor, and the full
+canonical record list for each stdlib and platstdlib root. Every external
+regular record includes bytes, SHA-256, mode, owner UID/GID, link count,
+per-object filesystem-read-only evidence, and the ACL-aware effective-write
+result; directory records include the corresponding owner, mode, link, mount,
+and write-denial facts. Symlinks, hard links, sockets, FIFOs, and device nodes
+are forbidden in the external executable surface. The versioned
+`caerus_alpha_lab_atlas_gate_e_runtime_receipt_v2` inside
 `verification_receipt.json` is the direct Atlas provenance surface. It binds
 the release-input, build, and built-manifest identities; copied Python bytes;
 the canonical complete site-packages subtree; lock, wheel-manifest, and
@@ -198,22 +250,69 @@ python3.10 -I -S -B "$GATE_A_BUILDER" ceremony \
   --external-pin <active-registry-hash>
 ```
 
-Mode `0555`/`0444` is tamper-evident but is not an adversarial seal against the
-same Unix owner, which can restore write permission. Before any Gate E ceremony,
-an administrator must place the release and bootstrap hierarchy under a
-different non-writing principal or a read-only mount. The launcher fails closed
-for root, a same-owner caller, writable ancestors, group/other-write modes, or
-a descriptor-relative ACL-aware effective principal that can write any
-protected release/bootstrap file or directory. It records the current effective
-UID/GID and canonical protected-tree write-denial census, then runs
-a second complete release/base-runtime verification before execution. This
-separate-principal/read-only control is an external production Gate E action;
-until it is proven on the exact Ubuntu host, release work remains in progress.
+The Gate E ceremony command itself must also be launched by the administrator,
+not from an already-running Python or mutable shell namespace. Its unit uses
+`ReadOnlyPaths=/` and grants write access only to the approved output root and
+a dedicated empty temporary root supplied as `TMPDIR`; the release, bootstrap,
+system runtime, source inputs, and all ancestors remain read-only:
+
+```bash
+sudo systemd-run --wait --pipe --collect \
+  --property=User=<APPROVED_NONROOT_GATE_E_PRINCIPAL> \
+  --property=NoNewPrivileges=yes \
+  --property=ReadOnlyPaths=/ \
+  --property="ReadWritePaths=$CEREMONY_OUTPUT_ROOT $GATE_E_TEMP_ROOT" \
+  --setenv="TMPDIR=$GATE_E_TEMP_ROOT" \
+  /usr/bin/python3.10 -I -S -B "$GATE_A_BUILDER" ceremony \
+  --release-dir "$RELEASE_DIR" \
+  --ceremony-output-root "$CEREMONY_OUTPUT_ROOT" \
+  -- ...exact allowlisted ceremony arguments...
+```
+
+Mode `0555`/`0444` and a different Unix principal are tamper-evident controls,
+not an adversarial seal: the owner, an ACL, or a path-ancestor owner can still
+race verification. Before any Gate E Python starts, an administrator must
+place the complete external system image plus the release and bootstrap trees
+on read-only mounts for the entire ceremony window. A different principal by
+itself is never accepted. The external administrator/image owner is explicitly
+inside the trusted computing base and outside the attacker model. The launcher
+fails closed for root, any writable protected object or ancestor, a non-read-
+only nested mount, an ACL-aware effective write, any external symlink or
+special entry, or a multi-link external regular file. It records the current
+effective UID/GID and canonical per-object mount/write-denial census, then runs
+a complete release and external-runtime verification before execution.
+
+The same immutable system image must contain every library that can be loaded
+later; the ceremony child creates a final `/proc/self/maps` receipt in its
+`finally` boundary. The parent creates an anonymous open file description and
+passes only its descriptor through `unshare`; the child never opens a receipt
+path, and the parent verifies the same pinned descriptor after exit. A
+same-principal process therefore cannot substitute a named receipt between
+child exit and verification. Every external mapped path must already be an exact file in
+the sealed shared-object receipt or complete stdlib manifest. A late DSO absent
+from that predeclared closure, a missing child receipt (including a killed
+process), or a substituted map path fails Gate E. The final map inventory and
+hash are bound into the success receipt. After the command exits (including a
+nonzero or signal return), the launcher also rescans the complete release and
+external TCB and requires byte-identical pre/post receipts. Command outputs are
+uncertified until return code zero and those checks all pass. Only then does
+the launcher create a canonical receipt under
+`<ceremony-output-root>/.gate_e_success/`. A postscan failure leaves any output
+untrusted and creates no success receipt. The success receipt binds the exact
+approved output-root path, the complete canonical before/after output manifests
+(all file bytes/SHA-256, mode, UID/GID, and link count), and the
+create-only path/record delta. Symlinks, hard-linked regular files, and special
+entries fail the output scan; modifying or removing preexisting workspace state
+also fails. Consumers must rehash the referenced output manifest and pin the
+success-receipt bytes before treating an output as certified. Until this exact
+Ubuntu/read-only image handoff is proven, Gate A/Gate E remain external
+blockers.
 
 The launcher executes only `projects.alpha_lab.factory.ceremony`, uses the
 exact app and interpreter paths from `READY`, forbids relative paths and
 publication `--write`, applies OS-level network isolation, and re-verifies the
-sealed release after the command. Outputs must be create-only and beneath the
+sealed release and external runtime after the command. Outputs must be
+create-only and beneath the
 separately approved, preexisting no-symlink ceremony-output root, which must be
 outside the release, authoritative checkout/data roots, and protected inputs.
 
