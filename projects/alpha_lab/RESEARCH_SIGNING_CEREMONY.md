@@ -52,11 +52,147 @@ The operator receives these reviewed, absolute-path inputs:
 - the approved release parent. Wheel binaries and generated release/source
   manifests are ceremony inputs and must not enter Git.
 
+### Protected Gate A handoff and dirty-checkout preservation
+
+The network-enabled staging area is not a Gate A input root. Before bootstrap,
+an administrator must use the separately reviewed, standard-library-only
+`gate_a_handoff.py` to copy exactly the five named files plus the 25-wheel
+`wheelhouse/` into an absent leaf below `/var/lib/caerus/gate-a/inputs`. The
+identity summary is verified in place but is not copied. The staging directory
+must contain exactly these six logical entries; missing files, extra files or
+wheels, links, special files, hard-linked packet inputs, authorization drift,
+and source races fail closed.
+
+The handoff tool authenticates its own bytes against a separately approved
+SHA-256 before reading any packet input. That self-check is defense in depth,
+not the tool's initial trust anchor. Before the ceremony, an administrator must
+exclusive-create the reviewed tool bytes at the content-addressed path
+`/var/lib/caerus/gate-a/tools/sha256/<EXACT_HANDOFF_TOOL_SHA256>/gate_a_handoff.py`.
+The tool leaf and every ancestor must be root-owned and non-group/other-
+writable; the file must be `0444`, its directories `0555`, and the administrator
+must verify the file's exact SHA-256 both before and after sealing it. The leaf
+and file must have been absent: no overwrite, rename-replace, repair, or reuse
+is permitted. Production commands execute only that protected path.
+
+Install the reviewed tool before defining any ceremony command from it. This
+Ubuntu command uses `mkdir`'s absent-leaf requirement and GNU `dd
+oflag=excl` (an `O_EXCL` create) rather than a copying command that can
+overwrite. The exact source digest is checked before creation, and the sealed
+target digest and metadata are checked afterward. The `sha256/` parent and all
+of its named ancestors must already pass the root-owner/non-writable loop; a
+failure stops rather than repairing permissions in place:
+
+```bash
+set -euo pipefail
+
+REVIEWED_HANDOFF=/approved/review/gate_a_handoff.py
+HANDOFF_SHA=<EXACT_HANDOFF_TOOL_SHA256>
+TOOLS_SHA_ROOT=/var/lib/caerus/gate-a/tools/sha256
+TOOL_DIR="$TOOLS_SHA_ROOT/$HANDOFF_SHA"
+HANDOFF_TOOL="$TOOL_DIR/gate_a_handoff.py"
+
+test "$(/usr/bin/sha256sum "$REVIEWED_HANDOFF" | /usr/bin/cut -d' ' -f1)" = \
+  "$HANDOFF_SHA"
+
+for ancestor in \
+  /var /var/lib /var/lib/caerus /var/lib/caerus/gate-a \
+  /var/lib/caerus/gate-a/tools "$TOOLS_SHA_ROOT"
+do
+  read -r owner mode type <<EOF
+$(sudo /usr/bin/stat -c '%u %a %F' "$ancestor")
+EOF
+  test "$owner" = 0
+  test "$type" = directory
+  test $((8#$mode & 8#22)) -eq 0
+done
+
+sudo /usr/bin/mkdir --mode=0755 -- "$TOOL_DIR"
+sudo /usr/bin/dd if="$REVIEWED_HANDOFF" of="$HANDOFF_TOOL" \
+  bs=1048576 oflag=excl conv=fsync status=none
+sudo /usr/bin/chown 0:0 -- "$HANDOFF_TOOL"
+sudo /usr/bin/chmod 0444 -- "$HANDOFF_TOOL"
+sudo /usr/bin/chmod 0555 -- "$TOOL_DIR"
+
+test "$(sudo /usr/bin/sha256sum "$HANDOFF_TOOL" | /usr/bin/cut -d' ' -f1)" = \
+  "$HANDOFF_SHA"
+test "$(sudo /usr/bin/stat -c '%u:%g:%a:%h' "$HANDOFF_TOOL")" = 0:0:444:1
+test "$(sudo /usr/bin/stat -c '%u:%g:%a' "$TOOL_DIR")" = 0:0:555
+```
+
+The approved digest and the administrator-reviewed install operation are the
+initial trust anchor. The running tool's `--authorized-handoff-tool-sha256`
+self-check then detects post-install drift as defense in depth.
+
+Production transfer also verifies
+every existing target ancestor is root-owned and has no group/other write bit.
+The administrator must therefore create the `/var/lib/caerus/gate-a` hierarchy
+in advance with root ownership; the tool creates only the final protected leaf.
+After writing `TRANSFER_RECEIPT.json` last, it seals the leaf and wheelhouse to
+`0555` and every copied file plus the receipt to `0444`. Root ownership remains
+unchanged, allowing the distinct non-root `caerus-gate-a` principal to traverse
+and read the inputs without being able to modify them.
+
+After the protected handoff tool has been installed and immediately before the
+first ceremony write (the protected transfer), create the `before` dirty-
+checkout snapshot outside the checkout. Do not create the matching `after`
+snapshot until bootstrap, the release build, durable `READY`, and independent
+release verification have all completed. This preservation window therefore
+covers the complete Gate A operation, not only packet transfer. Each receipt
+binds the canonical repository root, HEAD, exact raw
+NUL-delimited porcelain bytes and hash, every expanded dirty file/symlink/
+absence record, fixed `/usr/bin/git` identity, and scanner identity. Expansion
+includes ignored files beneath a reported untracked directory. Comparison is
+exact and its semantic hash excludes only the capture timestamp.
+
+The following is the required command shape. Replace every placeholder with a
+separately reviewed absolute path or digest; do not derive an authorization
+value from the staging files during the ceremony:
+
+```bash
+HANDOFF_SHA=<EXACT_HANDOFF_TOOL_SHA256>
+HANDOFF_TOOL=/var/lib/caerus/gate-a/tools/sha256/$HANDOFF_SHA/gate_a_handoff.py
+DIRTY_REPO=/mnt/disks/alpha-lab/alpha-lab-project
+STAGING=/approved/staging/exact-six-inputs
+IDENTITY_SUMMARY=/approved/review/identity_summary.json
+PROTECTED_INPUT=/var/lib/caerus/gate-a/inputs/<EXACT_RELEASE_INPUT_SHA256>
+PRESERVATION=/var/lib/caerus/gate-a/preservation/<APPROVED_CEREMONY_ID>
+
+sudo /usr/bin/python3 -I -S -B "$HANDOFF_TOOL" dirty-snapshot \
+  --repo-root "$DIRTY_REPO" \
+  --output "$PRESERVATION/before.json"
+
+sudo /usr/bin/python3 -I -S -B "$HANDOFF_TOOL" protected-transfer \
+  --staging "$STAGING" \
+  --identity-summary "$IDENTITY_SUMMARY" \
+  --protected-leaf "$PROTECTED_INPUT" \
+  --authorized-packet-summary-sha256 <EXACT_PACKET_SUMMARY_SHA256> \
+  --authorized-source-archive-sha256 <EXACT_SOURCE_ARCHIVE_SHA256> \
+  --authorized-bootstrap-sha256 <EXACT_BOOTSTRAP_SHA256> \
+  --authorized-release-input-sha256 <EXACT_RELEASE_INPUT_SHA256> \
+  --authorized-handoff-tool-sha256 "$HANDOFF_SHA"
+```
+
+The transfer is provisionally accepted only when the command succeeds, the
+canonical receipt is present at `$PROTECTED_INPUT/TRANSFER_RECEIPT.json`, and
+an independent reviewer pins the receipt bytes. Gate A as a whole is not
+accepted until the final preservation comparison below returns `status=EQUAL`.
+Any failed or interrupted target leaf is abandoned and never repaired or
+reused. Subsequent bootstrap/build commands use only:
+
+```text
+$PROTECTED_INPUT/gate_a_bootstrap.py
+$PROTECTED_INPUT/source.tar
+$PROTECTED_INPUT/source_manifest.json
+$PROTECTED_INPUT/file_manifest.json
+$PROTECTED_INPUT/release_input_manifest.json
+$PROTECTED_INPUT/wheelhouse/
+```
+
 Download the target wheels into a temporary wheelhouse before entering Gate A.
 This is the only network-enabled dependency preparation step:
 
 ```bash
-WHEELHOUSE="$(mktemp -d /tmp/caerus-alpha-phase1-wheelhouse.XXXXXX)"
+WHEELHOUSE="$STAGING/wheelhouse"
 
 python3.10 -m pip download \
   --dest "$WHEELHOUSE" \
@@ -89,20 +225,20 @@ repaired, deleted, or reused:
 RELEASE_PARENT=/approved/release/parent
 SOURCE_ARCHIVE_SHA256=<EXACT_SOURCE_ARCHIVE_SHA256>
 BOOTSTRAP_SHA256=<EXACT_OWNER_APPROVED_BOOTSTRAP_SHA256>
-BOOTSTRAP_TOOL=/protected-release-input/gate_a_bootstrap.py
+BOOTSTRAP_TOOL="$PROTECTED_INPUT/gate_a_bootstrap.py"
 
 python3.10 -I -S -B "$BOOTSTRAP_TOOL" \
-  --source-archive /absolute/path/to/source.tar \
-  --source-manifest /absolute/path/to/source_manifest.json \
-  --file-manifest /absolute/path/to/file_manifest.json \
+  --source-archive "$PROTECTED_INPUT/source.tar" \
+  --source-manifest "$PROTECTED_INPUT/source_manifest.json" \
+  --file-manifest "$PROTECTED_INPUT/file_manifest.json" \
   --release-parent "$RELEASE_PARENT" \
   --authorized-source-archive-sha256 "$SOURCE_ARCHIVE_SHA256" \
   --authorized-bootstrap-sha256 "$BOOTSTRAP_SHA256"
 
 python3.10 -I -S -B "$BOOTSTRAP_TOOL" \
-  --source-archive /absolute/path/to/source.tar \
-  --source-manifest /absolute/path/to/source_manifest.json \
-  --file-manifest /absolute/path/to/file_manifest.json \
+  --source-archive "$PROTECTED_INPUT/source.tar" \
+  --source-manifest "$PROTECTED_INPUT/source_manifest.json" \
+  --file-manifest "$PROTECTED_INPUT/file_manifest.json" \
   --release-parent "$RELEASE_PARENT" \
   --authorized-source-archive-sha256 "$SOURCE_ARCHIVE_SHA256" \
   --authorized-bootstrap-sha256 "$BOOTSTRAP_SHA256" \
@@ -164,20 +300,20 @@ administrator-established environment:
 ```bash
 python3.10 -I -S -B "$GATE_A_BUILDER" preflight \
   --repo-root "$BOOTSTRAP_ROOT" \
-  --source-archive /absolute/path/to/source.tar \
-  --source-manifest /absolute/path/to/source_manifest.json \
-  --file-manifest /absolute/path/to/file_manifest.json \
-  --wheelhouse "$WHEELHOUSE" \
-  --release-input-manifest /absolute/path/to/release_input_manifest.json \
+  --source-archive "$PROTECTED_INPUT/source.tar" \
+  --source-manifest "$PROTECTED_INPUT/source_manifest.json" \
+  --file-manifest "$PROTECTED_INPUT/file_manifest.json" \
+  --wheelhouse "$PROTECTED_INPUT/wheelhouse" \
+  --release-input-manifest "$PROTECTED_INPUT/release_input_manifest.json" \
   --release-parent "$RELEASE_PARENT"
 
 python3.10 -I -S -B "$GATE_A_BUILDER" build \
   --repo-root "$BOOTSTRAP_ROOT" \
-  --source-archive /absolute/path/to/source.tar \
-  --source-manifest /absolute/path/to/source_manifest.json \
-  --file-manifest /absolute/path/to/file_manifest.json \
-  --wheelhouse "$WHEELHOUSE" \
-  --release-input-manifest /absolute/path/to/release_input_manifest.json \
+  --source-archive "$PROTECTED_INPUT/source.tar" \
+  --source-manifest "$PROTECTED_INPUT/source_manifest.json" \
+  --file-manifest "$PROTECTED_INPUT/file_manifest.json" \
+  --wheelhouse "$PROTECTED_INPUT/wheelhouse" \
+  --release-input-manifest "$PROTECTED_INPUT/release_input_manifest.json" \
   --release-parent "$RELEASE_PARENT"
 ```
 
@@ -187,11 +323,11 @@ operator add both write controls:
 ```bash
 python3.10 -I -S -B "$GATE_A_BUILDER" build \
   --repo-root "$BOOTSTRAP_ROOT" \
-  --source-archive /absolute/path/to/source.tar \
-  --source-manifest /absolute/path/to/source_manifest.json \
-  --file-manifest /absolute/path/to/file_manifest.json \
-  --wheelhouse "$WHEELHOUSE" \
-  --release-input-manifest /absolute/path/to/release_input_manifest.json \
+  --source-archive "$PROTECTED_INPUT/source.tar" \
+  --source-manifest "$PROTECTED_INPUT/source_manifest.json" \
+  --file-manifest "$PROTECTED_INPUT/file_manifest.json" \
+  --wheelhouse "$PROTECTED_INPUT/wheelhouse" \
+  --release-input-manifest "$PROTECTED_INPUT/release_input_manifest.json" \
   --release-parent "$RELEASE_PARENT" \
   --interpreter /usr/bin/python3.10 \
   --write \
@@ -235,7 +371,29 @@ before durable `READY` leaves an unreferenced directory that is never repaired,
 deleted, or reused automatically. An existing valid address is idempotently
 verified; any incomplete or divergent collision fails closed.
 
-Verify independently immediately before every ceremony invocation:
+Verify the finished release independently before any later ceremony invocation:
+
+```bash
+python3.10 -I -S -B "$GATE_A_BUILDER" verify \
+  --release-dir /approved/release/parent/releases/sha256/<EXACT_RELEASE_INPUT_SHA256>
+```
+
+Only after that verification has accepted durable `READY`, create the second
+dirty snapshot and compare it with the pre-transfer snapshot. These commands
+are part of Gate A and must complete before the build is accepted:
+
+```bash
+sudo /usr/bin/python3 -I -S -B "$HANDOFF_TOOL" dirty-snapshot \
+  --repo-root "$DIRTY_REPO" \
+  --output "$PRESERVATION/after-build.json"
+
+sudo /usr/bin/python3 -I -S -B "$HANDOFF_TOOL" compare \
+  --before "$PRESERVATION/before.json" \
+  --after "$PRESERVATION/after-build.json"
+```
+
+After Gate A and all later owner gates have independently passed, invoke a
+ceremony only after re-verifying the release:
 
 ```bash
 python3.10 -I -S -B "$GATE_A_BUILDER" verify \
