@@ -23,12 +23,20 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 
-VERSION = "1.1"
+VERSION = "1.3"
 TRANSFER_SCHEMA = "caerus_alpha_lab_gate_a_protected_transfer_v1"
-DIRTY_SCHEMA = "caerus_alpha_lab_dirty_snapshot_v1"
-SEMANTIC_SCHEMA = "caerus_alpha_lab_dirty_snapshot_semantic_v1"
+DIRTY_SCHEMA = "caerus_alpha_lab_dirty_snapshot_v2"
+SEMANTIC_SCHEMA = "caerus_alpha_lab_dirty_snapshot_semantic_v2"
 RECEIPT_NAME = "TRANSFER_RECEIPT.json"
 GIT = "/usr/bin/git"
+GIT_ENVIRONMENT = {
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_TERMINAL_PROMPT": "0",
+    "LANG": "C",
+    "LC_ALL": "C",
+}
 EXPECTED_INPUTS = {
     "gate_a_bootstrap.py",
     "source.tar",
@@ -196,7 +204,14 @@ def _write_all(fd: int, value: bytes) -> None:
         view = view[count:]
 
 
-def _create_file_at(parent_fd: int, name: str, value: bytes, mode: int) -> os.stat_result:
+def _create_file_at(
+    parent_fd: int,
+    name: str,
+    value: bytes,
+    mode: int,
+    *,
+    owner: tuple[int, int] | None = None,
+) -> os.stat_result:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NOFOLLOW | O_CLOEXEC
     try:
         fd = os.open(name, flags, mode, dir_fd=parent_fd)
@@ -204,6 +219,8 @@ def _create_file_at(parent_fd: int, name: str, value: bytes, mode: int) -> os.st
         raise HandoffError(f"cannot exclusively create target: {name}") from exc
     try:
         _write_all(fd, value)
+        if owner is not None:
+            os.fchown(fd, *owner)
         os.fchmod(fd, mode)
         os.fsync(fd)
         result = os.fstat(fd)
@@ -709,27 +726,98 @@ def protected_transfer(
         os.close(staging_fd)
 
 
-def _git(repo: Path, arguments: Sequence[str]) -> bytes:
-    environment = {
-        "GIT_CONFIG_GLOBAL": "/dev/null",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_OPTIONAL_LOCKS": "0",
-        "GIT_TERMINAL_PROMPT": "0",
-        "LANG": "C",
-        "LC_ALL": "C",
+def _repository_principal(metadata: os.stat_result) -> Mapping[str, Any]:
+    """Return the one non-root identity allowed to inspect this checkout."""
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise HandoffError("repository root is not a directory")
+    if metadata.st_uid == 0 or metadata.st_gid == 0:
+        raise HandoffError("repository root must have a non-root owner and group")
+    return {
+        "gid": metadata.st_gid,
+        "supplementary_gids": [],
+        "uid": metadata.st_uid,
     }
+
+
+def _git_directory_identity(
+    repo_fd: int, principal: Mapping[str, Any],
+) -> tuple[int, ...]:
+    """Require an owned in-root .git directory, never a gitfile or symlink."""
+    try:
+        git_fd = os.open(".git", DIR_FLAGS, dir_fd=repo_fd)
+    except OSError as exc:
+        raise HandoffError("repository root must contain an in-root .git directory") from exc
+    try:
+        metadata = os.fstat(git_fd)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != principal["uid"]
+            or metadata.st_gid != principal["gid"]
+        ):
+            raise HandoffError(".git directory ownership differs from repository root")
+        return _stable_identity(metadata)
+    finally:
+        os.close(git_fd)
+
+
+def _git_child_setup(
+    repo_fd: int, principal: Mapping[str, Any], *, drop_privileges: bool,
+):
+    """Build the minimal child setup used immediately before fixed Git exec."""
+    uid = int(principal["uid"])
+    gid = int(principal["gid"])
+
+    def setup() -> None:
+        if drop_privileges:
+            # This ordering is deliberate: supplementary groups can be cleared
+            # only while privileged, and setuid is the final privilege drop.
+            os.setgroups([])
+            os.setgid(gid)
+            os.setuid(uid)
+            if (
+                os.getuid() != uid
+                or os.geteuid() != uid
+                or os.getgid() != gid
+                or os.getegid() != gid
+                or os.getgroups() != []
+            ):
+                raise OSError("Git child identity drop did not take effect")
+        # Bind Git to the same already-open directory scanned descriptor-
+        # relatively by the privileged parent.  No attacker-controlled path is
+        # resolved again between the material scan and Git inspection.
+        os.fchdir(repo_fd)
+
+    return setup
+
+
+def _git(
+    repo_fd: int,
+    arguments: Sequence[str],
+    *,
+    principal: Mapping[str, Any],
+    drop_privileges: bool,
+) -> bytes:
     try:
         result = subprocess.run(
             [
                 GIT, "--no-replace-objects",
-                "-c", "core.fsmonitor=false",
+                "--git-dir=.git",
+                "--work-tree=.",
+                # Git <=2.35.1 treats Boolean "false" as a hook pathname.
+                # An explicitly empty value disables both old hook-based and
+                # newer built-in fsmonitor implementations without execution.
+                "-c", "core.fsmonitor=",
                 "-c", "core.untrackedCache=false",
-                "-C", str(repo), *arguments,
+                *arguments,
             ],
             check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            env=environment,
+            env=GIT_ENVIRONMENT,
+            pass_fds=(repo_fd,),
+            preexec_fn=_git_child_setup(
+                repo_fd, principal, drop_privileges=drop_privileges
+            ),
         )
-    except OSError as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         raise HandoffError("cannot invoke fixed /usr/bin/git") from exc
     if result.returncode != 0:
         raise HandoffError(f"git inspection failed with exit {result.returncode}")
@@ -887,36 +975,71 @@ def _git_tool_record() -> Mapping[str, Any]:
     }
 
 
-def dirty_snapshot(*, repo_root: Path, output: Path) -> Mapping[str, Any]:
+def dirty_snapshot(
+    *, repo_root: Path, output: Path,
+    _require_root: bool = True,
+    _enforce_protected_output: bool = True,
+) -> Mapping[str, Any]:
     """Create a lossless, create-only receipt for the current dirty material."""
     repo_root = _absolute(repo_root, label="repository root")
     output = _absolute(output, label="snapshot output")
+    if _require_root and os.geteuid() != 0:
+        raise HandoffError("dirty snapshot requires the root receipt principal")
+    if os.path.commonpath((str(repo_root), str(output))) == str(repo_root):
+        raise HandoffError("snapshot output must be outside the repository")
+    if _enforce_protected_output:
+        _verify_root_owned_ancestors(output.parent)
     root_fd = _open_dir(repo_root)
     try:
+        root_before = os.fstat(root_fd)
+        principal = _repository_principal(root_before)
+        git_directory_before = _git_directory_identity(root_fd, principal)
         git_tool = _git_tool_record()
-        head_raw = _git(repo_root, ["rev-parse", "--verify", "HEAD"])
+        top_level_raw = _git(
+            root_fd, ["rev-parse", "--show-toplevel"],
+            principal=principal, drop_privileges=_require_root,
+        )
+        expected_top_level = f"{repo_root}\n".encode("utf-8")
+        if top_level_raw != expected_top_level:
+            raise HandoffError("Git top level differs from the canonical repository root")
+        head_raw = _git(
+            root_fd, ["rev-parse", "--verify", "HEAD"],
+            principal=principal, drop_privileges=_require_root,
+        )
         if re.fullmatch(rb"[0-9a-f]{40}\n", head_raw) is None:
             raise HandoffError("git HEAD identity is invalid")
         head = head_raw[:-1].decode("ascii")
-        raw = _git(repo_root, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])
+        raw = _git(
+            root_fd,
+            ["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+            principal=principal, drop_privileges=_require_root,
+        )
         first_records = _scan_dirty_records(root_fd, raw)
         first_census = _dirty_census(first_records)
         # Each complete material scan is bracketed by the Git namespace.  The
         # second independent descriptor-relative scan also catches byte or mode
         # mutation that leaves porcelain unchanged.
-        middle_head = _git(repo_root, ["rev-parse", "--verify", "HEAD"])
+        middle_head = _git(
+            root_fd, ["rev-parse", "--verify", "HEAD"],
+            principal=principal, drop_privileges=_require_root,
+        )
         middle_raw = _git(
-            repo_root,
+            root_fd,
             ["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+            principal=principal, drop_privileges=_require_root,
         )
         if middle_head != head_raw or middle_raw != raw:
             raise HandoffError("git HEAD or porcelain changed during dirty scan")
         second_records = _scan_dirty_records(root_fd, middle_raw)
         second_census = _dirty_census(second_records)
-        final_head = _git(repo_root, ["rev-parse", "--verify", "HEAD"])
+        final_head = _git(
+            root_fd, ["rev-parse", "--verify", "HEAD"],
+            principal=principal, drop_privileges=_require_root,
+        )
         final_raw = _git(
-            repo_root,
+            root_fd,
             ["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+            principal=principal, drop_privileges=_require_root,
         )
         if final_head != middle_head or final_raw != middle_raw:
             raise HandoffError("git HEAD or porcelain changed during dirty scan")
@@ -926,10 +1049,16 @@ def dirty_snapshot(*, repo_root: Path, output: Path) -> Mapping[str, Any]:
         git_tool_after = _git_tool_record()
         if git_tool_after != git_tool:
             raise HandoffError("fixed /usr/bin/git changed during dirty scan")
+        if _stable_identity(os.fstat(root_fd)) != _stable_identity(root_before):
+            raise HandoffError("repository root changed during dirty scan")
+        if _git_directory_identity(root_fd, principal) != git_directory_before:
+            raise HandoffError(".git directory changed during dirty scan")
         tool = _tool_record()
         record_count, total_bytes = second_census
         semantic = {
             "git_head": head,
+            "git_inspection_principal": principal,
+            "git_top_level": str(repo_root),
             "git_tool": git_tool,
             "porcelain_bytes": len(raw),
             "porcelain_sha256": _sha256(raw),
@@ -945,9 +1074,11 @@ def dirty_snapshot(*, repo_root: Path, output: Path) -> Mapping[str, Any]:
             "git": {
                 "executable": GIT,
                 "head": head,
+                "inspection_principal": principal,
                 "porcelain_base64": base64.b64encode(raw).decode("ascii"),
                 "porcelain_bytes": len(raw),
                 "porcelain_sha256": _sha256(raw),
+                "top_level": str(repo_root),
                 "tool": git_tool,
             },
             "records": records,
@@ -961,7 +1092,16 @@ def dirty_snapshot(*, repo_root: Path, output: Path) -> Mapping[str, Any]:
         os.close(root_fd)
     parent_fd = _open_dir(output.parent)
     try:
-        metadata = _create_file_at(parent_fd, output.name, _canonical(receipt), 0o440)
+        metadata = _create_file_at(
+            parent_fd, output.name, _canonical(receipt), 0o440,
+            owner=(0, 0) if _enforce_protected_output else None,
+        )
+        if _enforce_protected_output and (
+            metadata.st_uid != 0
+            or metadata.st_gid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o440
+        ):
+            raise HandoffError("snapshot receipt is not root-owned, root-grouped, and 0440")
         os.fsync(parent_fd)
     finally:
         os.close(parent_fd)
@@ -1003,10 +1143,23 @@ def _validate_snapshot_receipt(receipt: Any, *, label: str) -> None:
         raise HandoffError(f"{label} snapshot scanner path is invalid") from exc
     git = receipt.get("git")
     if not isinstance(git, Mapping) or set(git) != {
-        "executable", "head", "porcelain_base64", "porcelain_bytes",
-        "porcelain_sha256", "tool",
+        "executable", "head", "inspection_principal", "porcelain_base64",
+        "porcelain_bytes", "porcelain_sha256", "tool", "top_level",
     }:
         raise HandoffError(f"{label} snapshot git record is invalid")
+    principal = git.get("inspection_principal")
+    if (
+        not isinstance(principal, Mapping)
+        or set(principal) != {"gid", "supplementary_gids", "uid"}
+        or not isinstance(principal.get("uid"), int)
+        or isinstance(principal.get("uid"), bool)
+        or principal["uid"] <= 0
+        or not isinstance(principal.get("gid"), int)
+        or isinstance(principal.get("gid"), bool)
+        or principal["gid"] <= 0
+        or principal.get("supplementary_gids") != []
+    ):
+        raise HandoffError(f"{label} snapshot Git inspection principal is invalid")
     git_tool = git.get("tool")
     if (
         not isinstance(git_tool, Mapping)
@@ -1023,7 +1176,11 @@ def _validate_snapshot_receipt(receipt: Any, *, label: str) -> None:
         or SHA256.fullmatch(str(git_tool.get("sha256", ""))) is None
     ):
         raise HandoffError(f"{label} snapshot fixed-git identity is invalid")
-    if git.get("executable") != GIT or re.fullmatch(r"[0-9a-f]{40}", str(git.get("head", ""))) is None:
+    if (
+        git.get("executable") != GIT
+        or git.get("top_level") != str(repo_root)
+        or re.fullmatch(r"[0-9a-f]{40}", str(git.get("head", ""))) is None
+    ):
         raise HandoffError(f"{label} snapshot git identity is invalid")
     try:
         raw = base64.b64decode(str(git.get("porcelain_base64", "")), validate=True)
@@ -1074,9 +1231,9 @@ def _validate_snapshot_receipt(receipt: Any, *, label: str) -> None:
             raise HandoffError(f"{label} snapshot symlink target is invalid")
     semantic = receipt.get("semantic_snapshot")
     semantic_fields = {
-        "git_head", "git_tool", "porcelain_bytes", "porcelain_sha256",
-        "record_count", "records", "repo_root", "schema_version", "scanner",
-        "total_file_bytes",
+        "git_head", "git_inspection_principal", "git_tool", "git_top_level",
+        "porcelain_bytes", "porcelain_sha256", "record_count", "records",
+        "repo_root", "schema_version", "scanner", "total_file_bytes",
     }
     digest = receipt.get("semantic_snapshot_sha256")
     if (
@@ -1088,6 +1245,8 @@ def _validate_snapshot_receipt(receipt: Any, *, label: str) -> None:
         raise HandoffError(f"{label} snapshot semantic hash is invalid")
     if (
         semantic.get("git_head") != git["head"]
+        or semantic.get("git_inspection_principal") != principal
+        or semantic.get("git_top_level") != git["top_level"]
         or semantic.get("git_tool") != git_tool
         or semantic.get("porcelain_bytes") != len(raw)
         or semantic.get("porcelain_sha256") != _sha256(raw)

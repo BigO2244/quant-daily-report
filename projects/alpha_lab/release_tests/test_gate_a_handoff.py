@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -199,6 +200,33 @@ def test_write_all_retries_short_writes(monkeypatch) -> None:
     assert b"".join(writes) == b"abcdef"
 
 
+def test_create_file_sets_explicit_owner_before_final_mode(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    calls = []
+    original_fchmod = handoff.os.fchmod
+
+    monkeypatch.setattr(
+        handoff.os, "fchown",
+        lambda _fd, uid, gid: calls.append(("owner", uid, gid)),
+    )
+
+    def recording_fchmod(fd, mode):
+        calls.append(("mode", mode))
+        original_fchmod(fd, mode)
+
+    monkeypatch.setattr(handoff.os, "fchmod", recording_fchmod)
+    parent_fd = handoff._open_dir(tmp_path.absolute())
+    try:
+        metadata = handoff._create_file_at(
+            parent_fd, "receipt.json", b"{}", 0o440, owner=(0, 0)
+        )
+    finally:
+        os.close(parent_fd)
+    assert calls == [("owner", 0, 0), ("mode", 0o440)]
+    assert stat.S_IMODE(metadata.st_mode) == 0o440
+
+
 def test_required_file_probe_rejects_fifo_without_blocking(tmp_path: Path) -> None:
     directory = tmp_path / "fifo-input"
     directory.mkdir()
@@ -317,6 +345,153 @@ def _git_repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _dirty_snapshot(*, repo_root: Path, output: Path):
+    """Exercise receipt semantics without pretending a portable test is root."""
+    return handoff.dirty_snapshot(
+        repo_root=repo_root,
+        output=output,
+        _require_root=False,
+        _enforce_protected_output=False,
+    )
+
+
+def test_git_child_uses_exact_repo_owner_identity_fd_and_fixed_argv(
+    monkeypatch,
+) -> None:
+    calls = []
+    captured = {}
+
+    monkeypatch.setattr(handoff.os, "setgroups", lambda value: calls.append(("groups", value)))
+    monkeypatch.setattr(handoff.os, "setgid", lambda value: calls.append(("gid", value)))
+    monkeypatch.setattr(handoff.os, "setuid", lambda value: calls.append(("uid", value)))
+    monkeypatch.setattr(handoff.os, "getgroups", lambda: [])
+    monkeypatch.setattr(handoff.os, "getgid", lambda: 456)
+    monkeypatch.setattr(handoff.os, "getegid", lambda: 456)
+    monkeypatch.setattr(handoff.os, "getuid", lambda: 123)
+    monkeypatch.setattr(handoff.os, "geteuid", lambda: 123)
+    monkeypatch.setattr(handoff.os, "fchdir", lambda value: calls.append(("fchdir", value)))
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured.update(kwargs)
+        kwargs["preexec_fn"]()
+        return SimpleNamespace(returncode=0, stdout=b"result\n", stderr=b"")
+
+    monkeypatch.setattr(handoff.subprocess, "run", fake_run)
+    result = handoff._git(
+        19,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        principal={"uid": 123, "gid": 456, "supplementary_gids": []},
+        drop_privileges=True,
+    )
+
+    assert result == b"result\n"
+    assert calls == [
+        ("groups", []), ("gid", 456), ("uid", 123), ("fchdir", 19),
+    ]
+    assert captured["argv"] == [
+        "/usr/bin/git", "--no-replace-objects",
+        "--git-dir=.git", "--work-tree=.",
+        "-c", "core.fsmonitor=",
+        "-c", "core.untrackedCache=false",
+        "status", "--porcelain=v1", "-z", "--untracked-files=normal",
+    ]
+    assert "safe.directory" not in " ".join(captured["argv"])
+    assert "-C" not in captured["argv"]
+    assert "core.fsmonitor=false" not in captured["argv"]
+    assert captured["env"] == handoff.GIT_ENVIRONMENT
+    assert set(captured["env"]) == {
+        "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_OPTIONAL_LOCKS",
+        "GIT_TERMINAL_PROMPT", "LANG", "LC_ALL",
+    }
+    assert "SUDO_UID" not in captured["env"]
+    assert "HOME" not in captured["env"]
+    assert captured["pass_fds"] == (19,)
+
+
+@pytest.mark.parametrize("uid,gid", [(0, 456), (123, 0)])
+def test_repository_principal_rejects_any_root_identity(uid: int, gid: int) -> None:
+    metadata = SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=uid, st_gid=gid)
+    with pytest.raises(handoff.HandoffError, match="non-root owner and group"):
+        handoff._repository_principal(metadata)
+
+
+def test_dirty_snapshot_production_path_requires_root(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(handoff.os, "geteuid", lambda: 501)
+    with pytest.raises(handoff.HandoffError, match="root receipt principal"):
+        handoff.dirty_snapshot(
+            repo_root=(tmp_path / "repo").absolute(),
+            output=(tmp_path / "receipt.json").absolute(),
+        )
+
+
+def test_dirty_snapshot_rejects_output_inside_checkout(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path)
+    with pytest.raises(handoff.HandoffError, match="outside the repository"):
+        _dirty_snapshot(
+            repo_root=repo.absolute(), output=(repo / "receipt.json").absolute()
+        )
+
+
+def test_dirty_snapshot_rejects_parent_repository_discovery(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path)
+    nested = repo / "nested"
+    nested.mkdir()
+    with pytest.raises(handoff.HandoffError, match="in-root .git directory"):
+        _dirty_snapshot(
+            repo_root=nested.absolute(), output=(tmp_path / "nested.json").absolute()
+        )
+
+
+def test_dirty_snapshot_overrides_worktree_redirect_and_fsmonitor_hook(
+    tmp_path: Path,
+) -> None:
+    repo = _git_repo(tmp_path)
+    redirected = tmp_path / "redirected-worktree"
+    redirected.mkdir()
+    (redirected / "tracked.txt").write_text("old\n")
+    hook = tmp_path / "malicious-fsmonitor"
+    marker = Path(f"{hook}.ran")
+    hook.write_text('#!/bin/sh\n: > "$0.ran"\nexit 0\n')
+    hook.chmod(0o755)
+    subprocess.run(
+        [
+            "/usr/bin/git", f"--git-dir={repo / '.git'}", "config",
+            "core.worktree", str(redirected),
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "/usr/bin/git", f"--git-dir={repo / '.git'}", "config",
+            "core.fsmonitor", str(hook),
+        ],
+        check=True,
+    )
+    (repo / "tracked.txt").write_text("new\n")
+    subprocess.run(
+        [
+            "/usr/bin/git", f"--git-dir={repo / '.git'}",
+            f"--work-tree={redirected}", "status", "--porcelain=v1",
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert marker.exists(), "adversarial fixture did not invoke its configured hook"
+    marker.unlink()
+
+    receipt = _dirty_snapshot(
+        repo_root=repo.absolute(), output=(tmp_path / "override.json").absolute()
+    )
+
+    assert not marker.exists()
+    records = {record["path"]: record for record in receipt["records"]}
+    assert records["tracked.txt"]["status"] == " M"
+    assert records["tracked.txt"]["sha256"] == hashlib.sha256(b"new\n").hexdigest()
+    assert receipt["git"]["top_level"] == str(repo)
+
+
 def test_dirty_snapshot_expands_untracked_and_exact_compare(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path)
     (repo / ".gitignore").write_text("*.secret\n")
@@ -329,8 +504,8 @@ def test_dirty_snapshot_expands_untracked_and_exact_compare(tmp_path: Path) -> N
     (repo / "newdir" / "link").symlink_to("nested/visible.txt")
     before = tmp_path / "before.json"
     after = tmp_path / "after.json"
-    first = handoff.dirty_snapshot(repo_root=repo.absolute(), output=before.absolute())
-    second = handoff.dirty_snapshot(repo_root=repo.absolute(), output=after.absolute())
+    first = _dirty_snapshot(repo_root=repo.absolute(), output=before.absolute())
+    second = _dirty_snapshot(repo_root=repo.absolute(), output=after.absolute())
     paths = {item["path"]: item for item in first["records"]}
     assert paths["deleted.txt"]["type"] == "absent"
     assert paths["newdir/nested/hidden.secret"]["type"] == "file"
@@ -342,6 +517,16 @@ def test_dirty_snapshot_expands_untracked_and_exact_compare(tmp_path: Path) -> N
         item["bytes"] for item in first["records"] if item["type"] == "file"
     )
     assert semantic["git_tool"] == first["git"]["tool"]
+    assert semantic["git_inspection_principal"] == first["git"][
+        "inspection_principal"
+    ]
+    assert semantic["git_top_level"] == str(repo)
+    assert first["git"]["top_level"] == str(repo)
+    assert first["git"]["inspection_principal"] == {
+        "gid": repo.stat().st_gid,
+        "supplementary_gids": [],
+        "uid": repo.stat().st_uid,
+    }
     assert semantic["git_tool"]["path"] == "/usr/bin/git"
     assert set(semantic["git_tool"]) == {
         "bytes", "gid", "mode", "nlink", "path", "sha256", "uid",
@@ -349,7 +534,7 @@ def test_dirty_snapshot_expands_untracked_and_exact_compare(tmp_path: Path) -> N
     assert first["semantic_snapshot_sha256"] == second["semantic_snapshot_sha256"]
     assert handoff.compare_snapshots(before=before.absolute(), after=after.absolute())["status"] == "EQUAL"
     with pytest.raises(handoff.HandoffError, match="exclusively create"):
-        handoff.dirty_snapshot(repo_root=repo.absolute(), output=before.absolute())
+        _dirty_snapshot(repo_root=repo.absolute(), output=before.absolute())
 
 
 def test_dirty_snapshot_compare_detects_tamper_and_change(tmp_path: Path) -> None:
@@ -357,9 +542,9 @@ def test_dirty_snapshot_compare_detects_tamper_and_change(tmp_path: Path) -> Non
     (repo / "tracked.txt").write_text("before\n")
     before = tmp_path / "before.json"
     after = tmp_path / "after.json"
-    handoff.dirty_snapshot(repo_root=repo.absolute(), output=before.absolute())
+    _dirty_snapshot(repo_root=repo.absolute(), output=before.absolute())
     (repo / "tracked.txt").write_text("after\n")
-    handoff.dirty_snapshot(repo_root=repo.absolute(), output=after.absolute())
+    _dirty_snapshot(repo_root=repo.absolute(), output=after.absolute())
     with pytest.raises(handoff.HandoffError, match="differ"):
         handoff.compare_snapshots(before=before.absolute(), after=after.absolute())
     value = json.loads(before.read_text())
@@ -377,8 +562,8 @@ def test_dirty_snapshot_binds_repository_root(tmp_path: Path) -> None:
     shutil.copytree(first_repo, second_repo, symlinks=True)
     first_path = tmp_path / "first-root.json"
     second_path = tmp_path / "second-root.json"
-    first = handoff.dirty_snapshot(repo_root=first_repo.absolute(), output=first_path.absolute())
-    second = handoff.dirty_snapshot(repo_root=second_repo.absolute(), output=second_path.absolute())
+    first = _dirty_snapshot(repo_root=first_repo.absolute(), output=first_path.absolute())
+    second = _dirty_snapshot(repo_root=second_repo.absolute(), output=second_path.absolute())
     assert first["git"]["head"] == second["git"]["head"]
     assert first["git"]["porcelain_sha256"] == second["git"]["porcelain_sha256"]
     assert first["semantic_snapshot_sha256"] != second["semantic_snapshot_sha256"]
@@ -392,9 +577,9 @@ def test_dirty_snapshot_rejects_git_race(tmp_path: Path, monkeypatch) -> None:
     original = handoff._git
     first_status = True
 
-    def racing(repo_root, arguments):
+    def racing(repo_fd, arguments, **kwargs):
         nonlocal first_status
-        result = original(repo_root, arguments)
+        result = original(repo_fd, arguments, **kwargs)
         if first_status and arguments and arguments[0] == "status":
             first_status = False
             (repo / "appeared.txt").write_text("race\n")
@@ -402,7 +587,7 @@ def test_dirty_snapshot_rejects_git_race(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(handoff, "_git", racing)
     with pytest.raises(handoff.HandoffError, match="changed during dirty scan"):
-        handoff.dirty_snapshot(
+        _dirty_snapshot(
             repo_root=repo.absolute(), output=(tmp_path / "race.json").absolute()
         )
 
@@ -428,7 +613,7 @@ def test_dirty_snapshot_rejects_content_race_with_unchanged_porcelain(
 
     monkeypatch.setattr(handoff, "_read_path_record", racing)
     with pytest.raises(handoff.HandoffError, match="material records changed"):
-        handoff.dirty_snapshot(
+        _dirty_snapshot(
             repo_root=repo.absolute(),
             output=(tmp_path / "content-race.json").absolute(),
         )
@@ -440,8 +625,8 @@ def test_compare_rejects_top_level_duplicate_drift(tmp_path: Path, field: str) -
     (repo / "tracked.txt").write_text("dirty\n")
     before = tmp_path / "before-strict.json"
     after = tmp_path / "after-strict.json"
-    handoff.dirty_snapshot(repo_root=repo.absolute(), output=before.absolute())
-    handoff.dirty_snapshot(repo_root=repo.absolute(), output=after.absolute())
+    _dirty_snapshot(repo_root=repo.absolute(), output=before.absolute())
+    _dirty_snapshot(repo_root=repo.absolute(), output=after.absolute())
     value = json.loads(after.read_text())
     if field == "records":
         value[field] = []
@@ -456,6 +641,25 @@ def test_compare_rejects_top_level_duplicate_drift(tmp_path: Path, field: str) -
     after.chmod(0o644)
     after.write_bytes(_canonical(value))
     with pytest.raises(handoff.HandoffError):
+        handoff.compare_snapshots(before=before.absolute(), after=after.absolute())
+
+
+def test_compare_rejects_git_principal_drift(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path)
+    (repo / "tracked.txt").write_text("dirty\n")
+    before = tmp_path / "before-principal.json"
+    after = tmp_path / "after-principal.json"
+    _dirty_snapshot(repo_root=repo.absolute(), output=before.absolute())
+    _dirty_snapshot(repo_root=repo.absolute(), output=after.absolute())
+    value = json.loads(after.read_text())
+    value["git"]["inspection_principal"]["uid"] = 0
+    value["semantic_snapshot"]["git_inspection_principal"]["uid"] = 0
+    value["semantic_snapshot_sha256"] = hashlib.sha256(
+        _canonical(value["semantic_snapshot"])
+    ).hexdigest()
+    after.chmod(0o644)
+    after.write_bytes(_canonical(value))
+    with pytest.raises(handoff.HandoffError, match="inspection principal"):
         handoff.compare_snapshots(before=before.absolute(), after=after.absolute())
 
 

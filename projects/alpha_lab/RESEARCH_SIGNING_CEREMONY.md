@@ -228,6 +228,39 @@ absence record, fixed `/usr/bin/git` identity, and scanner identity. Expansion
 includes ignored files beneath a reported untracked directory. Comparison is
 exact and its semantic hash excludes only the capture timestamp.
 
+Handoff tool version 1.3 keeps the receipt writer privileged but never runs Git
+as root. It opens the canonical repository directory without following links,
+requires that directory to have a non-root owner and group, and launches only
+the fixed `/usr/bin/git` children as that exact numeric UID/GID with all
+supplementary groups cleared. Each child changes to the already-open repository
+descriptor, so it does not resolve an attacker-swappable repository path again.
+The checkout must contain an actual `.git/` directory—not a symlink or gitfile—
+with the same UID/GID as the repository root. Fixed global
+`--git-dir=.git --work-tree=.` arguments prevent parent discovery and override a
+local `core.worktree` redirect. Before HEAD or status inspection, Git's exact
+`rev-parse --show-toplevel` output must equal the canonical repository path.
+
+The child receives only the fixed six-variable Git environment documented by
+the tool; system and global config are disabled. The command-scoped empty
+`core.fsmonitor=` value disables fsmonitor without invoking a hook on both the
+target Ubuntu Git 2.34.1 and newer Git. Do not substitute
+`core.fsmonitor=false`: Git 2.35.1 and earlier interpret `false` as a hook
+pathname. `core.untrackedCache=false` separately disables the untracked cache.
+Local `.git/config` is still parsed, as Git requires for normal repository
+interpretation, but it is parsed with only the checkout owner's authority—not
+root authority—and its work-tree/fsmonitor redirections are overridden. The
+receipt and semantic hash record the exact Git inspection UID, GID, empty
+supplementary group set, and proven top-level path.
+
+Do not add `safe.directory`, including a command-scoped exact path, wildcard,
+prefix, persistent config entry, or value derived from `SUDO_UID`. That approach
+would bypass Git's dubious-ownership defense while leaving the root process to
+parse the user-controlled repository and local config. The owner-identity Git
+child removes the ownership mismatch without expanding root's trusted Git
+surface. The privileged parent retains the already-open repository descriptor
+for its independent descriptor-relative material scans and retains root only
+to exclusive-create a `root:root`, `0440` receipt outside the checkout.
+
 The following is the required command shape. Replace every placeholder with a
 separately reviewed absolute path or digest; do not derive an authorization
 value from the staging files during the ceremony:
@@ -241,11 +274,27 @@ IDENTITY_SUMMARY=/approved/review/identity_summary.json
 PROTECTED_INPUT=/var/lib/caerus/gate-a/inputs/<EXACT_RELEASE_INPUT_SHA256>
 PRESERVATION=/var/lib/caerus/gate-a/preservation/<APPROVED_CEREMONY_ID>
 
-sudo /usr/bin/python3 -I -S -B "$HANDOFF_TOOL" dirty-snapshot \
+PRESERVATION_PARENT=/var/lib/caerus/gate-a/preservation
+for ancestor in \
+  /var /var/lib /var/lib/caerus /var/lib/caerus/gate-a \
+  "$PRESERVATION_PARENT"
+do
+  read -r owner mode type <<EOF
+$(sudo /usr/bin/stat -c '%u %a %F' "$ancestor")
+EOF
+  test "$owner" = 0
+  test "$type" = directory
+  test $((8#$mode & 8#22)) -eq 0
+done
+sudo /usr/bin/mkdir --mode=0755 -- "$PRESERVATION"
+test "$(sudo /usr/bin/stat -c '%u:%g:%a:%F' "$PRESERVATION")" = \
+  "0:0:755:directory"
+
+sudo /usr/bin/python3.10 -I -S -B "$HANDOFF_TOOL" dirty-snapshot \
   --repo-root "$DIRTY_REPO" \
   --output "$PRESERVATION/before.json"
 
-sudo /usr/bin/python3 -I -S -B "$HANDOFF_TOOL" protected-transfer \
+sudo /usr/bin/python3.10 -I -S -B "$HANDOFF_TOOL" protected-transfer \
   --staging "$STAGING" \
   --identity-summary "$IDENTITY_SUMMARY" \
   --protected-leaf "$PROTECTED_INPUT" \
@@ -467,11 +516,11 @@ dirty snapshot and compare it with the pre-transfer snapshot. These commands
 are part of Gate A and must complete before the build is accepted:
 
 ```bash
-sudo /usr/bin/python3 -I -S -B "$HANDOFF_TOOL" dirty-snapshot \
+sudo /usr/bin/python3.10 -I -S -B "$HANDOFF_TOOL" dirty-snapshot \
   --repo-root "$DIRTY_REPO" \
   --output "$PRESERVATION/after-build.json"
 
-sudo /usr/bin/python3 -I -S -B "$HANDOFF_TOOL" compare \
+sudo /usr/bin/python3.10 -I -S -B "$HANDOFF_TOOL" compare \
   --before "$PRESERVATION/before.json" \
   --after "$PRESERVATION/after-build.json"
 ```
