@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import shutil
 from datetime import datetime, timezone
@@ -19,6 +18,13 @@ from projects.alpha_lab.factory.research_ledger import (
     ResearchRunClass,
 )
 
+from .authenticated_ledger import (
+    load_event_attestations,
+    open_authenticated_global_ledger,
+    require_event_attestation,
+    strict_load_json_object_bytes,
+    strict_load_json_object,
+)
 from .evaluator import EvaluationPhase, load_spec, run_evaluator
 from .evaluator_recovery import reconcile_finalized_evaluator_bundle
 from .lifecycle import (
@@ -31,10 +37,7 @@ from .models import CandidateSnapshot, REQUIRED_RESEARCH_GATES_V2
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise ContractValidationError("JSON artifact must contain an object")
-    return value
+    return strict_load_json_object(path)
 
 
 def _seal_candidate(
@@ -114,7 +117,11 @@ def _authoritative_root(repo_root: Path) -> Path:
 
 
 def _canonical_ledger(
-    repo_root: Path, ledger_path: Optional[Path]
+    repo_root: Path,
+    ledger_path: Optional[Path],
+    *,
+    identity_bundle: Optional[Path],
+    identity_registry_pin: Optional[str],
 ) -> GlobalResearchLedger:
     if ledger_path is None:
         raise ContractValidationError("--ledger is required for decision-grade lifecycle work")
@@ -123,7 +130,12 @@ def _canonical_ledger(
     actual = ledger_path.expanduser().resolve()
     if actual != expected:
         raise ResearchBoundaryError("lifecycle requires the canonical global research ledger")
-    return GlobalResearchLedger(actual, research_root=data_root)
+    return open_authenticated_global_ledger(
+        ledger_path=actual,
+        research_root=data_root,
+        identity_bundle=identity_bundle,
+        identity_registry_pin=identity_registry_pin,
+    )
 
 
 def _verify_registered_evaluator_contract(
@@ -211,18 +223,27 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    def add_identity_arguments(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--identity-bundle", type=Path)
+        command.add_argument("--identity-registry-pin")
+
+    def add_event_attestation_arguments(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--event-attestation", action="append", type=Path, default=[])
+
     seal = subparsers.add_parser("seal-candidate", help="hash and validate a candidate draft")
     seal.add_argument("--draft", type=Path, required=True)
     seal.add_argument("--write", action="store_true")
     seal.add_argument("--repo-root", type=Path, default=Path.cwd())
     seal.add_argument("--ledger", type=Path)
     seal.add_argument("--at")
+    add_identity_arguments(seal)
 
     assess = subparsers.add_parser("assess", help="assess one immutable candidate snapshot")
     assess.add_argument("--candidate", type=Path, required=True)
     assess.add_argument("--repo-root", type=Path, default=Path.cwd())
     assess.add_argument("--ledger", type=Path)
     assess.add_argument("--at")
+    add_identity_arguments(assess)
 
     queue = subparsers.add_parser("build-queue", help="build the CIO decision queue")
     queue.add_argument("--candidate", action="append", type=Path, default=[])
@@ -231,6 +252,7 @@ def _parser() -> argparse.ArgumentParser:
     queue.add_argument("--write", action="store_true")
     queue.add_argument("--repo-root", type=Path, default=Path.cwd())
     queue.add_argument("--ledger", type=Path)
+    add_identity_arguments(queue)
 
     evaluator = subparsers.add_parser("run-evaluator", help="run a frozen research adapter")
     evaluator.add_argument("--spec", type=Path, required=True)
@@ -242,6 +264,8 @@ def _parser() -> argparse.ArgumentParser:
     evaluator.add_argument("--write", action="store_true")
     evaluator.add_argument("--repo-root", type=Path, default=Path.cwd())
     evaluator.add_argument("--at")
+    add_identity_arguments(evaluator)
+    add_event_attestation_arguments(evaluator)
 
     recovery = subparsers.add_parser(
         "reconcile-evaluator-bundle",
@@ -252,6 +276,8 @@ def _parser() -> argparse.ArgumentParser:
     recovery.add_argument("--ledger", type=Path, required=True)
     recovery.add_argument("--repo-root", type=Path, default=Path.cwd())
     recovery.add_argument("--at")
+    add_identity_arguments(recovery)
+    add_event_attestation_arguments(recovery)
     return parser
 
 
@@ -262,7 +288,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "seal-candidate":
         draft = _load_json(args.draft)
         research_ledger = (
-            _canonical_ledger(args.repo_root.expanduser().resolve(), args.ledger)
+            _canonical_ledger(
+                args.repo_root.expanduser().resolve(),
+                args.ledger,
+                identity_bundle=args.identity_bundle,
+                identity_registry_pin=args.identity_registry_pin,
+            )
             if draft.get("research_verdict") == "EVIDENCE_READY_FOR_OWNER_REVIEW"
             else None
         )
@@ -283,7 +314,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "assess":
         candidate = _load_candidate(args.candidate)
         research_ledger = (
-            _canonical_ledger(args.repo_root.expanduser().resolve(), args.ledger)
+            _canonical_ledger(
+                args.repo_root.expanduser().resolve(),
+                args.ledger,
+                identity_bundle=args.identity_bundle,
+                identity_registry_pin=args.identity_registry_pin,
+            )
             if candidate.research_verdict.value == "EVIDENCE_READY_FOR_OWNER_REVIEW"
             else None
         )
@@ -296,7 +332,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         paths = _candidate_paths(args.candidate, args.candidate_dir)
         candidates = [_load_candidate(path) for path in paths]
         research_ledger = (
-            _canonical_ledger(args.repo_root.expanduser().resolve(), args.ledger)
+            _canonical_ledger(
+                args.repo_root.expanduser().resolve(),
+                args.ledger,
+                identity_bundle=args.identity_bundle,
+                identity_registry_pin=args.identity_registry_pin,
+            )
             if any(
                 item.research_verdict.value == "EVIDENCE_READY_FOR_OWNER_REVIEW"
                 for item in candidates
@@ -323,12 +364,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     if args.command == "reconcile-evaluator-bundle":
         repo_root = args.repo_root.expanduser().resolve()
-        ledger = _canonical_ledger(repo_root, args.ledger)
+        ledger = _canonical_ledger(
+            repo_root,
+            args.ledger,
+            identity_bundle=args.identity_bundle,
+            identity_registry_pin=args.identity_registry_pin,
+        )
+        event_attestations = load_event_attestations(args.event_attestation)
         result = reconcile_finalized_evaluator_bundle(
             bundle_dir=args.bundle,
             ledger=ledger,
             spec=load_spec(args.spec),
             recorded_at=now,
+            event_attestations=event_attestations,
         )
         print(canonical_json(result))
         return 0
@@ -338,17 +386,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "outcome-bearing evaluator runs must persist their result bundle"
             )
         repo_root = args.repo_root.expanduser().resolve()
-        data_root = _authoritative_root(repo_root)
-        ledger_path = args.ledger.expanduser().resolve()
-        canonical_ledger_path = (data_root / "ledger/research_events.v1.jsonl").resolve()
-        if ledger_path != canonical_ledger_path:
-            raise ResearchBoundaryError(
-                "evaluator requires the canonical global research ledger"
-            )
-        ledger = GlobalResearchLedger(ledger_path, research_root=data_root)
+        ledger = _canonical_ledger(
+            repo_root,
+            args.ledger,
+            identity_bundle=args.identity_bundle,
+            identity_registry_pin=args.identity_registry_pin,
+        )
+        event_attestations = load_event_attestations(args.event_attestation)
         phase = EvaluationPhase(args.phase)
         trial_ids = tuple(args.trial_id)
         spec = load_spec(args.spec)
+        for trial_id in trial_ids:
+            require_event_attestation(
+                event_attestations,
+                "result:{}".format(trial_id),
+                ledger=ledger,
+            )
         def require_frozen_policy(runs: Sequence[Dict[str, Any]]) -> None:
             records = ledger.store.read_all()
             family = next(
@@ -475,7 +528,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 raise ContractValidationError(
                     "multi-family challenge epochs require atomic batch execution"
                 )
-            receipt_event = ledger.record_holdout_access(access, recorded_at=now)
+            receipt_event = ledger.record_holdout_access(
+                access,
+                recorded_at=now,
+                event_attestation=require_event_attestation(
+                    event_attestations,
+                    "challenge-access:{}".format(access.access_id),
+                    ledger=ledger,
+                ),
+            )
             receipt = receipt_event
             input_bytes = args.input.read_bytes()
             challenge_input_sha256 = _sha256_bytes(input_bytes)
@@ -486,9 +547,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 raise ContractValidationError(
                     "challenge input differs from the consumed epoch binding"
                 )
-            input_packet = json.loads(input_bytes)
-            if not isinstance(input_packet, dict):
-                raise ContractValidationError("evaluator input must contain an object")
+            input_packet = strict_load_json_object_bytes(
+                input_bytes, source=str(args.input.expanduser().resolve())
+            )
         else:
             if args.challenge_access is not None:
                 raise ContractValidationError(
@@ -548,6 +609,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             ledger=ledger,
             spec=spec,
             recorded_at=now,
+            event_attestations=event_attestations,
         )
         print(canonical_json(response))
         return 0

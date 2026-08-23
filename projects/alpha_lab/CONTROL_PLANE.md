@@ -187,6 +187,24 @@ independent-review event must bind the current ledger head and attest PIT,
 replay, benchmark/factor, and artifact integrity before decision-grade status
 is possible.
 
+Owner ratification, preregistration authorship, certified evaluator input, and
+independent review additionally require the detached public-key control in
+`AUTHENTICATED_RESEARCH_IDENTITIES.md`. Legacy imported evidence remains
+explicitly unauthenticated and non-decision-grade; it is never retroactively
+signed.
+
+An Alpha signed projection export is a verified research handoff only. It must
+use `caerus_alpha_lab_signed_projection_export_v1`, carry the exact source
+ledger byte/head receipt and active externally pinned registry release, and be
+attested by a lifetime-separated `LEDGER_EXPORTER` key. It neither changes the
+canonical ledger nor authorizes a queue, Shadow, Paper, capital, or production
+decision.
+
+The export is a single locked ledger snapshot. Its signed receipt includes an
+event-count-to-head ancestry map so a downstream reviewer can advance only from
+an already accepted chain prefix; it must reject any mixed, stale, or
+newly-created source file.
+
 Historical migration is dry-run by default:
 
 ```bash

@@ -57,6 +57,29 @@ from projects.alpha_lab.factory import (
 
 NOW = datetime(2026, 7, 20, 16, 0, tzinfo=timezone.utc)
 HASH = "a" * 64
+EXACT_LEDGER_PROJECTION_RESEARCH_GATES = frozenset(
+    {
+        "family_lineage_integrity",
+        "frozen_spec_integrity",
+        "point_in_time_integrity",
+        "deterministic_replay",
+        "complete_trial_census",
+        "trial_budget_compliant",
+        "family_inference_pass",
+        "exploratory_wave_fdr_pass",
+        "locked_validation_economic_pass",
+        "benchmark_and_factor_model",
+        "costs_capacity_and_concentration",
+        "challenge_epoch_integrity",
+        "challenge_confirmation_pass",
+        "authenticated_owner_ratification",
+        "authenticated_preregistration_authorship",
+        "authenticated_data_certification",
+        "legacy_definition_complete",
+        "independent_review",
+        "artifact_and_event_chain_integrity",
+    }
+)
 RESEARCH_GATES = {name: True for name in REQUIRED_RESEARCH_GATES_V2}
 RESEARCH_PROJECTION = {
     "event_chain_head": HASH,
@@ -313,10 +336,23 @@ def test_owner_review_candidate_cannot_self_attest_without_ledger_projection():
     assert "canonical_research_ledger_projection_missing" in assessment.blockers
 
 
-def test_owner_review_verdict_requires_every_v2_research_gate():
-    gates = dict(RESEARCH_GATES)
+def test_owner_review_verdict_requires_exact_projection_research_gate_set():
+    assert REQUIRED_RESEARCH_GATES_V2 == EXACT_LEDGER_PROJECTION_RESEARCH_GATES
+
+    valid_projection_gates = {
+        name: True for name in EXACT_LEDGER_PROJECTION_RESEARCH_GATES
+    }
+    candidate = _candidate(research_gates=valid_projection_gates)
+    assert set(candidate.research_gates) == EXACT_LEDGER_PROJECTION_RESEARCH_GATES
+
+    gates = dict(valid_projection_gates)
     del gates["complete_trial_census"]
     with pytest.raises(ContractValidationError, match="mandatory v2 gates"):
+        _candidate(research_gates=gates)
+
+    gates = dict(valid_projection_gates)
+    gates["not_a_ledger_projection_gate"] = True
+    with pytest.raises(ContractValidationError, match="unexpected v2 gates"):
         _candidate(research_gates=gates)
 
 

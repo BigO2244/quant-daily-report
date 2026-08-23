@@ -60,7 +60,12 @@ def _wave(*family_ids: str, owner_ratified: bool = True) -> ResearchWave:
     )
 
 
-def _family(*, maximum_trial_units: int = 2, owner_ratified: bool = True):
+def _family(
+    *,
+    maximum_trial_units: int = 2,
+    owner_ratified: bool = True,
+    legacy_definition_blockers=(),
+):
     return HypothesisFamily(
         family_id="FAM-2026-001",
         wave_id="WAVE-2026-001",
@@ -82,6 +87,7 @@ def _family(*, maximum_trial_units: int = 2, owner_ratified: bool = True):
         source_artifact="hypotheses/HYP-2026-001.md",
         source_sha256=_sha("hypothesis"),
         owner_ratified=owner_ratified,
+        legacy_definition_blockers=tuple(legacy_definition_blockers),
     )
 
 
@@ -169,6 +175,27 @@ def _bootstrap(ledger: GlobalResearchLedger, *, maximum_trial_units: int = 2) ->
         ),
         recorded_at=NOW,
     )
+
+
+def test_legacy_definition_blockers_are_projected_and_fail_decision_grade(tmp_path):
+    ledger = _ledger(tmp_path)
+    ledger.register_wave(_wave("FAM-2026-001"), recorded_at=NOW)
+    ledger.register_family(
+        _family(
+            legacy_definition_blockers=(
+                "LEGACY_PRIMARY_COMPARATOR_UNRESOLVED",
+            )
+        ),
+        recorded_at=NOW,
+    )
+
+    row = ledger.project()["families"][0]
+    assert row["legacy_definition_blockers"] == [
+        "LEGACY_PRIMARY_COMPARATOR_UNRESOLVED"
+    ]
+    assert "LEGACY_PRIMARY_COMPARATOR_UNRESOLVED" in row["decision_grade_blockers"]
+    assert row["research_gates"]["legacy_definition_complete"] is False
+    assert row["decision_grade_ready"] is False
 
 
 def test_data_gates_and_robustness_do_not_consume_statistical_trial_budget(tmp_path):
@@ -479,7 +506,7 @@ def test_shared_challenge_epoch_is_consumed_exactly_once(tmp_path):
     family_projection = ledger.project()["families"][0]
     assert family_projection["decision_grade_ready"] is False
     assert (
-        "AUTHENTICATED_INDEPENDENT_REVIEW_NOT_IMPLEMENTED"
+            "AUTHENTICATED_INDEPENDENT_REVIEW_MISSING_OR_INVALID"
         in family_projection["decision_grade_blockers"]
     )
     second = HoldoutAccess(

@@ -24,6 +24,15 @@ from .canonical import (
 )
 from .contracts import _require_aware
 from .errors import ContractValidationError, EventStoreIntegrityError
+from .research_identity import (
+    GENESIS_LEDGER_HEAD,
+    IdentityActivationEvidence,
+    IdentityRegistryHistory,
+    IdentityRole,
+    ResearchAttestation,
+    event_attestation_context_hash,
+    typed_event_payload_hash,
+)
 from .store import AppendOnlyJSONLEventStore, EventRecord
 
 
@@ -233,6 +242,7 @@ class HypothesisFamily:
     source_sha256: str
     owner_ratified: bool
     parent_family_ids: Tuple[str, ...] = ()
+    legacy_definition_blockers: Tuple[str, ...] = ()
     schema_version: str = "caerus_alpha_lab_hypothesis_family_v1"
 
     def __post_init__(self) -> None:
@@ -281,6 +291,12 @@ class HypothesisFamily:
             raise ContractValidationError("family_alpha cannot exceed 0.10")
         if not isinstance(self.owner_ratified, bool):
             raise ContractValidationError("owner_ratified must be boolean")
+        if len(self.legacy_definition_blockers) != len(
+            set(self.legacy_definition_blockers)
+        ) or any(not item for item in self.legacy_definition_blockers):
+            raise ContractValidationError(
+                "legacy_definition_blockers must be unique non-empty values"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -306,6 +322,7 @@ class HypothesisFamily:
             "source_sha256": self.source_sha256,
             "owner_ratified": self.owner_ratified,
             "parent_family_ids": list(self.parent_family_ids),
+            "legacy_definition_blockers": list(self.legacy_definition_blockers),
         }
 
 
@@ -1101,8 +1118,26 @@ class GlobalResearchLedger:
         }
     )
 
-    def __init__(self, path: Path, *, research_root: Path) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        research_root: Path,
+        identity_history: Optional[IdentityRegistryHistory] = None,
+        identity_activation: Optional[IdentityActivationEvidence] = None,
+    ) -> None:
         self.store = AppendOnlyJSONLEventStore(path, research_root=research_root)
+        if identity_activation is not None and identity_history is None:
+            raise ContractValidationError(
+                "identity activation requires externally pinned registry history"
+            )
+        self.identity_history = identity_history
+        self.identity_activation = identity_activation
+        self.identity_activation_head_hash = (
+            identity_activation.identity_activation_head_hash
+            if identity_activation is not None
+            else (GENESIS_LEDGER_HEAD if identity_history is not None else None)
+        )
 
     @staticmethod
     def _payloads(records: Iterable[EventRecord], event_type: str) -> List[Mapping[str, Any]]:
@@ -1131,8 +1166,122 @@ class GlobalResearchLedger:
                 "independent review artifact hash does not match source_sha256"
             )
 
-    def register_wave(self, wave: ResearchWave, *, recorded_at: datetime) -> EventRecord:
+    def _verify_event_attestation(
+        self,
+        raw: Optional[Mapping[str, Any]],
+        *,
+        role: IdentityRole,
+        event_id: str,
+        event_type: str,
+        occurred_at: datetime,
+        payload: Mapping[str, Any],
+        previous_event_hash: str,
+        recorded_at: datetime,
+        required: bool,
+        for_new_event: bool,
+    ) -> Optional[str]:
+        """Verify a signature over the typed payload and exact append context."""
+
+        if raw is None:
+            if self.identity_history is not None and required:
+                raise EventStoreIntegrityError(
+                    "authenticated {} attestation is required".format(role.value.lower())
+                )
+            return None
+        if self.identity_history is None:
+            raise EventStoreIntegrityError(
+                "identity attestation cannot be trusted without an enrolled identity registry"
+            )
+        try:
+            attestation = ResearchAttestation.from_dict(raw)
+            payload_sha256 = typed_event_payload_hash(event_type, payload)
+            context_sha256 = event_attestation_context_hash(
+                event_id=event_id,
+                event_type=event_type,
+                occurred_at=occurred_at,
+                recorded_at=recorded_at,
+                payload_sha256=payload_sha256,
+                previous_event_hash=previous_event_hash,
+            )
+            self.identity_history.verify(
+                attestation,
+                expected_role=role,
+                artifact_sha256=payload_sha256,
+                ledger_head_hash=previous_event_hash,
+                context_sha256=context_sha256,
+                recorded_at=recorded_at,
+                for_new_event=for_new_event,
+            )
+        except ContractValidationError as exc:
+            raise EventStoreIntegrityError("authenticated attestation verification failed") from exc
+        return attestation.identity_id
+
+    def _attestation_subject(self, raw: Mapping[str, Any]) -> str:
+        if self.identity_history is None:
+            raise EventStoreIntegrityError("authenticated subject resolution requires an identity registry")
+        try:
+            return self.identity_history.subject_id_for(
+                identity_id=str(raw["identity_id"]),
+                key_id=str(raw["key_id"]),
+                registry_hash=str(raw["registry_hash"]),
+            )
+        except (KeyError, ContractValidationError) as exc:
+            raise EventStoreIntegrityError("identity subject is not enrolled") from exc
+
+    @staticmethod
+    def _head(records: Sequence[EventRecord]) -> str:
+        return records[-1].event_hash if records else GENESIS_LEDGER_HEAD
+
+    def _identity_required_for_records(self, records: Sequence[EventRecord]) -> bool:
+        if self.identity_history is None:
+            return False
+        if self.identity_activation is None:
+            return True
+        try:
+            self.identity_activation.verify_legacy_records(records)
+        except ContractValidationError as exc:
+            raise EventStoreIntegrityError(
+                "signed identity activation evidence does not match the ledger"
+            ) from exc
+        return True
+
+    @staticmethod
+    def _event_role(event_type: str) -> IdentityRole:
+        return {
+            GlobalResearchLedger.WAVE_EVENT: IdentityRole.OWNER_RATIFIER,
+            GlobalResearchLedger.FAMILY_EVENT: IdentityRole.OWNER_RATIFIER,
+            GlobalResearchLedger.EXPERIMENT_EVENT: IdentityRole.PREREGISTRATION_AUTHOR,
+            GlobalResearchLedger.RUN_EVENT: IdentityRole.DATA_CERTIFIER,
+            GlobalResearchLedger.RESULT_EVENT: IdentityRole.PREREGISTRATION_AUTHOR,
+            GlobalResearchLedger.FAMILY_INFERENCE_EVENT: IdentityRole.PREREGISTRATION_AUTHOR,
+            GlobalResearchLedger.CHALLENGE_EPOCH_EVENT: IdentityRole.OWNER_RATIFIER,
+            GlobalResearchLedger.HOLDOUT_EVENT: IdentityRole.DATA_CERTIFIER,
+            GlobalResearchLedger.REVIEW_EVENT: IdentityRole.INDEPENDENT_REVIEWER,
+        }[event_type]
+
+    def register_wave(
+        self,
+        wave: ResearchWave,
+        *,
+        recorded_at: datetime,
+        event_attestation: Optional[Mapping[str, Any]] = None,
+    ) -> EventRecord:
+        event_id = "wave:{}".format(wave.wave_id)
+        payload = wave.to_dict()
+
         def validate(records: List[EventRecord]) -> None:
+            self._verify_event_attestation(
+                event_attestation,
+                role=IdentityRole.OWNER_RATIFIER,
+                event_id=event_id,
+                event_type=self.WAVE_EVENT,
+                occurred_at=wave.registered_at,
+                payload=payload,
+                previous_event_hash=self._head(records),
+                recorded_at=recorded_at,
+                required=self._identity_required_for_records(records),
+                for_new_event=True,
+            )
             waves = self._payloads(records, self.WAVE_EVENT)
             if any(item["wave_id"] == wave.wave_id for item in waves):
                 raise EventStoreIntegrityError("duplicate wave_id")
@@ -1141,16 +1290,38 @@ class GlobalResearchLedger:
                 raise EventStoreIntegrityError("family generation already belongs to a wave")
 
         return self.store.append(
-            event_id="wave:{}".format(wave.wave_id),
+            event_id=event_id,
             event_type=self.WAVE_EVENT,
             occurred_at=wave.registered_at,
             recorded_at=recorded_at,
-            payload=wave.to_dict(),
+            payload=payload,
+            event_attestation=event_attestation,
             validate_existing=validate,
         )
 
-    def register_family(self, family: HypothesisFamily, *, recorded_at: datetime) -> EventRecord:
+    def register_family(
+        self,
+        family: HypothesisFamily,
+        *,
+        recorded_at: datetime,
+        event_attestation: Optional[Mapping[str, Any]] = None,
+    ) -> EventRecord:
+        event_id = "family:{}".format(family.family_id)
+        payload = family.to_dict()
+
         def validate(records: List[EventRecord]) -> None:
+            self._verify_event_attestation(
+                event_attestation,
+                role=IdentityRole.OWNER_RATIFIER,
+                event_id=event_id,
+                event_type=self.FAMILY_EVENT,
+                occurred_at=family.registered_at,
+                payload=payload,
+                previous_event_hash=self._head(records),
+                recorded_at=recorded_at,
+                required=self._identity_required_for_records(records),
+                for_new_event=True,
+            )
             families = self._payloads(records, self.FAMILY_EVENT)
             if any(item["family_id"] == family.family_id for item in families):
                 raise EventStoreIntegrityError("duplicate family_id")
@@ -1183,18 +1354,38 @@ class GlobalResearchLedger:
                 )
 
         return self.store.append(
-            event_id="family:{}".format(family.family_id),
+            event_id=event_id,
             event_type=self.FAMILY_EVENT,
             occurred_at=family.registered_at,
             recorded_at=recorded_at,
-            payload=family.to_dict(),
+            payload=payload,
+            event_attestation=event_attestation,
             validate_existing=validate,
         )
 
     def register_experiment(
-        self, experiment: ResearchExperiment, *, recorded_at: datetime
+        self,
+        experiment: ResearchExperiment,
+        *,
+        recorded_at: datetime,
+        event_attestation: Optional[Mapping[str, Any]] = None,
     ) -> EventRecord:
+        event_id = "experiment:{}".format(experiment.experiment_id)
+        payload = experiment.to_dict()
+
         def validate(records: List[EventRecord]) -> None:
+            self._verify_event_attestation(
+                event_attestation,
+                role=IdentityRole.PREREGISTRATION_AUTHOR,
+                event_id=event_id,
+                event_type=self.EXPERIMENT_EVENT,
+                occurred_at=experiment.registered_at,
+                payload=payload,
+                previous_event_hash=self._head(records),
+                recorded_at=recorded_at,
+                required=self._identity_required_for_records(records),
+                for_new_event=True,
+            )
             families = {
                 item["family_id"]: item
                 for item in self._payloads(records, self.FAMILY_EVENT)
@@ -1233,16 +1424,38 @@ class GlobalResearchLedger:
                     )
 
         return self.store.append(
-            event_id="experiment:{}".format(experiment.experiment_id),
+            event_id=event_id,
             event_type=self.EXPERIMENT_EVENT,
             occurred_at=experiment.registered_at,
             recorded_at=recorded_at,
-            payload=experiment.to_dict(),
+            payload=payload,
+            event_attestation=event_attestation,
             validate_existing=validate,
         )
 
-    def register_run(self, run: ResearchRun, *, recorded_at: datetime) -> EventRecord:
+    def register_run(
+        self,
+        run: ResearchRun,
+        *,
+        recorded_at: datetime,
+        event_attestation: Optional[Mapping[str, Any]] = None,
+    ) -> EventRecord:
+        event_id = "attempt:{}".format(run.attempt_id)
+        payload = run.to_dict()
+
         def validate(records: List[EventRecord]) -> None:
+            certifier_identity = self._verify_event_attestation(
+                event_attestation,
+                role=IdentityRole.DATA_CERTIFIER,
+                event_id=event_id,
+                event_type=self.RUN_EVENT,
+                occurred_at=run.occurred_at,
+                payload=payload,
+                previous_event_hash=self._head(records),
+                recorded_at=recorded_at,
+                required=self._identity_required_for_records(records),
+                for_new_event=True,
+            )
             families = {
                 item["family_id"]: item for item in self._payloads(records, self.FAMILY_EVENT)
             }
@@ -1263,6 +1476,30 @@ class GlobalResearchLedger:
                 or experiment["hypothesis_id"] != run.hypothesis_id
             ):
                 raise EventStoreIntegrityError("attempt experiment lineage mismatch")
+            experiment_record = next(
+                (
+                    item
+                    for item in records
+                    if item.event_type == self.EXPERIMENT_EVENT
+                    and item.payload["experiment_id"] == run.experiment_id
+                ),
+                None,
+            )
+            author_attestation = (
+                experiment_record.event_attestation
+                if experiment_record is not None
+                else None
+            )
+            if (
+                certifier_identity is not None
+                and author_attestation is not None
+                and event_attestation is not None
+                and self._attestation_subject(event_attestation)
+                == self._attestation_subject(author_attestation)
+            ):
+                raise EventStoreIntegrityError(
+                    "data certifier cannot be a preregistration author"
+                )
             runs = self._payloads(records, self.RUN_EVENT)
             if any(item["attempt_id"] == run.attempt_id for item in runs):
                 raise EventStoreIntegrityError("duplicate attempt_id")
@@ -1294,16 +1531,38 @@ class GlobalResearchLedger:
                 raise EventStoreIntegrityError("family selection trial budget exceeded")
 
         return self.store.append(
-            event_id="attempt:{}".format(run.attempt_id),
+            event_id=event_id,
             event_type=self.RUN_EVENT,
             occurred_at=run.occurred_at,
             recorded_at=recorded_at,
-            payload=run.to_dict(),
+            payload=payload,
+            event_attestation=event_attestation,
             validate_existing=validate,
         )
 
-    def record_result(self, result: TrialResult, *, recorded_at: datetime) -> EventRecord:
+    def record_result(
+        self,
+        result: TrialResult,
+        *,
+        recorded_at: datetime,
+        event_attestation: Optional[Mapping[str, Any]] = None,
+    ) -> EventRecord:
+        event_id = "result:{}".format(result.statistical_trial_id)
+        payload = result.to_dict()
+
         def validate(records: List[EventRecord]) -> None:
+            self._verify_event_attestation(
+                event_attestation,
+                role=IdentityRole.PREREGISTRATION_AUTHOR,
+                event_id=event_id,
+                event_type=self.RESULT_EVENT,
+                occurred_at=result.recorded_at,
+                payload=payload,
+                previous_event_hash=self._head(records),
+                recorded_at=recorded_at,
+                required=self._identity_required_for_records(records),
+                for_new_event=True,
+            )
             run = next(
                 (
                     item
@@ -1369,18 +1628,41 @@ class GlobalResearchLedger:
                 raise EventStoreIntegrityError("trial result is already recorded")
 
         return self.store.append(
-            event_id="result:{}".format(result.statistical_trial_id),
+            event_id=event_id,
             event_type=self.RESULT_EVENT,
             occurred_at=result.recorded_at,
             recorded_at=recorded_at,
-            payload=result.to_dict(),
+            payload=payload,
+            event_attestation=event_attestation,
             validate_existing=validate,
         )
 
     def record_family_inference(
-        self, inference: FamilyInference, *, recorded_at: datetime
+        self,
+        inference: FamilyInference,
+        *,
+        recorded_at: datetime,
+        event_attestation: Optional[Mapping[str, Any]] = None,
     ) -> EventRecord:
+        event_id = "family-inference:{}:{}".format(
+            inference.family_id, inference.track.value.lower()
+        )
+        payload = inference.to_dict()
+        payload["verified_internal"] = True
+
         def validate(records: List[EventRecord]) -> None:
+            self._verify_event_attestation(
+                event_attestation,
+                role=IdentityRole.PREREGISTRATION_AUTHOR,
+                event_id=event_id,
+                event_type=self.FAMILY_INFERENCE_EVENT,
+                occurred_at=inference.recorded_at,
+                payload=payload,
+                previous_event_hash=self._head(records),
+                recorded_at=recorded_at,
+                required=self._identity_required_for_records(records),
+                for_new_event=True,
+            )
             if not records or records[-1].event_hash != inference.evaluated_ledger_head_hash:
                 raise EventStoreIntegrityError("inference is not bound to the current ledger head")
             family = next(
@@ -1511,23 +1793,39 @@ class GlobalResearchLedger:
             ):
                 raise EventStoreIntegrityError("family inference is already recorded")
 
-        payload = inference.to_dict()
-        payload["verified_internal"] = True
         return self.store.append(
-            event_id="family-inference:{}:{}".format(
-                inference.family_id, inference.track.value.lower()
-            ),
+            event_id=event_id,
             event_type=self.FAMILY_INFERENCE_EVENT,
             occurred_at=inference.recorded_at,
             recorded_at=recorded_at,
             payload=payload,
+            event_attestation=event_attestation,
             validate_existing=validate,
         )
 
     def register_challenge_epoch(
-        self, epoch: ChallengeEpoch, *, recorded_at: datetime
+        self,
+        epoch: ChallengeEpoch,
+        *,
+        recorded_at: datetime,
+        event_attestation: Optional[Mapping[str, Any]] = None,
     ) -> EventRecord:
+        event_id = "challenge-epoch:{}".format(epoch.challenge_epoch_id)
+        payload = epoch.to_dict()
+
         def validate(records: List[EventRecord]) -> None:
+            self._verify_event_attestation(
+                event_attestation,
+                role=IdentityRole.OWNER_RATIFIER,
+                event_id=event_id,
+                event_type=self.CHALLENGE_EPOCH_EVENT,
+                occurred_at=epoch.authorized_at,
+                payload=payload,
+                previous_event_hash=self._head(records),
+                recorded_at=recorded_at,
+                required=self._identity_required_for_records(records),
+                for_new_event=True,
+            )
             existing_epochs = self._payloads(records, self.CHALLENGE_EPOCH_EVENT)
             if any(
                 item["challenge_epoch_id"] == epoch.challenge_epoch_id
@@ -1617,20 +1915,40 @@ class GlobalResearchLedger:
                     )
 
         return self.store.append(
-            event_id="challenge-epoch:{}".format(epoch.challenge_epoch_id),
+            event_id=event_id,
             event_type=self.CHALLENGE_EPOCH_EVENT,
             occurred_at=epoch.authorized_at,
             recorded_at=recorded_at,
-            payload=epoch.to_dict(),
+            payload=payload,
+            event_attestation=event_attestation,
             validate_existing=validate,
         )
 
     def record_holdout_access(
-        self, access: HoldoutAccess, *, recorded_at: datetime
+        self,
+        access: HoldoutAccess,
+        *,
+        recorded_at: datetime,
+        event_attestation: Optional[Mapping[str, Any]] = None,
     ) -> EventRecord:
         """Consume the whole challenge epoch before any outcome-bearing input read."""
 
+        event_id = "challenge-access:{}".format(access.access_id)
+        payload = access.to_dict()
+
         def validate(records: List[EventRecord]) -> None:
+            self._verify_event_attestation(
+                event_attestation,
+                role=IdentityRole.DATA_CERTIFIER,
+                event_id=event_id,
+                event_type=self.HOLDOUT_EVENT,
+                occurred_at=access.accessed_at,
+                payload=payload,
+                previous_event_hash=self._head(records),
+                recorded_at=recorded_at,
+                required=self._identity_required_for_records(records),
+                for_new_event=True,
+            )
             epoch = next(
                 (
                     item
@@ -1662,18 +1980,38 @@ class GlobalResearchLedger:
                 raise EventStoreIntegrityError("single-use challenge epoch was already accessed")
 
         return self.store.append(
-            event_id="challenge-access:{}".format(access.access_id),
+            event_id=event_id,
             event_type=self.HOLDOUT_EVENT,
             occurred_at=access.accessed_at,
             recorded_at=recorded_at,
-            payload=access.to_dict(),
+            payload=payload,
+            event_attestation=event_attestation,
             validate_existing=validate,
         )
 
     def record_independent_review(
-        self, review: IndependentResearchReview, *, recorded_at: datetime
+        self,
+        review: IndependentResearchReview,
+        *,
+        recorded_at: datetime,
+        event_attestation: Optional[Mapping[str, Any]] = None,
     ) -> EventRecord:
+        event_id = "review:{}".format(review.review_id)
+        payload = review.to_dict()
+
         def validate(records: List[EventRecord]) -> None:
+            reviewer_identity = self._verify_event_attestation(
+                event_attestation,
+                role=IdentityRole.INDEPENDENT_REVIEWER,
+                event_id=event_id,
+                event_type=self.REVIEW_EVENT,
+                occurred_at=review.reviewed_at,
+                payload=payload,
+                previous_event_hash=self._head(records),
+                recorded_at=recorded_at,
+                required=self._identity_required_for_records(records),
+                for_new_event=True,
+            )
             if not records or records[-1].event_hash != review.reviewed_ledger_head_hash:
                 raise EventStoreIntegrityError(
                     "independent review is not bound to the current ledger head"
@@ -1688,6 +2026,22 @@ class GlobalResearchLedger:
             )
             if family is None:
                 raise EventStoreIntegrityError("review family is not registered")
+            author_subjects = {
+                self._attestation_subject(item.event_attestation)
+                for item in records
+                if item.event_type == self.EXPERIMENT_EVENT
+                and item.payload["family_id"] == review.family_id
+                and item.event_attestation is not None
+            }
+            reviewer_subject = (
+                self._attestation_subject(event_attestation)
+                if reviewer_identity is not None and event_attestation is not None
+                else None
+            )
+            if reviewer_subject is not None and reviewer_subject in author_subjects:
+                raise EventStoreIntegrityError(
+                    "independent reviewer cannot be a preregistration author"
+                )
             if any(
                 item["family_id"] == review.family_id
                 for item in self._payloads(records, self.REVIEW_EVENT)
@@ -1718,11 +2072,12 @@ class GlobalResearchLedger:
             self._verify_review_artifact(review.to_dict())
 
         return self.store.append(
-            event_id="review:{}".format(review.review_id),
+            event_id=event_id,
             event_type=self.REVIEW_EVENT,
             occurred_at=review.reviewed_at,
             recorded_at=recorded_at,
-            payload=review.to_dict(),
+            payload=payload,
+            event_attestation=event_attestation,
             validate_existing=validate,
         )
 
@@ -1862,6 +2217,9 @@ class GlobalResearchLedger:
                     source_sha256=item["source_sha256"],
                     owner_ratified=item["owner_ratified"],
                     parent_family_ids=tuple(item.get("parent_family_ids", [])),
+                    legacy_definition_blockers=tuple(
+                        item.get("legacy_definition_blockers", [])
+                    ),
                     schema_version=item["schema_version"],
                 )
                 if canonical_hash(typed_family.to_dict()) != canonical_hash(item):
@@ -2017,6 +2375,35 @@ class GlobalResearchLedger:
             raise EventStoreIntegrityError(
                 "semantic replay found an invalid typed event payload"
             ) from exc
+        authenticated_event_hashes: set[str] = set()
+        if self.identity_history is not None:
+            if self.identity_activation is None:
+                authenticated_records = records
+            else:
+                try:
+                    self.identity_activation.verify_legacy_records(records)
+                except ContractValidationError as exc:
+                    raise EventStoreIntegrityError(
+                        "canonical evidence does not match the signed identity activation"
+                    ) from exc
+                authenticated_records = records[
+                    len(self.identity_activation.plan["ordered_events"]) :
+                ]
+            authenticated_event_hashes = {record.event_hash for record in authenticated_records}
+            for record in authenticated_records:
+                prior_head = record.previous_event_hash or GENESIS_LEDGER_HEAD
+                self._verify_event_attestation(
+                    record.event_attestation,
+                    role=self._event_role(record.event_type),
+                    event_id=record.event_id,
+                    event_type=record.event_type,
+                    occurred_at=record.occurred_at,
+                    payload=record.payload,
+                    previous_event_hash=prior_head,
+                    recorded_at=record.recorded_at,
+                    required=True,
+                    for_new_event=False,
+                )
         for values, key in (
             (waves, "wave_id"),
             (families, "family_id"),
@@ -2037,6 +2424,46 @@ class GlobalResearchLedger:
             )
         family_index = {item["family_id"]: item for item in families}
         experiment_index = {item["experiment_id"]: item for item in experiments}
+        author_identities_by_family = {
+            family_id: {
+                self._attestation_subject(record.event_attestation)
+                for record in records
+                if record.event_type == self.EXPERIMENT_EVENT
+                and record.payload["family_id"] == family_id
+                and record.event_hash in authenticated_event_hashes
+                and record.event_attestation is not None
+            }
+            for family_id in family_index
+        }
+        for record in records:
+            if (
+                self.identity_history is not None
+                and record.event_type == self.REVIEW_EVENT
+                and record.event_hash in authenticated_event_hashes
+                and (
+                    record.event_attestation is None
+                    or self._attestation_subject(record.event_attestation)
+                    in author_identities_by_family.get(record.payload["family_id"], set())
+                )
+            ):
+                raise EventStoreIntegrityError(
+                    "semantic replay found reviewer-author identity overlap"
+                )
+        if self.identity_history is not None:
+            for record in records:
+                if record.event_type != self.RUN_EVENT or record.payload["run_class"] not in {
+                    ResearchRunClass.MODEL_TRIAL.value,
+                    ResearchRunClass.CHALLENGE_READ.value,
+                }:
+                    continue
+                if record.event_hash in authenticated_event_hashes and (
+                    record.event_attestation is None
+                    or self._attestation_subject(record.event_attestation)
+                    in author_identities_by_family.get(record.payload["family_id"], set())
+                ):
+                    raise EventStoreIntegrityError(
+                        "semantic replay found data-certifier author identity overlap"
+                    )
         wave_index = {item["wave_id"]: item for item in waves}
         wave_family_ids = [family_id for item in waves for family_id in item["family_ids"]]
         if len(wave_family_ids) != len(set(wave_family_ids)):
@@ -2523,6 +2950,30 @@ class GlobalResearchLedger:
             item["family_id"]: item
             for item in self._payloads(records, self.REVIEW_EVENT)
         }
+        identity_control_enabled = self.identity_history is not None
+        if identity_control_enabled:
+            activation_count = (
+                len(self.identity_activation.plan["ordered_events"])
+                if self.identity_activation is not None
+                else 0
+            )
+            authenticated_records = records[activation_count:]
+        else:
+            authenticated_records = []
+        authenticated_event_hashes = {
+            item.event_hash for item in authenticated_records
+        }
+        record_by_event_id = {item.event_id: item for item in records}
+        inference_record_by_family_track = {
+            (record.payload["family_id"], record.payload["track"]): record
+            for record in records
+            if record.event_type == self.FAMILY_INFERENCE_EVENT
+        }
+        access_record_by_epoch = {
+            record.payload["challenge_epoch_id"]: record
+            for record in records
+            if record.event_type == self.HOLDOUT_EVENT
+        }
 
         wave_rows: Dict[str, Dict[str, Any]] = {}
         wave_decisions: Dict[Tuple[str, str], bool] = {}
@@ -2559,6 +3010,9 @@ class GlobalResearchLedger:
         family_rows = []
         for family_id, family in sorted(families.items()):
             family_runs = [item for item in runs if item["family_id"] == family_id]
+            legacy_definition_blockers = list(
+                family.get("legacy_definition_blockers", [])
+            )
             model_trials = [
                 item for item in family_runs if item["run_class"] == ResearchRunClass.MODEL_TRIAL.value
             ]
@@ -2649,7 +3103,164 @@ class GlobalResearchLedger:
             family_experiments = [
                 item for item in experiments.values() if item["family_id"] == family_id
             ]
+            # A projection may summarize a family only when its primary discovery
+            # evidence can be joined, without inference, to one exact challenge
+            # read and the immutable single-use access receipt.  This is a
+            # deliberately narrower claim than the ledger's general gates.
+            lineage_blockers: List[str] = []
+            evidence_lineage: Optional[Dict[str, Any]] = None
+            primary_model_trials = []
+            if inference is None:
+                lineage_blockers.append("EVIDENCE_LINEAGE_FAMILY_INFERENCE_MISSING")
+            elif not inference_validity.get((family_id, track), False):
+                lineage_blockers.append("EVIDENCE_LINEAGE_FAMILY_INFERENCE_INVALID")
+            else:
+                primary_model_trials = [
+                    item
+                    for item in model_trials
+                    if item["variant_id"] == family["primary_variant_id"]
+                    and item["statistical_trial_id"] in inference["included_trial_ids"]
+                    and item["statistical_trial_id"] in results
+                ]
+                if len(primary_model_trials) != 1:
+                    lineage_blockers.append(
+                        "EVIDENCE_LINEAGE_PRIMARY_MODEL_TRIAL_AMBIGUOUS_OR_MISSING"
+                    )
+            if len(primary_model_trials) == 1:
+                model_run = primary_model_trials[0]
+                matching_challenge_trials = [
+                    item
+                    for item in challenge_trials
+                    if item["hypothesis_id"] == model_run["hypothesis_id"]
+                    and item["experiment_id"] == model_run["experiment_id"]
+                    and item["variant_id"] == model_run["variant_id"]
+                    and item["variant_definition_hash"]
+                    == model_run["variant_definition_hash"]
+                    and item["statistical_trial_id"] in results
+                ]
+                if len(matching_challenge_trials) != 1:
+                    lineage_blockers.append(
+                        "EVIDENCE_LINEAGE_CHALLENGE_READ_AMBIGUOUS_OR_MISSING"
+                    )
+                elif epoch is None:
+                    lineage_blockers.append("EVIDENCE_LINEAGE_CHALLENGE_EPOCH_MISSING")
+                else:
+                    challenge_run = matching_challenge_trials[0]
+                    access_record = access_record_by_epoch.get(
+                        family["challenge_epoch_id"]
+                    )
+                    access = accesses.get(family["challenge_epoch_id"])
+                    if (
+                        access_record is None
+                        or access is None
+                        or access_record.event_hash is None
+                        or access_record.payload != access
+                        or access["trial_ids"] != epoch["trial_ids"]
+                        or access["input_sha256_by_trial"]
+                        != epoch["expected_input_sha256_by_trial"]
+                        or challenge_run["statistical_trial_id"]
+                        not in access["trial_ids"]
+                    ):
+                        lineage_blockers.append(
+                            "EVIDENCE_LINEAGE_CHALLENGE_ACCESS_MISMATCH"
+                        )
+                    else:
+                        model_record = record_by_event_id[
+                            "attempt:{}".format(model_run["attempt_id"])
+                        ]
+                        challenge_record = record_by_event_id[
+                            "attempt:{}".format(challenge_run["attempt_id"])
+                        ]
+                        inference_record = inference_record_by_family_track[
+                            (family_id, track)
+                        ]
+                        evidence_lineage = {
+                            "family_id": family_id,
+                            "hypothesis_id": model_run["hypothesis_id"],
+                            "experiment_id": model_run["experiment_id"],
+                            "primary_variant_id": family["primary_variant_id"],
+                            "variant_definition_hash": model_run[
+                                "variant_definition_hash"
+                            ],
+                            "model_trial": {
+                                "attempt_id": model_run["attempt_id"],
+                                "statistical_trial_id": model_run[
+                                    "statistical_trial_id"
+                                ],
+                                "event_hash": model_record.event_hash,
+                                "result_event_hash": record_by_event_id[
+                                    "result:{}".format(
+                                        model_run["statistical_trial_id"]
+                                    )
+                                ].event_hash,
+                            },
+                            "family_inference": {
+                                "track": track,
+                                "event_hash": inference_record.event_hash,
+                            },
+                            "challenge_read": {
+                                "attempt_id": challenge_run["attempt_id"],
+                                "statistical_trial_id": challenge_run[
+                                    "statistical_trial_id"
+                                ],
+                                "event_hash": challenge_record.event_hash,
+                                "result_event_hash": record_by_event_id[
+                                    "result:{}".format(
+                                        challenge_run["statistical_trial_id"]
+                                    )
+                                ].event_hash,
+                            },
+                            "challenge_access": {
+                                "access_id": access["access_id"],
+                                "event_hash": access_record.event_hash,
+                                "challenge_epoch_id": access[
+                                    "challenge_epoch_id"
+                                ],
+                                "trial_ids": list(access["trial_ids"]),
+                                "input_sha256_by_trial": dict(
+                                    access["input_sha256_by_trial"]
+                                ),
+                            },
+                        }
             review = reviews.get(family_id)
+            preregistration_records = [
+                record_by_event_id["experiment:{}".format(item["experiment_id"])]
+                for item in family_experiments
+            ]
+            preregistration_identities = {
+                self._attestation_subject(item.event_attestation)
+                for item in preregistration_records
+                if item.event_hash in authenticated_event_hashes
+                and item.event_attestation is not None
+            }
+            wave_record = record_by_event_id["wave:{}".format(family["wave_id"])]
+            family_record = record_by_event_id["family:{}".format(family_id)]
+            authenticated_owner_ratification = bool(
+                identity_control_enabled
+                and family_record.event_hash in authenticated_event_hashes
+                and wave_record.event_hash in authenticated_event_hashes
+            )
+            authenticated_preregistration_authorship = bool(
+                identity_control_enabled
+                and family_experiments
+                and all(
+                    item.event_hash in authenticated_event_hashes
+                    for item in preregistration_records
+                )
+            )
+            certified_run_records = [
+                record_by_event_id["attempt:{}".format(item["attempt_id"])]
+                for item in model_trials + challenge_trials
+            ]
+            authenticated_data_certification = bool(
+                identity_control_enabled
+                and model_trials
+                and challenge_trials
+                and all(
+                    item.event_hash in authenticated_event_hashes
+                    for item in certified_run_records
+                )
+            )
             frozen_spec_integrity = bool(
                 model_trials
                 and all(
@@ -2672,6 +3283,20 @@ class GlobalResearchLedger:
             review_valid = bool(
                 review
                 and review.get("independent_of_research_authors") is True
+                and identity_control_enabled
+                and record_by_event_id[
+                    "review:{}".format(review["review_id"])
+                ].event_hash
+                in authenticated_event_hashes
+                and record_by_event_id[
+                    "review:{}".format(review["review_id"])
+                ].event_attestation
+                is not None
+                and self._attestation_subject(
+                    record_by_event_id[
+                        "review:{}".format(review["review_id"])
+                    ].event_attestation
+                ) not in preregistration_identities
             )
             research_gates = {
                 "family_lineage_integrity": family_lineage_integrity,
@@ -2717,6 +3342,10 @@ class GlobalResearchLedger:
                     and challenge_trials[0]["statistical_trial_id"] in epoch["trial_ids"]
                 ),
                 "challenge_confirmation_pass": challenge_pass,
+                "authenticated_owner_ratification": authenticated_owner_ratification,
+                "authenticated_preregistration_authorship": authenticated_preregistration_authorship,
+                "authenticated_data_certification": authenticated_data_certification,
+                "legacy_definition_complete": not legacy_definition_blockers,
                 "independent_review": review_valid,
                 "artifact_and_event_chain_integrity": bool(
                     review_valid and review["artifact_integrity_pass"]
@@ -2729,9 +3358,14 @@ class GlobalResearchLedger:
                 blockers.append("WAVE_NOT_OWNER_RATIFIED")
             if waves[family["wave_id"]].get("legacy_policy") is True:
                 blockers.append("LEGACY_POLICY_WAVE_NOT_DECISION_GRADE")
-            blockers.append("AUTHENTICATED_OWNER_RATIFICATION_NOT_IMPLEMENTED")
-            blockers.append("AUTHENTICATED_PREREGISTRATION_NOT_IMPLEMENTED")
-            blockers.append("AUTHENTICATED_INDEPENDENT_REVIEW_NOT_IMPLEMENTED")
+            if not authenticated_owner_ratification:
+                blockers.append("AUTHENTICATED_OWNER_RATIFICATION_MISSING_OR_INVALID")
+            if not authenticated_preregistration_authorship:
+                blockers.append("AUTHENTICATED_PREREGISTRATION_MISSING_OR_INVALID")
+            if not authenticated_data_certification:
+                blockers.append("CERTIFIED_INPUT_AUTHENTICATION_MISSING_OR_INVALID")
+            if not review_valid:
+                blockers.append("AUTHENTICATED_INDEPENDENT_REVIEW_MISSING_OR_INVALID")
             if not model_trials:
                 blockers.append("NO_STATISTICAL_MODEL_TRIAL")
             if missing:
@@ -2758,6 +3392,11 @@ class GlobalResearchLedger:
                 blockers.append("CHALLENGE_TRIAL_NOT_REGISTERED")
             elif not challenge_pass:
                 blockers.append("CHALLENGE_CONFIRMATION_MISSING_OR_FAILED")
+            blockers.extend(lineage_blockers)
+            # A migration may preserve an ambiguity but never turn it into a
+            # decision-grade claim.  Keep the original blocker identifiers in
+            # both surfaces so consumers cannot accidentally omit this gate.
+            blockers.extend(legacy_definition_blockers)
             for gate_name, passed in sorted(research_gates.items()):
                 if not passed:
                     blockers.append("RESEARCH_GATE_FAILED:{}".format(gate_name))
@@ -2800,9 +3439,16 @@ class GlobalResearchLedger:
                     "challenge_trial_count": len(challenge_trials),
                     "missing_result_trial_ids": missing,
                     "legacy_incomplete_trial_ids": unresolved,
+                    "legacy_definition_blockers": legacy_definition_blockers,
                     "family_inference_pass": family_pass,
                     "wave_multiple_testing_pass": wave_pass,
                     "challenge_epoch_accessed": accessed,
+                    "evidence_lineage": evidence_lineage,
+                    "evidence_lineage_hash": (
+                        canonical_hash(evidence_lineage)
+                        if evidence_lineage is not None
+                        else None
+                    ),
                     "research_gates": research_gates,
                     "decision_grade_ready": not blockers,
                     "decision_grade_blockers": blockers,

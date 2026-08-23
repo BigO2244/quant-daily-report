@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Optional
 
+from .authenticated_ledger import require_event_attestation, strict_load_json_object
 from projects.alpha_lab.factory.canonical import canonical_hash, parse_datetime
 from projects.alpha_lab.factory.errors import (
     ContractValidationError,
@@ -33,15 +33,7 @@ def _sha256_bytes(value: bytes) -> str:
 
 
 def _load_object(path: Path) -> Dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ContractValidationError(
-            "finalized evaluator bundle contains invalid JSON"
-        ) from exc
-    if not isinstance(value, dict):
-        raise ContractValidationError("finalized evaluator artifact must be an object")
-    return value
+    return strict_load_json_object(path)
 
 
 def _verify_bundle(
@@ -111,6 +103,7 @@ def reconcile_finalized_evaluator_bundle(
     ledger: GlobalResearchLedger,
     spec: EvaluatorSpec,
     recorded_at: datetime,
+    event_attestations: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Close missing results and verify matching closures after an interrupted run.
 
@@ -258,6 +251,7 @@ def reconcile_finalized_evaluator_bundle(
         for record in ledger.store.read_all()
         if record.event_type == ledger.RESULT_EVENT
     }
+    event_attestations = event_attestations or {}
     added = []
     verified = []
     for trial_id, variant in zip(trial_ids, variants):
@@ -291,7 +285,15 @@ def reconcile_finalized_evaluator_bundle(
                 )
             verified.append(trial_id)
             continue
-        ledger.record_result(trial_result, recorded_at=recorded_at)
+        ledger.record_result(
+            trial_result,
+            recorded_at=recorded_at,
+            event_attestation=require_event_attestation(
+                event_attestations,
+                "result:{}".format(trial_id),
+                ledger=ledger,
+            ),
+        )
         added.append(trial_id)
     return {
         "schema_version": "caerus_alpha_lab_evaluator_reconciliation_v1",

@@ -23,6 +23,7 @@ from projects.alpha_lab.factory import (
     ResearchWave,
     TrialOutcome,
     TrialResult,
+    canonical_hash,
     deterministic_access_id,
     deterministic_attempt_id,
     deterministic_trial_id,
@@ -500,12 +501,17 @@ def test_self_attested_review_remains_explicitly_non_decision_grade(tmp_path):
     ledger = _ledger(tmp_path)
     _complete_self_attested_review(ledger)
     row = ledger.project()["families"][0]
-    assert all(row["research_gates"].values())
+    assert row["research_gates"]["authenticated_owner_ratification"] is False
+    assert row["research_gates"]["authenticated_preregistration_authorship"] is False
+    assert row["research_gates"]["authenticated_data_certification"] is False
+    assert row["research_gates"]["independent_review"] is False
     assert row["decision_grade_ready"] is False
     assert (
-        "AUTHENTICATED_INDEPENDENT_REVIEW_NOT_IMPLEMENTED"
+        "AUTHENTICATED_INDEPENDENT_REVIEW_MISSING_OR_INVALID"
         in row["decision_grade_blockers"]
     )
+    assert row["evidence_lineage"] is not None
+    assert row["evidence_lineage_hash"] == canonical_hash(row["evidence_lineage"])
 
 
 def test_semantic_replay_rejects_review_appended_before_challenge_result(tmp_path):

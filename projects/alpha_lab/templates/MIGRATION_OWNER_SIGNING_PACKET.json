@@ -1,0 +1,119 @@
+{
+  "schema_version": "caerus_alpha_lab_migration_owner_signing_packet_v1",
+  "status": "UNSIGNED_NOT_AUTHORIZED",
+  "owner": "Brett Olson",
+  "decision": "PENDING_PERSONAL_RATIFICATION",
+  "private_key_material_present": false,
+  "family_mappings": {
+    "HYP-2026-001": "FAM-2026-001",
+    "HYP-2026-002": "FAM-2026-002",
+    "HYP-2026-003": "FAM-2026-003",
+    "HYP-2026-004": "FAM-2026-004",
+    "HYP-2026-005": "FAM-2026-005",
+    "HYP-2026-006": "FAM-2026-006",
+    "HYP-2026-007": "FAM-2026-007",
+    "HYP-2026-008": "FAM-2026-008",
+    "HYP-2026-009": "FAM-2026-009",
+    "HYP-2026-010": "FAM-2026-010",
+    "HYP-2026-011": "FAM-2026-011",
+    "HYP-2026-012": "FAM-2026-012",
+    "HYP-2026-013": "FAM-2026-013"
+  },
+  "family_definitions_status": "OWNER_NORMALIZATION_NOT_FROZEN_FACT",
+  "family_definitions": {
+    "FAM-2026-001": {"name": "Current Caerus Decomposition", "economic_mechanism": "caerus_component_selection_attribution_and_ablation", "primary_metric": "worst_case_cost_adjusted_incremental_information_ratio", "benchmark": "eligible_universe_equal_weight_and_unchanged_full_caerus_rule", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "UNRESOLVED_LEGACY_ABLATION_REFERENCE_PRIMARY_VARIANT", "maximum_trial_units": 6, "selection_trial_budget": 0, "within_family_method": "HOLM_BONFERRONI", "family_alpha": 0.05, "legacy_ambiguity_blockers": ["LEGACY_ABLATION_AND_REFERENCE_SEMANTICS_AMBIGUITY"]},
+    "FAM-2026-002": {"name": "Earnings-Revision Drift", "economic_mechanism": "analyst_revision_information_diffusion", "primary_metric": "annualized_factor_adjusted_cost_net_daily_return_difference_candidate_minus_primary_investable_baseline_intercept", "benchmark": "eligible_universe_equal_weight", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "sector_neutral_eps_revenue_revision_composite_top_decile", "maximum_trial_units": 6, "selection_trial_budget": 0, "within_family_method": "ROMANO_WOLF", "family_alpha": 0.1, "legacy_ambiguity_blockers": ["LEGACY_DECLARED_VARIANT_COUNT_AND_LISTED_ALTERNATIVES_CONFLICT"]},
+    "FAM-2026-003": {"name": "Insider-Conviction Clusters", "economic_mechanism": "independent_insider_purchase_cluster_information", "primary_metric": "sixty_trading_day_factor_adjusted_net_calendar_time_portfolio_alpha_clusters_minus_single_insider_purchases", "benchmark": "otherwise_eligible_single_insider_code_p_purchases", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "independent_insider_cluster_composite_top_decile", "maximum_trial_units": 5, "selection_trial_budget": 0, "within_family_method": "ROMANO_WOLF", "family_alpha": 0.1, "legacy_ambiguity_blockers": ["LEGACY_DECLARED_VARIANT_COUNT_AND_LISTED_ALTERNATIVES_CONFLICT", "LEGACY_INSIDER_IDENTITY_AND_AMENDMENT_AMBIGUITY"]},
+    "FAM-2026-004": {"name": "Options-Information Lead", "economic_mechanism": "informed_options_flow_leads_equity_price_discovery", "primary_metric": "annualized_factor_adjusted_cost_net_candidate_minus_eligible_universe_equity_return_intercept", "benchmark": "eligible_optionable_equity_universe_equal_weight", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "concordant_options_information_composite_top_decile", "maximum_trial_units": 6, "selection_trial_budget": 0, "within_family_method": "ROMANO_WOLF", "family_alpha": 0.1, "legacy_ambiguity_blockers": ["LEGACY_DECLARED_VARIANT_COUNT_AND_LISTED_ALTERNATIVES_CONFLICT", "LEGACY_OPTION_TRADE_AND_DELIVERABLE_AMBIGUITY"]},
+    "FAM-2026-005": {"name": "Supply-Chain Shock Diffusion", "economic_mechanism": "customer_shock_supplier_demand_diffusion", "primary_metric": "annualized_factor_adjusted_cost_net_candidate_minus_primary_supplier_baseline_calendar_time_return_intercept", "benchmark": "eligible_suppliers_of_same_shocked_customers_equal_weight", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "dependency_weighted_customer_shock_supplier_score_top_decile", "maximum_trial_units": 4, "selection_trial_budget": 0, "within_family_method": "ROMANO_WOLF", "family_alpha": 0.1, "legacy_ambiguity_blockers": ["LEGACY_DECLARED_VARIANT_COUNT_AND_LISTED_ALTERNATIVES_CONFLICT", "LEGACY_RELATIONSHIP_DISCOVERY_TIME_AMBIGUITY"]},
+    "FAM-2026-006": {"name": "Residual Momentum", "economic_mechanism": "residual_intermediate_horizon_momentum", "primary_metric": "worst_case_annualized_excess_return_after_costs", "benchmark": "eligible_universe_equal_weight", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "twelve_minus_one_month_beta_residual_momentum_top_quintile", "maximum_trial_units": 3, "selection_trial_budget": 0, "within_family_method": "ROMANO_WOLF", "family_alpha": 0.05, "legacy_ambiguity_blockers": ["LEGACY_WITHIN_FAMILY_MAX_STAT_METHOD_UNSPECIFIED"]},
+    "FAM-2026-007": {"name": "Stock-Specific Return Seasonality", "economic_mechanism": "issuer_specific_calendar_month_return_seasonality", "primary_metric": "worst_case_annualized_excess_return_after_costs", "benchmark": "eligible_universe_equal_weight", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "five_year_same_calendar_month_mean_cross_sectionally_demeaned_top_quintile", "maximum_trial_units": 2, "selection_trial_budget": 0, "within_family_method": "HOLM_BONFERRONI", "family_alpha": 0.05, "legacy_ambiguity_blockers": ["LEGACY_WITHIN_FAMILY_PRIMARY_VERSUS_PLACEBO_METHOD_UNSPECIFIED"]},
+    "FAM-2026-008": {"name": "Short-Horizon Reversal", "economic_mechanism": "temporary_liquidity_pressure_and_order_imbalance_reversal", "primary_metric": "worst_case_annualized_excess_return_after_costs", "benchmark": "eligible_universe_equal_weight", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "weekly_negative_five_session_market_residual_return_top_quintile", "maximum_trial_units": 3, "selection_trial_budget": 0, "within_family_method": "ROMANO_WOLF", "family_alpha": 0.05, "legacy_ambiguity_blockers": ["LEGACY_WITHIN_FAMILY_MAX_STAT_METHOD_UNSPECIFIED"]},
+    "FAM-2026-009": {"name": "Cross-Asset Trend", "economic_mechanism": "slow_macro_adjustment_and_institutional_derisking_trend", "primary_metric": "validation_delta_portfolio_information_ratio", "benchmark": "cash_proxy__equal_weight_long_only_proxy_basket__unchanged_caerus_return_stream", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "UNRESOLVED_LEGACY_PRIMARY_VARIANT", "maximum_trial_units": 4, "selection_trial_budget": 0, "within_family_method": "HOLM_BONFERRONI", "family_alpha": 0.05, "legacy_ambiguity_blockers": ["LEGACY_PRIMARY_VARIANT_UNRESOLVED", "LEGACY_MULTIPLE_BASELINES_REQUIRE_OWNER_PRIMARY_COMPARATOR_NORMALIZATION"]},
+    "FAM-2026-010": {"name": "Executive and Managerial Tone Surprise", "economic_mechanism": "executive_language_change_reveals_private_information", "primary_metric": "validation_60d_factor_residual_car_after_costs", "benchmark": "UNRESOLVED_LEGACY_PRIMARY_BENCHMARK", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "within_executive_tone_change_residual", "maximum_trial_units": 3, "selection_trial_budget": 0, "within_family_method": "HOLM_BONFERRONI", "family_alpha": 0.05, "legacy_ambiguity_blockers": ["LEGACY_PRIMARY_BENCHMARK_UNRESOLVED"]},
+    "FAM-2026-011": {"name": "Net Payout and Share Issuance", "economic_mechanism": "managerial_market_timing_and_agency_investment", "primary_metric": "worst_case_annualized_excess_return_after_costs", "benchmark": "eligible_universe_equal_weight", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "net_payout_yield_top_quintile", "maximum_trial_units": 2, "selection_trial_budget": 0, "within_family_method": "HOLM_BONFERRONI", "family_alpha": 0.05, "legacy_ambiguity_blockers": ["LEGACY_WITHIN_FAMILY_METHOD_UNSPECIFIED"]},
+    "FAM-2026-012": {"name": "Asset Growth and Investment", "economic_mechanism": "overinvestment_and_financing_frictions", "primary_metric": "worst_case_annualized_excess_return_after_costs", "benchmark": "eligible_universe_equal_weight", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "negative_one_year_total_asset_growth_top_quintile", "maximum_trial_units": 2, "selection_trial_budget": 0, "within_family_method": "HOLM_BONFERRONI", "family_alpha": 0.05, "legacy_ambiguity_blockers": ["LEGACY_WITHIN_FAMILY_METHOD_UNSPECIFIED"]},
+    "FAM-2026-013": {"name": "AI Power/Grid Commitment Events", "economic_mechanism": "delayed_incorporation_of_public_ai_data_center_grid_commitments", "primary_metric": "annualized_factor_adjusted_cost_net_candidate_minus_primary_baseline_calendar_time_return_intercept", "benchmark": "pit_eligible_exposure_stratum_issuers_excluding_named_event_issuer", "expected_direction": "GREATER_THAN", "null_value": 0.0, "economic_hurdle": 0.0, "primary_variant_id": "equal_weight_qualifying_direct_exposure_events_preceding_five_trading_days", "maximum_trial_units": 3, "selection_trial_budget": 0, "within_family_method": "ROMANO_WOLF", "family_alpha": 0.1, "legacy_ambiguity_blockers": []}
+  },
+  "family_merge_policy": "REJECT_ALL_MERGES",
+  "unresolved_legacy_definition_blockers": {
+    "HYP-2026-001": [
+      "LEGACY_ABLATION_AND_REFERENCE_SEMANTICS_AMBIGUITY"
+    ],
+    "HYP-2026-002": [
+      "LEGACY_DECLARED_VARIANT_COUNT_AND_LISTED_ALTERNATIVES_CONFLICT"
+    ],
+    "HYP-2026-003": [
+      "LEGACY_DECLARED_VARIANT_COUNT_AND_LISTED_ALTERNATIVES_CONFLICT",
+      "LEGACY_INSIDER_IDENTITY_AND_AMENDMENT_AMBIGUITY"
+    ],
+    "HYP-2026-004": [
+      "LEGACY_DECLARED_VARIANT_COUNT_AND_LISTED_ALTERNATIVES_CONFLICT",
+      "LEGACY_OPTION_TRADE_AND_DELIVERABLE_AMBIGUITY"
+    ],
+    "HYP-2026-005": [
+      "LEGACY_DECLARED_VARIANT_COUNT_AND_LISTED_ALTERNATIVES_CONFLICT",
+      "LEGACY_RELATIONSHIP_DISCOVERY_TIME_AMBIGUITY"
+    ],
+    "HYP-2026-006": [
+      "LEGACY_WITHIN_FAMILY_MAX_STAT_METHOD_UNSPECIFIED"
+    ],
+    "HYP-2026-007": [
+      "LEGACY_WITHIN_FAMILY_PRIMARY_VERSUS_PLACEBO_METHOD_UNSPECIFIED"
+    ],
+    "HYP-2026-008": [
+      "LEGACY_WITHIN_FAMILY_MAX_STAT_METHOD_UNSPECIFIED"
+    ],
+    "HYP-2026-009": [
+      "LEGACY_PRIMARY_VARIANT_UNRESOLVED",
+      "LEGACY_MULTIPLE_BASELINES_REQUIRE_OWNER_PRIMARY_COMPARATOR_NORMALIZATION"
+    ],
+    "HYP-2026-010": [
+      "LEGACY_PRIMARY_BENCHMARK_UNRESOLVED"
+    ],
+    "HYP-2026-011": [
+      "LEGACY_WITHIN_FAMILY_METHOD_UNSPECIFIED"
+    ],
+    "HYP-2026-012": [
+      "LEGACY_WITHIN_FAMILY_METHOD_UNSPECIFIED"
+    ]
+  },
+  "required_unresolved_sentinels": {
+    "HYP-2026-009.primary_variant_id": "UNRESOLVED_LEGACY_PRIMARY_VARIANT",
+    "HYP-2026-010.benchmark": "UNRESOLVED_LEGACY_PRIMARY_BENCHMARK"
+  },
+  "registry_control": {
+    "active_registry_release_hash": "REQUIRED_LOWERCASE_SHA256",
+    "externally_pinned_registry_hash": "REQUIRED_SAME_LOWERCASE_SHA256",
+    "pin_match_verified": false
+  },
+  "deterministic_plan_control": {
+    "migration_event_plan_sha256": "REQUIRED_LOWERCASE_SHA256",
+    "plan_identity_sha256": "REQUIRED_LOWERCASE_SHA256",
+    "ordered_event_count": null,
+    "expected_terminal_head": "REQUIRED_LOWERCASE_SHA256",
+    "identity_activation_head_hash": "REQUIRED_SAME_AS_EXPECTED_TERMINAL_HEAD",
+    "expected_ledger_sha256": "REQUIRED_LOWERCASE_SHA256",
+    "scratch_bytes_and_hash_verified": false
+  },
+  "source_receipt_census": {
+    "source_receipts": "POPULATE_FROM_FRESH_CANONICAL_GCP_AUDIT",
+    "data_gate_attempt_count": 66,
+    "data_gate_status_counts": {
+      "BLOCKED_DATA": 60,
+      "READY_FOR_FROZEN_EVALUATOR": 6
+    },
+    "model_trial_count": 8,
+    "robustness_record_count": 8,
+    "challenge_read_count": 0,
+    "statistical_trial_count": 8
+  },
+  "gcp_publication_authorization": {
+    "canonical_path": "/mnt/disks/alpha-lab/alpha-lab-project/outputs/research/alpha_lab/ledger/research_events.v1.jsonl",
+    "mode": "CREATE_ONLY_ATOMIC_HARD_LINK",
+    "overwrite_or_repair_allowed": false,
+    "authorized": false,
+    "authorization_rule": "Only Brett's valid detached signature over the exact completed canonical event plan authorizes one create-only publication."
+  },
+  "owner_attestation": null
+}

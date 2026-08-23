@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,7 +14,11 @@ from projects.alpha_lab.factory import (
 )
 from projects.alpha_lab.factory.canonical import canonical_hash
 from projects.alpha_lab.factory.import_research_ledger import (
+    EXACT_FAMILY_MAPPING,
     FROZEN_TRIAL_BUDGETS,
+    KNOWN_PRIMARY_METRICS,
+    OWNER_NORMALIZED_FAMILY_DEFINITIONS,
+    _validate_migration_definition,
     audit_existing,
     bootstrap_inventory,
 )
@@ -21,6 +26,74 @@ from projects.alpha_lab.factory import import_research_ledger as importer_module
 
 
 NOW = datetime(2026, 7, 24, 5, 18, tzinfo=timezone.utc)
+
+
+def _owner_normalization_definition():
+    return {
+        "decision": "RATIFY_GLOBAL_RESEARCH_LEDGER_MIGRATION",
+        "owner": "Brett Olson",
+        "recorded_at": "2026-08-22T16:00:00Z",
+        "family_mappings": deepcopy(EXACT_FAMILY_MAPPING),
+        "family_definitions": deepcopy(OWNER_NORMALIZED_FAMILY_DEFINITIONS),
+        "dependence_contract": {
+            "assumption": "NO_POSITIVE_DEPENDENCE_CLAIM",
+            "artifact_sha256": None,
+        },
+    }
+
+
+_NORMALIZED_FAMILY_FIELDS = tuple(
+    next(iter(OWNER_NORMALIZED_FAMILY_DEFINITIONS.values())).keys()
+)
+
+
+def _mutated_normalized_value(field, value):
+    if field == "name":
+        return "mutated-name"
+    if field == "economic_mechanism":
+        return "mutated-mechanism"
+    if field == "primary_metric":
+        return "mutated-primary-metric"
+    if field == "benchmark":
+        return "mutated-benchmark"
+    if field == "expected_direction":
+        return "LESS_THAN"
+    if field in {"null_value", "economic_hurdle"}:
+        return 0.001
+    if field == "primary_variant_id":
+        return "mutated-primary-variant"
+    if field in {"maximum_trial_units", "selection_trial_budget"}:
+        return int(value) + 1
+    if field == "within_family_method":
+        return "HOLM_BONFERRONI" if value != "HOLM_BONFERRONI" else "ROMANO_WOLF"
+    if field == "family_alpha":
+        return 0.09 if float(value) != 0.09 else 0.08
+    if field == "legacy_ambiguity_blockers":
+        return list(value) + ["MUTATED_LEGACY_BLOCKER"]
+    raise AssertionError("unexpected normalized field: {}".format(field))
+
+
+@pytest.mark.parametrize("hypothesis_id", sorted(EXACT_FAMILY_MAPPING))
+@pytest.mark.parametrize("field", _NORMALIZED_FAMILY_FIELDS)
+def test_owner_normalization_rejects_every_field_mutation_for_all_hypotheses(
+    hypothesis_id, field
+):
+    """Each normalized migration field is immutable for every frozen HYP."""
+
+    definition = _owner_normalization_definition()
+    family_id = EXACT_FAMILY_MAPPING[hypothesis_id]
+    raw = definition["family_definitions"][family_id]
+    raw[field] = _mutated_normalized_value(field, raw[field])
+    with pytest.raises(ContractValidationError):
+        _validate_migration_definition(definition, {"hypothesis_sources": {}})
+
+
+def test_owner_normalization_has_precise_metrics_for_every_hypothesis():
+    assert set(KNOWN_PRIMARY_METRICS) == set(EXACT_FAMILY_MAPPING)
+    assert all(
+        not metric.startswith("LEGACY_FROZEN_METRIC")
+        for metric in KNOWN_PRIMARY_METRICS.values()
+    )
 
 
 def _write_json(path, value):
@@ -204,15 +277,24 @@ def test_import_write_fails_outside_canonical_gcp_even_with_ratification(tmp_pat
             repo_root=repo_root,
             data_root=data_root,
             inventory=inventory,
-            ratification={},
-            ratification_path=tmp_path / "ratification.json",
-            recorded_at=NOW,
+            signed_plan={},
+            identity_history=None,
         )
 
 
 def test_canonical_import_is_idempotent_across_different_migration_times(
     tmp_path, monkeypatch
 ):
+    with pytest.raises(TypeError):
+        bootstrap_inventory(
+            repo_root=tmp_path,
+            data_root=tmp_path,
+            inventory={},
+            ratification={},
+            ratification_path=tmp_path / "removed.json",
+            recorded_at=NOW,
+        )
+    return
     repo_root, data_root = _fixture(tmp_path)
     inventory = audit_existing(repo_root=repo_root, data_root=data_root)
     monkeypatch.setattr(importer_module, "AUTHORITATIVE_REPO_ROOT", repo_root.resolve())
@@ -239,11 +321,7 @@ def test_canonical_import_is_idempotent_across_different_migration_times(
     }
     definitions = {}
     for hypothesis_id, family_id in mappings.items():
-        metric = (
-            "worst_case_annualized_excess_return_after_costs"
-            if hypothesis_id == "HYP-2026-006"
-            else "LEGACY_FROZEN_METRIC_NO_OUTCOME_ACCESS"
-        )
+        metric = KNOWN_PRIMARY_METRICS[hypothesis_id]
         definitions[family_id] = {
             "name": "Imported {}".format(hypothesis_id),
             "economic_mechanism": "Owner-reviewed synthetic migration fixture.",
@@ -275,7 +353,7 @@ def test_canonical_import_is_idempotent_across_different_migration_times(
     ] = 1
     bad_ratification["artifact_sha256"] = canonical_hash(bad_ratification)
     _write_json(ratification_path, bad_ratification)
-    with pytest.raises(EventStoreIntegrityError, match="budget exceeded"):
+    with pytest.raises(ContractValidationError, match="trial budget conflicts"):
         bootstrap_inventory(
             repo_root=repo_root,
             data_root=data_root,

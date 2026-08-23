@@ -39,6 +39,10 @@ REQUIRED_RESEARCH_GATES_V2 = frozenset(
         "costs_capacity_and_concentration",
         "challenge_epoch_integrity",
         "challenge_confirmation_pass",
+        "authenticated_owner_ratification",
+        "authenticated_preregistration_authorship",
+        "authenticated_data_certification",
+        "legacy_definition_complete",
         "independent_review",
         "artifact_and_event_chain_integrity",
     }
@@ -256,11 +260,19 @@ class CandidateSnapshot:
             if not all(isinstance(value, bool) for value in gates.values()):
                 raise ContractValidationError("{} values must be boolean".format(name))
         if self.research_verdict is ResearchVerdict.EVIDENCE_READY_FOR_OWNER_REVIEW:
-            missing = sorted(REQUIRED_RESEARCH_GATES_V2 - set(self.research_gates))
+            supplied_gate_names = set(self.research_gates)
+            missing = sorted(REQUIRED_RESEARCH_GATES_V2 - supplied_gate_names)
             if missing:
                 raise ContractValidationError(
                     "owner-review evidence is missing mandatory v2 gates: {}".format(
                         ",".join(missing)
+                    )
+                )
+            unexpected = sorted(supplied_gate_names - REQUIRED_RESEARCH_GATES_V2)
+            if unexpected:
+                raise ContractValidationError(
+                    "owner-review evidence has unexpected v2 gates: {}".format(
+                        ",".join(unexpected)
                     )
                 )
             if self.schema_version != "caerus_alpha_lab_candidate_snapshot_v2":

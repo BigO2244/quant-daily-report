@@ -23,6 +23,9 @@
     "costs_capacity_and_concentration": false,
     "challenge_epoch_integrity": false,
     "challenge_confirmation_pass": false,
+    "authenticated_owner_ratification": false,
+    "authenticated_preregistration_authorship": false,
+    "authenticated_data_certification": false,
     "independent_review": false,
     "artifact_and_event_chain_integrity": false
   },
