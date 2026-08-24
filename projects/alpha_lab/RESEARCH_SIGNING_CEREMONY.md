@@ -397,8 +397,9 @@ bytecode writes. The operating-system runtime is part of the trust boundary:
 an administrator must start the entire Gate A session inside a private mount
 namespace or immutable Ubuntu image in which `/`, `/usr`, `/lib`, `/lib64`, and
 every other system-runtime mount are read-only. The approved release parent,
-temporary parent, and input mounts may be separate, explicitly scoped mounts;
-only the release and temporary parents may be writable during construction.
+temporary parent, failure-evidence root, and input mounts may be separate,
+explicitly scoped mounts; only the release parent, temporary parent, and exact
+attempt-scoped failure-evidence root may be writable during construction.
 This control must exist before `python3.10`, the bootstrap, or the builder is
 started. The Python verifier only confirms it; it cannot establish trust in
 stdlib code that the current process has already imported. A normal mutable VM
@@ -409,28 +410,34 @@ systemd unit that creates the mount boundary before executing Python. The
 administrator must replace the principal and paths, use direct argv (no shell),
 and preserve the command exit status. `PrivateNetwork=yes` must be established
 by systemd before Python starts. `ReadOnlyPaths=/` is the default; Gate A
-construction receives only the two explicit writable exceptions. There is no
+construction receives only the three explicit writable exceptions. There is no
 writable `/proc` exception. The code's
 per-object `fstatvfs` census remains authoritative and rejects a writable
 nested mount even if the unit configuration was intended to be read-only:
 
 ```bash
+GATE_A_ATTEMPT_ID=gate-a-<16-lowercase-hex>-<16-lowercase-hex>
+GATE_A_FAILURE_ROOT=/approved/gate-a-failures/$GATE_A_ATTEMPT_ID
+
 sudo systemd-run --wait --pipe --collect \
   --property=User=<APPROVED_NONROOT_GATE_PRINCIPAL> \
   --property=NoNewPrivileges=yes \
   --property=PrivateNetwork=yes \
   --property=ReadOnlyPaths=/ \
-  --property="ReadWritePaths=$RELEASE_PARENT $GATE_A_TEMP_PARENT" \
+  --property="ReadWritePaths=$RELEASE_PARENT $GATE_A_TEMP_PARENT $GATE_A_FAILURE_ROOT" \
   /usr/bin/python3.10 -I -S -B "$GATE_A_BUILDER" build \
   ...exact reviewed arguments... \
   --temporary-parent "$GATE_A_TEMP_PARENT" \
+  --attempt-id "$GATE_A_ATTEMPT_ID" \
+  --failure-evidence-root "$GATE_A_FAILURE_ROOT" \
   --write \
   --authorized-release-input-sha256 <EXACT_RELEASE_INPUT_SHA256>
 ```
 
 Bootstrap materialization uses the same boundary with only
-`$RELEASE_PARENT` and its dedicated temporary parent writable. Preflight needs
-no writable exception. Full verification creates a sanitized temporary
+`$RELEASE_PARENT` and its dedicated temporary parent writable; the
+failure-evidence exception belongs only to the builder write unit. Preflight
+needs no writable exception. Full verification creates a sanitized temporary
 HOME/TMP/XDG tree, so its unit must provide one dedicated empty writable temp
 root, set `TMPDIR` to it before Python starts, and leave every release/system
 path read-only. If this launcher or its unit policy is not independently
@@ -465,9 +472,13 @@ python3.10 -I -S -B "$GATE_A_BUILDER" build \
 ```
 
 Only after the preflight output has been independently reviewed may the
-operator add both write controls:
+operator add the required write controls:
 
 ```bash
+GATE_A_ATTEMPT_ID=gate-a-<16-lowercase-hex>-<16-lowercase-hex>
+GATE_A_TEMP_PARENT=/approved/gate-a-temp/$GATE_A_ATTEMPT_ID
+GATE_A_FAILURE_ROOT=/approved/gate-a-failures/$GATE_A_ATTEMPT_ID
+
 python3.10 -I -S -B "$GATE_A_BUILDER" build \
   --repo-root "$BOOTSTRAP_ROOT" \
   --source-archive "$PROTECTED_INPUT/source.tar" \
@@ -477,9 +488,76 @@ python3.10 -I -S -B "$GATE_A_BUILDER" build \
   --release-input-manifest "$PROTECTED_INPUT/release_input_manifest.json" \
   --release-parent "$RELEASE_PARENT" \
   --interpreter /usr/bin/python3.10 \
+  --temporary-parent "$GATE_A_TEMP_PARENT" \
+  --attempt-id "$GATE_A_ATTEMPT_ID" \
+  --failure-evidence-root "$GATE_A_FAILURE_ROOT" \
   --write \
   --authorized-release-input-sha256 <EXACT_RELEASE_INPUT_SHA256>
 ```
+
+Write mode requires the exact owner-reviewed attempt ID and failure-evidence
+root; dry build forbids both arguments, and preflight has no such options. The
+attempt ID is not merely grammar-valid: it must equal exactly
+`gate-a-${SOURCE_COMMIT_SHA:0:16}-${RELEASE_INPUT_SHA256:0:16}` using lowercase
+hex from the already verified source and release-input identities. The failure
+root's basename must equal that exact ID. A near-miss commit prefix,
+release-input prefix, attempt value, or root basename fails before any build
+write. Before the write unit starts, an administrator must create that root as
+one real, empty directory owned by the approved nonroot Gate A UID/GID with
+exact mode `0700` and no access or default POSIX ACL. It must be disjoint from
+the release, source, wheelhouse, checkout, authoritative data, and temporary
+roots. The builder will not create, clean, repair, or reuse it.
+
+Only a nonzero result from the fixed `RELEASE_PYTEST` command may create failure
+evidence. Before its sanitized `TemporaryDirectory` is removed, the builder
+creates exactly `$GATE_A_FAILURE_ROOT/failure-evidence/` with create-exclusive,
+descriptor-relative, no-follow operations. It writes exact combined stdout to
+`stdout.bin`, writes exact `junit.xml` only when pytest produced a stable-read,
+single-link regular JUnit file, and records an explicit `ABSENT` state only
+after a stable absence observation. An unsafe link, special object, open/read
+race, or observation error does not discard primary evidence: the bundle still
+preserves exact stdout and the subprocess return code, while JUnit is recorded
+as `UNSAFE` with only a closed reason code and no unsafe bytes, path, errno, or
+free text. Canonical `FAILURE_EVIDENCE.json` is created last and binds the
+closed `FAILED_CLOSED` status, attempt ID, fixed command role, return code,
+release-input identity, source identities, builder module identities, and the
+byte counts and SHA-256 values for safe evidence files. It records no argv,
+environment, caller filename, or free-text error. Files are fsynced and sealed
+`0440`; the bundle is fsynced and sealed `0550`; the attempt root remains
+`0700`. Any collision, dirty root, link, special object, ACL, ownership/mode
+drift, or observed race still fails the build closed and is never cleaned up.
+
+The producer never trusts a mutable exception object's attributes as receipt
+authority. Receipt construction requires the exact `ReleaseCommandFailure`
+class, rejects subclasses and proxies, and reconstructs an immutable value only
+after revalidating the exact `RELEASE_PYTEST` role, a non-Boolean nonzero integer
+return code, exact `bytes` stdout, the closed JUnit state, and every state/value/
+reason relationship. The filesystem writer independently repeats that exact-
+class and primitive validation, exact attempt/source/release binding, and
+immutable reconstruction before it creates the bundle directory or any file;
+it does not call through a replaceable receipt-validator result. Any post-
+construction mutation, subclass, proxy, invalid primitive type, or inconsistent
+JUnit tuple leaves the protected failure root completely empty and fails the
+attempt closed. The frozen validated snapshot enforces the same invariants in
+its constructor, and both receipt and writer reconstruct it again before use.
+Their snapshot and receipt-builder references are sealed at function-definition
+time rather than looked up through a replaceable module validator; the receipt
+builder also repeats the complete snapshot invariant check. Replacing either
+module helper with a forged zero-return, bad-role, non-bytes, or tuple-drift
+snapshot therefore cannot authorize a bundle or alter receipt bytes.
+
+Successful execution never treats the initial failure-root validation as
+sufficient. The builder independently re-opens and re-proves the exact
+device/inode, UID/GID, mode `0700`, no-ACL state, and emptiness immediately
+after runtime validation, immediately before writing `READY`, and immediately
+before the final successful return. The `ALREADY_READY` path performs the same
+independent reproof after complete sealed-release verification and immediately
+before returning. A runtime or adversarial monkeypatch that adds any failure-
+root artifact therefore cannot produce a new `READY`, and a dirty root can
+never return `PASS` or `ALREADY_READY`. Successful builds leave the failure
+root empty. A failure bundle is evidence of a permanently abandoned attempt,
+not authority to repair or retry its source, release, temp, or failure
+addresses.
 
 The build is create-only and content-addressed. Before opening or creating the
 release parent, write mode re-proves the inherited private network after exact

@@ -68,6 +68,22 @@ ATLAS_GATE_E_RUNTIME_RECEIPT_SCHEMA = (
 EXTERNAL_BASE_RUNTIME_RECEIPT_SCHEMA = (
     "caerus_alpha_lab_external_base_runtime_receipt_v2"
 )
+FAILURE_EVIDENCE_SCHEMA = "caerus_alpha_lab_gate_a_failure_evidence_v1"
+FAILURE_EVIDENCE_STATUS = "FAILED_CLOSED"
+FAILURE_COMMAND_ROLE = "RELEASE_PYTEST"
+FAILURE_BUNDLE_NAME = "failure-evidence"
+FAILURE_STDOUT_NAME = "stdout.bin"
+FAILURE_JUNIT_NAME = "junit.xml"
+FAILURE_RECEIPT_NAME = "FAILURE_EVIDENCE.json"
+FAILURE_JUNIT_STATES = {"PRESENT", "ABSENT", "UNSAFE"}
+FAILURE_JUNIT_UNSAFE_REASONS = {
+    "ABSENCE_RACE",
+    "BYTE_COUNT_DRIFT",
+    "NOT_SINGLE_LINK_REGULAR",
+    "OBSERVATION_ERROR",
+    "OPEN_RACE",
+    "READ_RACE",
+}
 NETWORK_IPV4_CONNECT_ADDRESS = "1.1.1.1"
 NETWORK_IPV6_CONNECT_ADDRESS = "2606:4700:4700::1111"
 NETWORK_CONNECT_PORT = 53
@@ -106,6 +122,7 @@ _METADATA_NAMES = {BUILT_MANIFEST_NAME, RECEIPT_NAME, READY_NAME}
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _SHA1 = re.compile(r"[0-9a-f]{40}")
 _MODE = re.compile(r"[0-7]{4}")
+_GATE_A_ATTEMPT_ID = re.compile(r"gate-a-[0-9a-f]{16}-[0-9a-f]{16}")
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
@@ -115,6 +132,94 @@ _READ_FILE_FLAGS = os.O_RDONLY | _O_NOFOLLOW | _O_CLOEXEC
 
 class ReleaseBuildError(RuntimeError):
     """A Gate A input, construction, or sealed-release invariant failed."""
+
+
+class ReleaseCommandFailure(ReleaseBuildError):
+    """A fixed evidence-bearing Gate A subprocess failed."""
+
+    def __init__(
+        self, *, command_role: str, return_code: int, stdout: bytes,
+        junit: Optional[bytes], junit_state: Optional[str] = None,
+        junit_unsafe_reason: Optional[str] = None,
+    ) -> None:
+        if command_role != FAILURE_COMMAND_ROLE:
+            raise ReleaseBuildError("failure command role is not closed")
+        if isinstance(return_code, bool) or not isinstance(return_code, int) or return_code == 0:
+            raise ReleaseBuildError("failure return code must be a nonzero integer")
+        if not isinstance(stdout, bytes) or (junit is not None and not isinstance(junit, bytes)):
+            raise ReleaseBuildError("failure command evidence must be exact bytes")
+        if junit_state is None:
+            junit_state = "PRESENT" if junit is not None else "ABSENT"
+        if junit_state not in FAILURE_JUNIT_STATES:
+            raise ReleaseBuildError("failure JUnit state is not closed")
+        if junit_state == "PRESENT":
+            if junit is None or junit_unsafe_reason is not None:
+                raise ReleaseBuildError("present JUnit evidence contract is invalid")
+        elif junit_state == "ABSENT":
+            if junit is not None or junit_unsafe_reason is not None:
+                raise ReleaseBuildError("absent JUnit evidence contract is invalid")
+        elif (
+            junit is not None
+            or junit_unsafe_reason not in FAILURE_JUNIT_UNSAFE_REASONS
+        ):
+            raise ReleaseBuildError("unsafe JUnit evidence contract is invalid")
+        self.command_role = command_role
+        self.return_code = return_code
+        self.stdout = stdout
+        self.junit = junit
+        self.junit_state = junit_state
+        self.junit_unsafe_reason = junit_unsafe_reason
+        super().__init__(
+            f"release command failed closed: {command_role} return_code={return_code}"
+        )
+
+
+@dataclass(frozen=True)
+class FailureEvidenceRoot:
+    path: Path
+    device: int
+    inode: int
+    uid: int
+    gid: int
+
+
+@dataclass(frozen=True)
+class JUnitObservation:
+    state: str
+    value: Optional[bytes]
+    unsafe_reason: Optional[str]
+
+
+@dataclass(frozen=True)
+class ValidatedCommandFailure:
+    command_role: str
+    return_code: int
+    stdout: bytes
+    junit_state: str
+    junit: Optional[bytes]
+    junit_unsafe_reason: Optional[str]
+
+    def __post_init__(self) -> None:
+        if type(self.command_role) is not str or self.command_role != FAILURE_COMMAND_ROLE:
+            raise ReleaseBuildError("validated failure command role is invalid")
+        if type(self.return_code) is not int or self.return_code == 0:
+            raise ReleaseBuildError("validated failure return code is invalid")
+        if type(self.stdout) is not bytes:
+            raise ReleaseBuildError("validated failure stdout is not exact bytes")
+        if type(self.junit_state) is not str or self.junit_state not in FAILURE_JUNIT_STATES:
+            raise ReleaseBuildError("validated failure JUnit state is invalid")
+        if self.junit_state == "PRESENT":
+            if type(self.junit) is not bytes or self.junit_unsafe_reason is not None:
+                raise ReleaseBuildError("validated failure PRESENT tuple is invalid")
+        elif self.junit_state == "ABSENT":
+            if self.junit is not None or self.junit_unsafe_reason is not None:
+                raise ReleaseBuildError("validated failure ABSENT tuple is invalid")
+        elif (
+            self.junit is not None
+            or type(self.junit_unsafe_reason) is not str
+            or self.junit_unsafe_reason not in FAILURE_JUNIT_UNSAFE_REASONS
+        ):
+            raise ReleaseBuildError("validated failure UNSAFE tuple is invalid")
 
 
 @dataclass(frozen=True)
@@ -154,6 +259,30 @@ def _canonical_bytes(value: Any) -> bytes:
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
+
+
+def _expected_gate_a_attempt_id(inputs: ReleaseInputs) -> str:
+    source_manifest = inputs.source.source_manifest
+    commit_sha = (
+        source_manifest.get("commit_sha")
+        if isinstance(source_manifest, Mapping)
+        else None
+    )
+    if not isinstance(commit_sha, str) or not _SHA1.fullmatch(commit_sha):
+        raise ReleaseBuildError("Gate A source commit identity is invalid")
+    if not _SHA256.fullmatch(inputs.release_input_sha256):
+        raise ReleaseBuildError("Gate A release-input identity is invalid")
+    return f"gate-a-{commit_sha[:16]}-{inputs.release_input_sha256[:16]}"
+
+
+def _validate_exact_gate_a_attempt_id(
+    inputs: ReleaseInputs, attempt_id: str,
+) -> None:
+    expected = _expected_gate_a_attempt_id(inputs)
+    if attempt_id != expected:
+        raise ReleaseBuildError(
+            "Gate A attempt ID does not equal the source/release identity binding"
+        )
 
 
 def _strict_json(value: bytes, *, label: str) -> Any:
@@ -1223,24 +1352,236 @@ def _validate_temporary_parent(path: Path, *, protected_roots: Sequence[Path]) -
             )
 
 
+def _paths_overlap(first: Path, second: Path) -> bool:
+    return first == second or first in second.parents or second in first.parents
+
+
+def _assert_no_posix_acl(descriptor: int, *, label: str) -> None:
+    listxattr = getattr(os, "listxattr", None)
+    if listxattr is None:
+        raise ReleaseBuildError("platform cannot prove absence of POSIX ACLs")
+    try:
+        names = set(listxattr(descriptor))
+    except OSError as exc:
+        raise ReleaseBuildError(f"cannot inspect POSIX ACL state for {label}") from exc
+    if names & {"system.posix_acl_access", "system.posix_acl_default"}:
+        raise ReleaseBuildError(f"POSIX ACL is forbidden on {label}")
+
+
+def _failure_root_metadata(
+    descriptor: int, *, path: Path, attempt_id: str, require_empty: bool,
+) -> os.stat_result:
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ReleaseBuildError("failure-evidence root is not a real directory")
+    if stat.S_IMODE(metadata.st_mode) != 0o700:
+        raise ReleaseBuildError("failure-evidence root must have exact mode 0700")
+    if os.geteuid() == 0 or metadata.st_uid != os.geteuid() or metadata.st_gid != os.getegid():
+        raise ReleaseBuildError(
+            "failure-evidence root must belong to the nonroot Gate A principal"
+        )
+    if path.name != attempt_id:
+        raise ReleaseBuildError("failure-evidence root is not bound to the attempt ID")
+    _assert_no_posix_acl(descriptor, label="failure-evidence root")
+    if require_empty and _directory_names(descriptor):
+        raise ReleaseBuildError("failure-evidence root must be dedicated and empty")
+    return metadata
+
+
+def _validate_failure_evidence_root(
+    path: Path, *, attempt_id: str, protected_roots: Sequence[Path],
+) -> FailureEvidenceRoot:
+    if not isinstance(attempt_id, str) or not _GATE_A_ATTEMPT_ID.fullmatch(attempt_id):
+        raise ReleaseBuildError("exact closed Gate A attempt ID is required")
+    path = _normalize_absolute_path(str(path), label="failure-evidence root")
+    for protected in protected_roots:
+        protected = _normalize_absolute_path(str(protected), label="protected root")
+        if _paths_overlap(path, protected):
+            raise ReleaseBuildError(
+                f"failure-evidence root overlaps protected or temporary state: {protected}"
+            )
+    descriptor = _open_absolute_directory(path)
+    try:
+        metadata = _failure_root_metadata(
+            descriptor, path=path, attempt_id=attempt_id, require_empty=True
+        )
+        return FailureEvidenceRoot(
+            path=path,
+            device=metadata.st_dev,
+            inode=metadata.st_ino,
+            uid=metadata.st_uid,
+            gid=metadata.st_gid,
+        )
+    finally:
+        os.close(descriptor)
+
+
+def _reprove_failure_root_empty(
+    root: FailureEvidenceRoot, *, attempt_id: str,
+) -> None:
+    """Independently re-open and prove the authorized root before success."""
+
+    descriptor = _open_absolute_directory(root.path)
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or (metadata.st_dev, metadata.st_ino) != (root.device, root.inode)
+            or metadata.st_uid != root.uid
+            or metadata.st_gid != root.gid
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_gid != os.getegid()
+            or os.geteuid() == 0
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            raise ReleaseBuildError(
+                "failure-evidence root success reproof identity/mode drift"
+            )
+        if root.path.name != attempt_id:
+            raise ReleaseBuildError(
+                "failure-evidence root success reproof attempt drift"
+            )
+        _assert_no_posix_acl(
+            descriptor, label="failure-evidence root success reproof"
+        )
+        if _directory_names(descriptor):
+            raise ReleaseBuildError(
+                "failure-evidence root is nonempty at successful boundary"
+            )
+    finally:
+        os.close(descriptor)
+
+
+def _unsafe_junit(reason: str) -> JUnitObservation:
+    if reason not in FAILURE_JUNIT_UNSAFE_REASONS:
+        raise ReleaseBuildError("JUnit unsafe reason is not closed")
+    return JUnitObservation(state="UNSAFE", value=None, unsafe_reason=reason)
+
+
+def _observe_junit(temporary_root: Path) -> JUnitObservation:
+    """Observe the fixed pytest JUnit leaf without losing primary stdout."""
+
+    try:
+        descriptor = _open_absolute_directory(temporary_root)
+    except (OSError, ValueError, ReleaseBuildError):
+        return _unsafe_junit("OBSERVATION_ERROR")
+    try:
+        try:
+            directory_before = os.fstat(descriptor)
+            before = os.stat(
+                "pytest-results.xml", dir_fd=descriptor, follow_symlinks=False
+            )
+        except FileNotFoundError:
+            try:
+                directory_after = os.fstat(descriptor)
+            except OSError:
+                return _unsafe_junit("OBSERVATION_ERROR")
+            stable_directory = ("st_dev", "st_ino", "st_mtime_ns")
+            if any(
+                getattr(directory_before, field) != getattr(directory_after, field)
+                for field in stable_directory
+            ):
+                return _unsafe_junit("ABSENCE_RACE")
+            return JUnitObservation(state="ABSENT", value=None, unsafe_reason=None)
+        except OSError:
+            return _unsafe_junit("OBSERVATION_ERROR")
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            return _unsafe_junit("NOT_SINGLE_LINK_REGULAR")
+        flags = _READ_FILE_FLAGS | getattr(os, "O_NONBLOCK", 0)
+        try:
+            evidence_fd = os.open("pytest-results.xml", flags, dir_fd=descriptor)
+        except OSError:
+            return _unsafe_junit("OBSERVATION_ERROR")
+        try:
+            try:
+                opened = os.fstat(evidence_fd)
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or opened.st_nlink != 1
+                    or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+                ):
+                    return _unsafe_junit("OPEN_RACE")
+                chunks: list[bytes] = []
+                while True:
+                    chunk = os.read(evidence_fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                after = os.fstat(evidence_fd)
+            except OSError:
+                return _unsafe_junit("OBSERVATION_ERROR")
+        finally:
+            os.close(evidence_fd)
+        try:
+            current = os.stat(
+                "pytest-results.xml", dir_fd=descriptor, follow_symlinks=False
+            )
+        except OSError:
+            return _unsafe_junit("READ_RACE")
+        stable = ("st_dev", "st_ino", "st_nlink", "st_size", "st_mtime_ns")
+        if any(getattr(opened, field) != getattr(after, field) for field in stable) or any(
+            getattr(after, field) != getattr(current, field) for field in stable
+        ):
+            return _unsafe_junit("READ_RACE")
+        value = b"".join(chunks)
+        if len(value) != after.st_size:
+            return _unsafe_junit("BYTE_COUNT_DRIFT")
+        return JUnitObservation(state="PRESENT", value=value, unsafe_reason=None)
+    finally:
+        os.close(descriptor)
+
+
 def _run_command(
     command: Sequence[str], *, cwd: Path, environment: Mapping[str, str],
+    failure_role: Optional[str] = None,
+    failure_temporary_root: Optional[Path] = None,
 ) -> subprocess.CompletedProcess[str]:
+    if (failure_role is None) != (failure_temporary_root is None):
+        raise ReleaseBuildError("failure command evidence contract is incomplete")
+    if failure_role is not None and failure_role != FAILURE_COMMAND_ROLE:
+        raise ReleaseBuildError("failure command role is not closed")
     result = subprocess.run(
         list(command),
         cwd=str(cwd),
         env=dict(environment),
-        text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         check=False,
     )
+    if isinstance(result.stdout, bytes):
+        stdout_bytes = result.stdout
+    elif isinstance(result.stdout, str):
+        # Compatibility for deliberately substituted unit-test runners only.
+        stdout_bytes = result.stdout.encode("utf-8")
+    else:
+        raise ReleaseBuildError("release command did not return captured stdout bytes")
     if result.returncode != 0:
+        if failure_role is not None:
+            if failure_temporary_root is None:  # Defensive despite the contract above.
+                raise ReleaseBuildError("failure command evidence root is absent")
+            try:
+                junit = _observe_junit(failure_temporary_root)
+            except Exception:
+                # Primary stdout/return-code evidence outranks optional JUnit.
+                # The closed receipt never exposes the observation exception.
+                junit = _unsafe_junit("OBSERVATION_ERROR")
+            raise ReleaseCommandFailure(
+                command_role=failure_role,
+                return_code=result.returncode,
+                stdout=stdout_bytes,
+                junit=junit.value,
+                junit_state=junit.state,
+                junit_unsafe_reason=junit.unsafe_reason,
+            )
         raise ReleaseBuildError(
             f"release command failed ({result.returncode}): {' '.join(command)}\n"
-            f"output_sha256={_sha256(result.stdout.encode('utf-8'))}"
+            f"output_sha256={_sha256(stdout_bytes)}"
         )
-    return result
+    try:
+        stdout = stdout_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ReleaseBuildError("successful release command output is not UTF-8") from exc
+    return subprocess.CompletedProcess(result.args, result.returncode, stdout=stdout)
 
 
 def _isolated_module_command(
@@ -2138,6 +2479,8 @@ def _execute_runtime_build(
         ),
         cwd=app,
         environment=environment,
+        failure_role=FAILURE_COMMAND_ROLE,
+        failure_temporary_root=temporary_root,
     )
     summary = re.search(r"(\d+) passed, (\d+) skipped in ", tests.stdout)
     if summary is None or tuple(map(int, summary.groups())) != (
@@ -2907,9 +3250,429 @@ def verify_sealed_release(release_dir: Path) -> Mapping[str, Any]:
     return _verify_sealed_release(release_dir, verify_runtime=True)
 
 
+def _failure_source_identity(inputs: ReleaseInputs) -> Mapping[str, Any]:
+    source_manifest = inputs.source.source_manifest
+    if not isinstance(source_manifest, Mapping) or not _SHA1.fullmatch(
+        str(source_manifest.get("commit_sha", ""))
+    ) or not _SHA1.fullmatch(str(source_manifest.get("tree_oid_sha1", ""))):
+        raise ReleaseBuildError("failure evidence source identity is invalid")
+    result = {
+        "archive_sha256": inputs.source.archive_sha256,
+        "commit_sha": source_manifest["commit_sha"],
+        "file_manifest_sha256": inputs.source.file_manifest_sha256,
+        "source_manifest_sha256": inputs.source.source_manifest_sha256,
+        "tree_oid_sha1": source_manifest["tree_oid_sha1"],
+    }
+    if not all(
+        _SHA256.fullmatch(str(result[field]))
+        for field in (
+            "archive_sha256", "file_manifest_sha256", "source_manifest_sha256"
+        )
+    ):
+        raise ReleaseBuildError("failure evidence source hashes are invalid")
+    return result
+
+
+def _failure_builder_identity(inputs: ReleaseInputs) -> Mapping[str, Any]:
+    origin = inputs.builder_origin
+    if not isinstance(origin, Mapping) or set(origin) != {
+        "content_addressed", "expected_bootstrap_root", "modules", "repo_root",
+        "source_archive_sha256",
+    } or origin.get("content_addressed") is not True or origin.get(
+        "source_archive_sha256"
+    ) != inputs.source.archive_sha256:
+        raise ReleaseBuildError("failure evidence builder origin is invalid")
+    modules = origin.get("modules")
+    if not isinstance(modules, list):
+        raise ReleaseBuildError("failure evidence builder module census is invalid")
+    result_modules = []
+    for record in modules:
+        if not isinstance(record, Mapping) or set(record) != {
+            "bytes", "path", "sha256", "source_relative_path"
+        }:
+            raise ReleaseBuildError("failure evidence builder module schema is invalid")
+        if (
+            isinstance(record.get("bytes"), bool)
+            or not isinstance(record.get("bytes"), int)
+            or record["bytes"] < 0
+            or not _SHA256.fullmatch(str(record.get("sha256", "")))
+        ):
+            raise ReleaseBuildError("failure evidence builder module identity is invalid")
+        result_modules.append(
+            {
+                "bytes": record["bytes"],
+                "sha256": record["sha256"],
+                "source_relative_path": record["source_relative_path"],
+            }
+        )
+    if [record["source_relative_path"] for record in result_modules] != [
+        str(BUILDER_RELATIVE_PATH), str(DEPENDENCY_VALIDATOR_RELATIVE_PATH)
+    ]:
+        raise ReleaseBuildError("failure evidence builder module set is invalid")
+    return {
+        "modules": result_modules,
+        "source_archive_sha256": inputs.source.archive_sha256,
+    }
+
+
+def _validated_command_failure(failure: Any) -> ValidatedCommandFailure:
+    """Reconstruct immutable evidence from one exact failure object."""
+
+    if type(failure) is not ReleaseCommandFailure:
+        raise ReleaseBuildError(
+            "failure evidence requires the exact ReleaseCommandFailure class"
+        )
+    try:
+        command_role = failure.command_role
+        return_code = failure.return_code
+        stdout = failure.stdout
+        junit_state = failure.junit_state
+        junit = failure.junit
+        junit_unsafe_reason = failure.junit_unsafe_reason
+    except Exception as exc:
+        raise ReleaseBuildError("failure evidence primitive access failed") from exc
+    if type(command_role) is not str or command_role != FAILURE_COMMAND_ROLE:
+        raise ReleaseBuildError("failure evidence command role is invalid")
+    if type(return_code) is not int or return_code == 0:
+        raise ReleaseBuildError("failure evidence return code is invalid")
+    if type(stdout) is not bytes:
+        raise ReleaseBuildError("failure evidence stdout is not exact bytes")
+    if type(junit_state) is not str or junit_state not in FAILURE_JUNIT_STATES:
+        raise ReleaseBuildError("failure evidence JUnit state is invalid")
+    if junit_state == "PRESENT":
+        if type(junit) is not bytes or junit_unsafe_reason is not None:
+            raise ReleaseBuildError("failure evidence PRESENT relationship is invalid")
+    elif junit_state == "ABSENT":
+        if junit is not None or junit_unsafe_reason is not None:
+            raise ReleaseBuildError("failure evidence ABSENT relationship is invalid")
+    elif (
+        junit is not None
+        or type(junit_unsafe_reason) is not str
+        or junit_unsafe_reason not in FAILURE_JUNIT_UNSAFE_REASONS
+    ):
+        raise ReleaseBuildError("failure evidence UNSAFE relationship is invalid")
+    return ValidatedCommandFailure(
+        command_role=command_role,
+        return_code=return_code,
+        stdout=stdout,
+        junit_state=junit_state,
+        junit=junit,
+        junit_unsafe_reason=junit_unsafe_reason,
+    )
+
+
+def _failure_receipt_from_validated(
+    *, inputs: ReleaseInputs, attempt_id: str,
+    failure: ValidatedCommandFailure,
+) -> Mapping[str, Any]:
+    # Independent from both the mutable-exception factory and dataclass
+    # constructor: a forged/object.__setattr__ snapshot cannot reach a receipt.
+    if type(failure) is not ValidatedCommandFailure:
+        raise ReleaseBuildError("failure receipt snapshot type is not exact")
+    if type(failure.command_role) is not str or failure.command_role != FAILURE_COMMAND_ROLE:
+        raise ReleaseBuildError("failure receipt snapshot role is invalid")
+    if type(failure.return_code) is not int or failure.return_code == 0:
+        raise ReleaseBuildError("failure receipt snapshot return code is invalid")
+    if type(failure.stdout) is not bytes:
+        raise ReleaseBuildError("failure receipt snapshot stdout is invalid")
+    if type(failure.junit_state) is not str or failure.junit_state not in FAILURE_JUNIT_STATES:
+        raise ReleaseBuildError("failure receipt snapshot JUnit state is invalid")
+    if failure.junit_state == "PRESENT":
+        if type(failure.junit) is not bytes or failure.junit_unsafe_reason is not None:
+            raise ReleaseBuildError("failure receipt PRESENT tuple is invalid")
+    elif failure.junit_state == "ABSENT":
+        if failure.junit is not None or failure.junit_unsafe_reason is not None:
+            raise ReleaseBuildError("failure receipt ABSENT tuple is invalid")
+    elif (
+        failure.junit is not None
+        or type(failure.junit_unsafe_reason) is not str
+        or failure.junit_unsafe_reason not in FAILURE_JUNIT_UNSAFE_REASONS
+    ):
+        raise ReleaseBuildError("failure receipt UNSAFE tuple is invalid")
+    if type(inputs) is not ReleaseInputs or type(inputs.source) is not SourceBundle:
+        raise ReleaseBuildError("failure receipt input types are not exact")
+    if type(attempt_id) is not str:
+        raise ReleaseBuildError("failure receipt attempt ID type is invalid")
+    _validate_exact_gate_a_attempt_id(inputs, attempt_id)
+    stdout = {
+        "bytes": len(failure.stdout),
+        "path": FAILURE_STDOUT_NAME,
+        "sha256": _sha256(failure.stdout),
+    }
+    junit: Mapping[str, Any]
+    if failure.junit_state == "ABSENT":
+        junit = {"state": "ABSENT"}
+    elif failure.junit_state == "PRESENT":
+        if failure.junit is None:
+            raise ReleaseBuildError("present failure JUnit bytes are absent")
+        junit = {
+            "bytes": len(failure.junit),
+            "path": FAILURE_JUNIT_NAME,
+            "sha256": _sha256(failure.junit),
+            "state": "PRESENT",
+        }
+    elif failure.junit_state == "UNSAFE":
+        if failure.junit_unsafe_reason not in FAILURE_JUNIT_UNSAFE_REASONS:
+            raise ReleaseBuildError("failure JUnit unsafe reason is not closed")
+        junit = {
+            "reason_code": failure.junit_unsafe_reason,
+            "state": "UNSAFE",
+        }
+    else:
+        raise ReleaseBuildError("failure JUnit state is not closed")
+    return {
+        "attempt_id": attempt_id,
+        "builder_identity": _failure_builder_identity(inputs),
+        "command_role": failure.command_role,
+        "junit_evidence": junit,
+        "release_input_sha256": inputs.release_input_sha256,
+        "return_code": failure.return_code,
+        "schema_version": FAILURE_EVIDENCE_SCHEMA,
+        "source_identity": _failure_source_identity(inputs),
+        "status": FAILURE_EVIDENCE_STATUS,
+        "stdout_evidence": stdout,
+    }
+
+
+def _failure_receipt(
+    *, inputs: ReleaseInputs, attempt_id: str, failure: Any,
+    _snapshot_factory: Callable[[Any], ValidatedCommandFailure] = (
+        _validated_command_failure
+    ),
+    _receipt_factory: Callable[..., Mapping[str, Any]] = (
+        _failure_receipt_from_validated
+    ),
+) -> Mapping[str, Any]:
+    candidate = _snapshot_factory(failure)
+    if type(candidate) is not ValidatedCommandFailure:
+        raise ReleaseBuildError("failure receipt factory returned a nonexact snapshot")
+    # A second frozen construction rechecks every primitive/tuple independently.
+    validated = ValidatedCommandFailure(
+        command_role=candidate.command_role,
+        return_code=candidate.return_code,
+        stdout=candidate.stdout,
+        junit_state=candidate.junit_state,
+        junit=candidate.junit,
+        junit_unsafe_reason=candidate.junit_unsafe_reason,
+    )
+    return _receipt_factory(
+        inputs=inputs, attempt_id=attempt_id, failure=validated
+    )
+
+
+def _write_failure_file_exclusive(
+    parent_fd: int, name: str, value: bytes,
+) -> int:
+    if name not in {FAILURE_STDOUT_NAME, FAILURE_JUNIT_NAME, FAILURE_RECEIPT_NAME}:
+        raise ReleaseBuildError("failure evidence filename is not closed")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW | _O_CLOEXEC
+    descriptor = os.open(name, flags, 0o440, dir_fd=parent_fd)
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != os.geteuid()
+            or before.st_gid != os.getegid()
+        ):
+            raise ReleaseBuildError(
+                f"new failure evidence is not owned single-link regular: {name}"
+            )
+        offset = 0
+        while offset < len(value):
+            written = os.write(descriptor, value[offset:])
+            if written <= 0:
+                raise ReleaseBuildError(f"short write for failure evidence: {name}")
+            offset += written
+        os.fchmod(descriptor, 0o440)
+        os.fsync(descriptor)
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(after.st_mode)
+            or after.st_nlink != 1
+            or stat.S_IMODE(after.st_mode) != 0o440
+            or after.st_uid != before.st_uid
+            or after.st_gid != before.st_gid
+            or (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
+            or after.st_size != len(value)
+        ):
+            raise ReleaseBuildError(f"failure evidence drifted while written: {name}")
+        _assert_no_posix_acl(descriptor, label=f"failure evidence {name}")
+        os.fsync(parent_fd)
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _verify_failure_file_at(
+    parent_fd: int, name: str, expected: bytes, held_fd: int,
+) -> None:
+    before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    flags = _READ_FILE_FLAGS | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(name, flags, dir_fd=parent_fd)
+    try:
+        opened = os.fstat(descriptor)
+        held = os.fstat(held_fd)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or stat.S_IMODE(opened.st_mode) != 0o440
+            or opened.st_uid != os.geteuid()
+            or opened.st_gid != os.getegid()
+            or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)
+            or (opened.st_dev, opened.st_ino) != (held.st_dev, held.st_ino)
+        ):
+            raise ReleaseBuildError(f"failure evidence link/type/race drift: {name}")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        after = os.fstat(descriptor)
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        stable = ("st_dev", "st_ino", "st_nlink", "st_size", "st_mtime_ns")
+        if any(getattr(opened, field) != getattr(after, field) for field in stable) or any(
+            getattr(after, field) != getattr(current, field) for field in stable
+        ):
+            raise ReleaseBuildError(f"failure evidence raced during verification: {name}")
+        if b"".join(chunks) != expected:
+            raise ReleaseBuildError(f"failure evidence content drift: {name}")
+        _assert_no_posix_acl(descriptor, label=f"failure evidence {name}")
+    finally:
+        os.close(descriptor)
+
+
+def _write_failure_evidence(
+    *, root: FailureEvidenceRoot, inputs: ReleaseInputs, attempt_id: str,
+    failure: Any,
+    _snapshot_factory: Callable[[Any], ValidatedCommandFailure] = (
+        _validated_command_failure
+    ),
+    _receipt_factory: Callable[..., Mapping[str, Any]] = (
+        _failure_receipt_from_validated
+    ),
+) -> Mapping[str, Any]:
+    # This is independent of `_failure_receipt`: no mutable exception attribute
+    # is trusted after this immutable reconstruction, and it happens before the
+    # bundle directory or any file can be created.
+    candidate = _snapshot_factory(failure)
+    if type(candidate) is not ValidatedCommandFailure:
+        raise ReleaseBuildError("failure writer factory returned a nonexact snapshot")
+    # This constructor has its own invariant checks and copies every primitive;
+    # later mutation of a forged candidate cannot affect filesystem bytes.
+    validated = ValidatedCommandFailure(
+        command_role=candidate.command_role,
+        return_code=candidate.return_code,
+        stdout=candidate.stdout,
+        junit_state=candidate.junit_state,
+        junit=candidate.junit,
+        junit_unsafe_reason=candidate.junit_unsafe_reason,
+    )
+    if type(inputs) is not ReleaseInputs or type(inputs.source) is not SourceBundle:
+        raise ReleaseBuildError("failure writer input types are not exact")
+    if type(attempt_id) is not str:
+        raise ReleaseBuildError("failure writer attempt ID type is invalid")
+    _validate_exact_gate_a_attempt_id(inputs, attempt_id)
+    receipt = _receipt_factory(
+        inputs=inputs, attempt_id=attempt_id, failure=validated
+    )
+    receipt_bytes = _canonical_bytes(receipt)
+    root_fd = _open_absolute_directory(root.path)
+    bundle_fd: Optional[int] = None
+    held_files: Dict[str, int] = {}
+    try:
+        root_metadata = _failure_root_metadata(
+            root_fd, path=root.path, attempt_id=attempt_id, require_empty=True
+        )
+        if (
+            root_metadata.st_dev,
+            root_metadata.st_ino,
+            root_metadata.st_uid,
+            root_metadata.st_gid,
+        ) != (root.device, root.inode, root.uid, root.gid):
+            raise ReleaseBuildError("failure-evidence root raced after authorization")
+        try:
+            bundle_fd = _mkdir_exclusive(root_fd, FAILURE_BUNDLE_NAME, 0o700)
+        except ReleaseBuildError as exc:
+            raise ReleaseBuildError("failure-evidence bundle collision") from exc
+        os.fchmod(bundle_fd, 0o700)
+        os.fsync(bundle_fd)
+        _assert_no_posix_acl(bundle_fd, label="failure-evidence bundle")
+        held_files[FAILURE_STDOUT_NAME] = _write_failure_file_exclusive(
+            bundle_fd, FAILURE_STDOUT_NAME, validated.stdout
+        )
+        if validated.junit is not None:
+            held_files[FAILURE_JUNIT_NAME] = _write_failure_file_exclusive(
+                bundle_fd, FAILURE_JUNIT_NAME, validated.junit
+            )
+        # The closed receipt is deliberately the final file created.
+        held_files[FAILURE_RECEIPT_NAME] = _write_failure_file_exclusive(
+            bundle_fd, FAILURE_RECEIPT_NAME, receipt_bytes
+        )
+        expected_files = {
+            FAILURE_STDOUT_NAME: validated.stdout,
+            FAILURE_RECEIPT_NAME: receipt_bytes,
+        }
+        if validated.junit is not None:
+            expected_files[FAILURE_JUNIT_NAME] = validated.junit
+        if set(_directory_names(bundle_fd)) != set(expected_files):
+            raise ReleaseBuildError("failure-evidence bundle has unexpected state")
+        for name, value in expected_files.items():
+            _verify_failure_file_at(bundle_fd, name, value, held_files[name])
+        os.fchmod(bundle_fd, 0o550)
+        os.fsync(bundle_fd)
+        sealed = os.fstat(bundle_fd)
+        if not stat.S_ISDIR(sealed.st_mode) or stat.S_IMODE(sealed.st_mode) != 0o550:
+            raise ReleaseBuildError("failure-evidence bundle did not seal")
+        os.fsync(root_fd)
+        if _directory_names(root_fd) != [FAILURE_BUNDLE_NAME]:
+            raise ReleaseBuildError("failure-evidence root has unexpected state")
+        current_bundle = os.open(FAILURE_BUNDLE_NAME, _READ_DIR_FLAGS, dir_fd=root_fd)
+        try:
+            current = os.fstat(current_bundle)
+            if (current.st_dev, current.st_ino) != (sealed.st_dev, sealed.st_ino):
+                raise ReleaseBuildError("failure-evidence bundle raced after sealing")
+            if stat.S_IMODE(current.st_mode) != 0o550:
+                raise ReleaseBuildError("failure-evidence bundle seal drift")
+            _assert_no_posix_acl(current_bundle, label="failure-evidence bundle")
+            if set(_directory_names(current_bundle)) != set(expected_files):
+                raise ReleaseBuildError("sealed failure-evidence bundle state drift")
+            for name, value in expected_files.items():
+                _verify_failure_file_at(
+                    current_bundle, name, value, held_files[name]
+                )
+        finally:
+            os.close(current_bundle)
+        current_root = _open_absolute_directory(root.path)
+        try:
+            metadata = _failure_root_metadata(
+                current_root,
+                path=root.path,
+                attempt_id=attempt_id,
+                require_empty=False,
+            )
+            if (metadata.st_dev, metadata.st_ino) != (root.device, root.inode):
+                raise ReleaseBuildError("failure-evidence root path raced")
+            if _directory_names(current_root) != [FAILURE_BUNDLE_NAME]:
+                raise ReleaseBuildError("failure-evidence root final state drift")
+        finally:
+            os.close(current_root)
+        return receipt
+    finally:
+        for descriptor in held_files.values():
+            os.close(descriptor)
+        if bundle_fd is not None:
+            os.close(bundle_fd)
+        os.close(root_fd)
+
+
 def build_release(
     inputs: ReleaseInputs, *, write: bool, authorized_release_input_sha256: Optional[str],
     interpreter: Path = Path("/usr/bin/python3"), temporary_parent: Path = Path("/tmp"),
+    attempt_id: Optional[str] = None, failure_evidence_root: Optional[Path] = None,
     fault_at: Optional[str] = None,
     runtime_executor: Callable[..., Mapping[str, Any]] = _execute_runtime_build,
     runtime_verifier: Callable[..., Any] = _verify_runtime_evidence,
@@ -2926,6 +3689,10 @@ def build_release(
         "write": write,
     }
     if not write:
+        if attempt_id is not None or failure_evidence_root is not None:
+            raise ReleaseBuildError(
+                "dry build forbids attempt and failure-evidence write arguments"
+            )
         return {**plan, "network_isolation": _network_isolation_contract()}
     if (
         authorized_release_input_sha256 is None
@@ -2938,8 +3705,16 @@ def build_release(
             "write requires the builder and dependency validator to execute from "
             "the reviewed content-addressed bootstrap source"
         )
+    if attempt_id is None or failure_evidence_root is None:
+        raise ReleaseBuildError(
+            "write requires exact attempt ID and failure-evidence root"
+        )
+    _validate_exact_gate_a_attempt_id(inputs, attempt_id)
     interpreter = _normalize_absolute_path(str(interpreter), label="interpreter")
     temporary_parent = _normalize_absolute_path(str(temporary_parent), label="temporary parent")
+    failure_evidence_root = _normalize_absolute_path(
+        str(failure_evidence_root), label="failure-evidence root"
+    )
     _validate_temporary_parent(
         temporary_parent,
         protected_roots=(
@@ -2947,10 +3722,31 @@ def build_release(
             inputs.release_parent,
             inputs.source.archive_path,
             inputs.wheelhouse,
+            failure_evidence_root,
             Path(EXPECTED_AUTHORITATIVE_REPO_ROOT),
             Path(EXPECTED_AUTHORITATIVE_DATA_ROOT),
         ),
     )
+    failure_root = _validate_failure_evidence_root(
+        failure_evidence_root,
+        attempt_id=attempt_id,
+        protected_roots=(
+            inputs.repo_root,
+            inputs.release_parent,
+            inputs.source.archive_path,
+            inputs.wheelhouse,
+            temporary_parent,
+            Path(EXPECTED_AUTHORITATIVE_REPO_ROOT),
+            Path(EXPECTED_AUTHORITATIVE_DATA_ROOT),
+        ),
+    )
+    if (
+        not isinstance(failure_root, FailureEvidenceRoot)
+        or failure_root.path != failure_evidence_root
+    ):
+        raise ReleaseBuildError(
+            "failure-evidence validator did not bind the exact authorized root"
+        )
     interpreter_fd, interpreter_stat = _open_regular_path(interpreter)
     os.close(interpreter_fd)
     if not interpreter_stat.st_mode & 0o111:
@@ -2971,6 +3767,7 @@ def build_release(
                 raise ReleaseBuildError(
                     "release address collision is incomplete or invalid; never reuse or repair it"
                 ) from exc
+            _reprove_failure_root_empty(failure_root, attempt_id=attempt_id)
             return {**verified, "status": "ALREADY_READY"}
         try:
             _fault(fault_at, "release_directory_created")
@@ -3001,13 +3798,23 @@ def build_release(
     with tempfile.TemporaryDirectory(
         prefix="caerus-alpha-gate-a-", dir=str(temporary_parent)
     ) as temporary:
-        runtime_evidence = runtime_executor(
-            release_dir=release_dir,
-            inputs=inputs,
-            interpreter=interpreter,
-            temporary_root=Path(temporary),
-        )
+        try:
+            runtime_evidence = runtime_executor(
+                release_dir=release_dir,
+                inputs=inputs,
+                interpreter=interpreter,
+                temporary_root=Path(temporary),
+            )
+        except ReleaseCommandFailure as exc:
+            _write_failure_evidence(
+                root=failure_root,
+                inputs=inputs,
+                attempt_id=attempt_id,
+                failure=exc,
+            )
+            raise
         _fault(fault_at, "runtime_validated")
+    _reprove_failure_root_empty(failure_root, attempt_id=attempt_id)
     release_fd = _open_absolute_directory(release_dir)
     try:
         _seal_tree_fd(release_fd)
@@ -3077,6 +3884,7 @@ def build_release(
     try:
         _write_exclusive(release_fd, RECEIPT_NAME, receipt_bytes, 0o444)
         _fault(fault_at, "receipt_written")
+        _reprove_failure_root_empty(failure_root, attempt_id=attempt_id)
         _write_exclusive(release_fd, READY_NAME, _canonical_bytes(ready), 0o444)
         os.fchmod(release_fd, 0o555)
         os.fsync(release_fd)
@@ -3093,7 +3901,9 @@ def build_release(
     finally:
         os.close(release_parent_fd)
     _fault(fault_at, "ready_written")
-    return verify_sealed_release(release_dir)
+    verified = verify_sealed_release(release_dir)
+    _reprove_failure_root_empty(failure_root, attempt_id=attempt_id)
+    return verified
 
 
 _CEREMONY_PATH_OPTIONS = {
@@ -3591,6 +4401,8 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--authorized-release-input-sha256")
     build.add_argument("--interpreter", type=Path, default=Path("/usr/bin/python3"))
     build.add_argument("--temporary-parent", type=Path, default=Path("/tmp"))
+    build.add_argument("--attempt-id")
+    build.add_argument("--failure-evidence-root", type=Path)
     build.add_argument(
         "--fault-at",
         choices=(
@@ -3663,6 +4475,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     authorized_release_input_sha256=arguments.authorized_release_input_sha256,
                     interpreter=arguments.interpreter,
                     temporary_parent=arguments.temporary_parent,
+                    attempt_id=arguments.attempt_id,
+                    failure_evidence_root=arguments.failure_evidence_root,
                     fault_at=arguments.fault_at,
                 )
     except (ReleaseBuildError, OSError, ValueError) as exc:

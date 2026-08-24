@@ -16,6 +16,9 @@ from projects.alpha_lab.factory import ceremony
 from projects.alpha_lab.release import gate_a_bootstrap as bootstrap
 
 
+_ATTEMPT_ID = "gate-a-1111111111111111-dddddddddddddddd"
+
+
 def _canonical(value) -> bytes:
     return gate._canonical_bytes(value)
 
@@ -271,7 +274,8 @@ def _minimal_release_inputs(tmp_path: Path, *, content_addressed: bool) -> gate.
     source = gate.SourceBundle(
         archive_path=tmp_path / "input/source.tar", archive_bytes=0,
         archive_sha256="a" * 64, archive_records=(), archive_directories=(),
-        source_manifest={}, source_manifest_bytes=b"{}",
+        source_manifest={"commit_sha": "1" * 40, "tree_oid_sha1": "2" * 40},
+        source_manifest_bytes=b"{}",
         source_manifest_sha256="b" * 64, file_manifest=(),
         file_manifest_bytes=b"[]", file_manifest_sha256="c" * 64,
     )
@@ -281,6 +285,72 @@ def _minimal_release_inputs(tmp_path: Path, *, content_addressed: bool) -> gate.
         release_parent=tmp_path / "release-parent", repo_root=tmp_path / "repo",
         lock_bytes=b"", wheel_manifest_bytes=b"",
         builder_origin={"content_addressed": content_addressed},
+    )
+
+
+def _failure_root(tmp_path: Path, attempt_id: str = _ATTEMPT_ID) -> Path:
+    root = tmp_path / attempt_id
+    root.mkdir(mode=0o700)
+    root.chmod(0o700)
+    return root
+
+
+def _failure_inputs(tmp_path: Path) -> gate.ReleaseInputs:
+    source_manifest = {
+        "commit_sha": "1" * 40,
+        "tree_oid_sha1": "2" * 40,
+    }
+    modules = []
+    for relative, content in (
+        (gate.BUILDER_RELATIVE_PATH, b"builder"),
+        (gate.DEPENDENCY_VALIDATOR_RELATIVE_PATH, b"dependencies"),
+    ):
+        modules.append(
+            {
+                "bytes": len(content),
+                "path": str(tmp_path / "bootstrap" / relative),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "source_relative_path": str(relative),
+            }
+        )
+    source = gate.SourceBundle(
+        archive_path=tmp_path / "source.tar",
+        archive_bytes=0,
+        archive_sha256="a" * 64,
+        archive_records=(),
+        archive_directories=(),
+        source_manifest=source_manifest,
+        source_manifest_bytes=_canonical(source_manifest),
+        source_manifest_sha256="b" * 64,
+        file_manifest=(),
+        file_manifest_bytes=b"[]",
+        file_manifest_sha256="c" * 64,
+    )
+    return gate.ReleaseInputs(
+        source=source,
+        release_input={},
+        release_input_bytes=b"{}",
+        release_input_sha256="d" * 64,
+        wheelhouse=tmp_path / "wheelhouse",
+        release_parent=tmp_path / "release-parent",
+        repo_root=tmp_path / "bootstrap",
+        lock_bytes=b"",
+        wheel_manifest_bytes=b"",
+        builder_origin={
+            "content_addressed": True,
+            "expected_bootstrap_root": str(tmp_path / "bootstrap"),
+            "modules": modules,
+            "repo_root": str(tmp_path / "bootstrap"),
+            "source_archive_sha256": "a" * 64,
+        },
+    )
+
+
+def _authorized_failure_root(tmp_path: Path, monkeypatch) -> gate.FailureEvidenceRoot:
+    root = _failure_root(tmp_path)
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
+    return gate._validate_failure_evidence_root(
+        root, attempt_id=_ATTEMPT_ID, protected_roots=()
     )
 
 
@@ -780,11 +850,13 @@ def test_write_network_failure_precedes_content_address_creation(
     inputs = _minimal_release_inputs(tmp_path, content_addressed=True)
     temporary_parent = tmp_path / "temporary"
     temporary_parent.mkdir()
+    failure_root = _failure_root(tmp_path)
 
     def reject_network():
         raise gate.ReleaseBuildError("inherited network isolation unavailable")
 
     monkeypatch.setattr(gate, "_network_isolation_contract", reject_network)
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
     with pytest.raises(gate.ReleaseBuildError, match="network isolation unavailable"):
         gate.build_release(
             inputs,
@@ -792,6 +864,8 @@ def test_write_network_failure_precedes_content_address_creation(
             authorized_release_input_sha256=inputs.release_input_sha256,
             interpreter=Path(sys._base_executable).resolve(),
             temporary_parent=temporary_parent,
+            attempt_id=_ATTEMPT_ID,
+            failure_evidence_root=failure_root,
         )
     assert not inputs.release_parent.exists()
 
@@ -860,6 +934,697 @@ def test_command_runs_without_a_substitutable_prefix(monkeypatch, tmp_path: Path
     monkeypatch.setattr(gate.subprocess, "run", fake_run)
     gate._run_command(["python", "test.py"], cwd=tmp_path, environment={})
     assert captured["command"] == ["python", "test.py"]
+
+
+def test_release_pytest_failure_captures_exact_combined_bytes_and_junit(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    stdout = b"exact\x00stdout\xff\n"
+    junit = b"<testsuites failures='1'/>\n"
+    (tmp_path / "pytest-results.xml").write_bytes(junit)
+
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(command, 7, stdout=stdout)
+
+    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+    with pytest.raises(gate.ReleaseCommandFailure) as captured:
+        gate._run_command(
+            ["fixed", "pytest"],
+            cwd=tmp_path,
+            environment={},
+            failure_role=gate.FAILURE_COMMAND_ROLE,
+            failure_temporary_root=tmp_path,
+        )
+    assert captured.value.command_role == "RELEASE_PYTEST"
+    assert captured.value.return_code == 7
+    assert captured.value.stdout == stdout
+    assert captured.value.junit == junit
+    assert captured.value.junit_state == "PRESENT"
+    assert captured.value.junit_unsafe_reason is None
+    assert stdout.decode("latin1") not in str(captured.value)
+
+
+def test_release_pytest_failure_records_explicit_absent_junit(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        gate.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, -9, stdout=b"terminated"
+        ),
+    )
+    with pytest.raises(gate.ReleaseCommandFailure) as captured:
+        gate._run_command(
+            ["fixed", "pytest"], cwd=tmp_path, environment={},
+            failure_role=gate.FAILURE_COMMAND_ROLE,
+            failure_temporary_root=tmp_path,
+        )
+    assert captured.value.return_code == -9
+    assert captured.value.junit is None
+    assert captured.value.junit_state == "ABSENT"
+    assert captured.value.junit_unsafe_reason is None
+
+
+def test_release_pytest_absent_junit_race_preserves_primary_evidence(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    real_stat = gate.os.stat
+
+    def racing_stat(path, *args, **kwargs):
+        if path == "pytest-results.xml":
+            (tmp_path / "raced-entry").write_bytes(b"x")
+            raise FileNotFoundError(path)
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(gate.os, "stat", racing_stat)
+    monkeypatch.setattr(
+        gate.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 1, stdout=b"\x00race\xff"
+        ),
+    )
+    with pytest.raises(gate.ReleaseCommandFailure) as captured:
+        gate._run_command(
+            ["fixed", "pytest"], cwd=tmp_path, environment={},
+            failure_role=gate.FAILURE_COMMAND_ROLE,
+            failure_temporary_root=tmp_path,
+        )
+    assert captured.value.stdout == b"\x00race\xff"
+    assert captured.value.junit_state == "UNSAFE"
+    assert captured.value.junit_unsafe_reason == "ABSENCE_RACE"
+    assert captured.value.junit is None
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    receipt = gate._write_failure_evidence(
+        root=root,
+        inputs=_failure_inputs(tmp_path),
+        attempt_id=_ATTEMPT_ID,
+        failure=captured.value,
+    )
+    assert (
+        root.path / gate.FAILURE_BUNDLE_NAME / gate.FAILURE_STDOUT_NAME
+    ).read_bytes() == b"\x00race\xff"
+    assert receipt["junit_evidence"] == {
+        "reason_code": "ABSENCE_RACE",
+        "state": "UNSAFE",
+    }
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "fifo"])
+def test_release_pytest_failure_persists_stdout_with_unsafe_junit(
+    monkeypatch, tmp_path: Path, kind: str,
+) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"junit")
+    junit = tmp_path / "pytest-results.xml"
+    if kind == "symlink":
+        junit.symlink_to(target)
+    elif kind == "hardlink":
+        os.link(target, junit)
+    else:
+        os.mkfifo(junit)
+    monkeypatch.setattr(
+        gate.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 1, stdout=b"\x00unsafe\xff"
+        ),
+    )
+    with pytest.raises(gate.ReleaseCommandFailure) as captured:
+        gate._run_command(
+            ["fixed", "pytest"], cwd=tmp_path, environment={},
+            failure_role=gate.FAILURE_COMMAND_ROLE,
+            failure_temporary_root=tmp_path,
+        )
+    assert captured.value.stdout == b"\x00unsafe\xff"
+    assert captured.value.junit_state == "UNSAFE"
+    assert captured.value.junit_unsafe_reason == "NOT_SINGLE_LINK_REGULAR"
+    assert captured.value.junit is None
+
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    receipt = gate._write_failure_evidence(
+        root=root,
+        inputs=_failure_inputs(tmp_path),
+        attempt_id=_ATTEMPT_ID,
+        failure=captured.value,
+    )
+    bundle = root.path / gate.FAILURE_BUNDLE_NAME
+    assert (bundle / gate.FAILURE_STDOUT_NAME).read_bytes() == b"\x00unsafe\xff"
+    assert receipt["junit_evidence"] == {
+        "reason_code": "NOT_SINGLE_LINK_REGULAR",
+        "state": "UNSAFE",
+    }
+    assert not (bundle / gate.FAILURE_JUNIT_NAME).exists()
+
+
+def test_monkeypatched_junit_observer_cannot_discard_primary_evidence(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    stdout = b"\x00primary\xff"
+    monkeypatch.setattr(
+        gate.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 3, stdout=stdout
+        ),
+    )
+    monkeypatch.setattr(
+        gate,
+        "_observe_junit",
+        lambda _root: (_ for _ in ()).throw(
+            RuntimeError("unsafe free text must never escape")
+        ),
+    )
+    with pytest.raises(gate.ReleaseCommandFailure) as captured:
+        gate._run_command(
+            ["fixed", "pytest"], cwd=tmp_path, environment={},
+            failure_role=gate.FAILURE_COMMAND_ROLE,
+            failure_temporary_root=tmp_path,
+        )
+    assert captured.value.stdout == stdout
+    assert captured.value.return_code == 3
+    assert captured.value.junit_state == "UNSAFE"
+    assert captured.value.junit_unsafe_reason == "OBSERVATION_ERROR"
+
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    receipt = gate._write_failure_evidence(
+        root=root,
+        inputs=_failure_inputs(tmp_path),
+        attempt_id=_ATTEMPT_ID,
+        failure=captured.value,
+    )
+    receipt_bytes = _canonical(receipt)
+    assert (
+        root.path / gate.FAILURE_BUNDLE_NAME / gate.FAILURE_STDOUT_NAME
+    ).read_bytes() == stdout
+    assert receipt["junit_evidence"] == {
+        "reason_code": "OBSERVATION_ERROR",
+        "state": "UNSAFE",
+    }
+    assert b"unsafe free text" not in receipt_bytes
+
+
+def test_release_command_failure_role_is_closed(monkeypatch, tmp_path: Path) -> None:
+    called = False
+
+    def fake_run(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("must not execute")
+
+    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+    with pytest.raises(gate.ReleaseBuildError, match="role is not closed"):
+        gate._run_command(
+            ["pip"], cwd=tmp_path, environment={},
+            failure_role="PIP_INSTALL", failure_temporary_root=tmp_path,
+        )
+    assert called is False
+
+
+@pytest.mark.parametrize("junit", [None, b"<testsuites failures='1'/>\n"])
+def test_failure_bundle_is_closed_exact_and_sealed(
+    monkeypatch, tmp_path: Path, junit: bytes | None,
+) -> None:
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    inputs = _failure_inputs(tmp_path)
+    stdout = b"private exact output\x00\xff"
+    failure = gate.ReleaseCommandFailure(
+        command_role=gate.FAILURE_COMMAND_ROLE,
+        return_code=1,
+        stdout=stdout,
+        junit=junit,
+    )
+    receipt = gate._write_failure_evidence(
+        root=root, inputs=inputs, attempt_id=_ATTEMPT_ID, failure=failure
+    )
+    bundle = root.path / gate.FAILURE_BUNDLE_NAME
+    expected_names = {gate.FAILURE_STDOUT_NAME, gate.FAILURE_RECEIPT_NAME}
+    if junit is not None:
+        expected_names.add(gate.FAILURE_JUNIT_NAME)
+    assert {path.name for path in bundle.iterdir()} == expected_names
+    assert stat.S_IMODE(bundle.stat().st_mode) == 0o550
+    for path in bundle.iterdir():
+        assert path.is_file() and not path.is_symlink()
+        assert path.stat().st_nlink == 1
+        assert stat.S_IMODE(path.stat().st_mode) == 0o440
+    assert (bundle / gate.FAILURE_STDOUT_NAME).read_bytes() == stdout
+    assert gate._strict_json(
+        (bundle / gate.FAILURE_RECEIPT_NAME).read_bytes(), label="failure receipt"
+    ) == receipt
+    assert set(receipt) == {
+        "attempt_id", "builder_identity", "command_role", "junit_evidence",
+        "release_input_sha256", "return_code", "schema_version",
+        "source_identity", "status", "stdout_evidence",
+    }
+    assert receipt["schema_version"] == gate.FAILURE_EVIDENCE_SCHEMA
+    assert receipt["status"] == "FAILED_CLOSED"
+    assert receipt["command_role"] == "RELEASE_PYTEST"
+    assert receipt["stdout_evidence"] == {
+        "bytes": len(stdout),
+        "path": "stdout.bin",
+        "sha256": hashlib.sha256(stdout).hexdigest(),
+    }
+    if junit is None:
+        assert receipt["junit_evidence"] == {"state": "ABSENT"}
+        assert not (bundle / gate.FAILURE_JUNIT_NAME).exists()
+    else:
+        assert receipt["junit_evidence"] == {
+            "bytes": len(junit), "path": "junit.xml",
+            "sha256": hashlib.sha256(junit).hexdigest(), "state": "PRESENT",
+        }
+        assert (bundle / gate.FAILURE_JUNIT_NAME).read_bytes() == junit
+    receipt_bytes = (bundle / gate.FAILURE_RECEIPT_NAME).read_bytes()
+    assert b"private exact output" not in receipt_bytes
+    assert b"argv" not in receipt_bytes and b"environment" not in receipt_bytes
+
+
+def test_failure_receipt_binds_source_and_builder_without_absolute_module_paths(
+    tmp_path: Path,
+) -> None:
+    inputs = _failure_inputs(tmp_path)
+    receipt = gate._failure_receipt(
+        inputs=inputs,
+        attempt_id=_ATTEMPT_ID,
+        failure=gate.ReleaseCommandFailure(
+            command_role=gate.FAILURE_COMMAND_ROLE,
+            return_code=2,
+            stdout=b"failure",
+            junit=None,
+        ),
+    )
+    assert receipt["source_identity"] == {
+        "archive_sha256": "a" * 64,
+        "commit_sha": "1" * 40,
+        "file_manifest_sha256": "c" * 64,
+        "source_manifest_sha256": "b" * 64,
+        "tree_oid_sha1": "2" * 40,
+    }
+    assert receipt["builder_identity"] == {
+        "modules": [
+            {
+                "bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "source_relative_path": str(relative),
+            }
+            for relative, content in (
+                (gate.BUILDER_RELATIVE_PATH, b"builder"),
+                (gate.DEPENDENCY_VALIDATOR_RELATIVE_PATH, b"dependencies"),
+            )
+        ],
+        "source_archive_sha256": "a" * 64,
+    }
+    assert str(tmp_path).encode() not in _canonical(receipt)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("mode", "mode 0700"),
+        ("dirty_file", "dedicated and empty"),
+        ("dirty_symlink", "dedicated and empty"),
+        ("dirty_fifo", "dedicated and empty"),
+        ("acl", "POSIX ACL"),
+        ("uid", "nonroot Gate A principal"),
+        ("gid", "nonroot Gate A principal"),
+    ],
+)
+def test_failure_root_rejects_mode_acl_owner_and_dirty_state(
+    monkeypatch, tmp_path: Path, mutation: str, message: str,
+) -> None:
+    root = _failure_root(tmp_path)
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
+    if mutation == "mode":
+        root.chmod(0o755)
+    elif mutation == "dirty_file":
+        (root / "unexpected").write_bytes(b"x")
+    elif mutation == "dirty_symlink":
+        (root / "unexpected").symlink_to(tmp_path)
+    elif mutation == "dirty_fifo":
+        os.mkfifo(root / "unexpected")
+    elif mutation == "acl":
+        monkeypatch.setattr(
+            gate.os, "listxattr", lambda _fd: ["system.posix_acl_access"]
+        )
+    elif mutation == "uid":
+        monkeypatch.setattr(gate.os, "geteuid", lambda: os.getuid() + 1000)
+    else:
+        monkeypatch.setattr(gate.os, "getegid", lambda: os.getgid() + 1000)
+    with pytest.raises(gate.ReleaseBuildError, match=message):
+        gate._validate_failure_evidence_root(
+            root, attempt_id=_ATTEMPT_ID, protected_roots=()
+        )
+
+
+def test_failure_root_rejects_attempt_drift_symlink_and_overlap(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    root = _failure_root(tmp_path)
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
+    with pytest.raises(gate.ReleaseBuildError, match="attempt ID"):
+        gate._validate_failure_evidence_root(
+            root, attempt_id="gate-a-not-closed", protected_roots=()
+        )
+    with pytest.raises(gate.ReleaseBuildError, match="bound to the attempt ID"):
+        gate._validate_failure_evidence_root(
+            root,
+            attempt_id="gate-a-1111111111111111-2222222222222222",
+            protected_roots=(),
+        )
+    with pytest.raises(gate.ReleaseBuildError, match="overlaps"):
+        gate._validate_failure_evidence_root(
+            root, attempt_id=_ATTEMPT_ID, protected_roots=(tmp_path,)
+        )
+    alias_parent = tmp_path / "alias-parent"
+    alias_parent.mkdir()
+    alias = alias_parent / _ATTEMPT_ID
+    alias.symlink_to(root)
+    with pytest.raises(OSError):
+        gate._validate_failure_evidence_root(
+            alias, attempt_id=_ATTEMPT_ID, protected_roots=()
+        )
+    missing = tmp_path / "missing" / _ATTEMPT_ID
+    with pytest.raises(OSError):
+        gate._validate_failure_evidence_root(
+            missing, attempt_id=_ATTEMPT_ID, protected_roots=()
+        )
+
+
+@pytest.mark.parametrize("mutation", ["mode", "acl", "dirty", "replaced"])
+def test_success_reproof_is_independent_and_exact(
+    monkeypatch, tmp_path: Path, mutation: str,
+) -> None:
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    # Disabling the initial validator cannot disable the success-boundary proof.
+    monkeypatch.setattr(
+        gate, "_validate_failure_evidence_root", lambda *_args, **_kwargs: root
+    )
+    if mutation == "mode":
+        root.path.chmod(0o755)
+    elif mutation == "acl":
+        monkeypatch.setattr(
+            gate.os, "listxattr", lambda _fd: ["system.posix_acl_default"]
+        )
+    elif mutation == "dirty":
+        (root.path / "rogue").write_bytes(b"x")
+    else:
+        original = tmp_path / "original-root"
+        root.path.rename(original)
+        root.path.mkdir(mode=0o700)
+        root.path.chmod(0o700)
+    with pytest.raises(gate.ReleaseBuildError):
+        gate._reprove_failure_root_empty(root, attempt_id=_ATTEMPT_ID)
+
+
+def test_failure_bundle_rejects_collision_and_root_path_race(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    inputs = _failure_inputs(tmp_path)
+    failure = gate.ReleaseCommandFailure(
+        command_role=gate.FAILURE_COMMAND_ROLE,
+        return_code=1,
+        stdout=b"failure",
+        junit=None,
+    )
+    (root.path / gate.FAILURE_BUNDLE_NAME).mkdir()
+    with pytest.raises(gate.ReleaseBuildError, match="dedicated and empty"):
+        gate._write_failure_evidence(
+            root=root, inputs=inputs, attempt_id=_ATTEMPT_ID, failure=failure
+        )
+
+    # A substituted path with the same name/mode cannot replace the authorized inode.
+    old = tmp_path / "authorized-root-old"
+    root.path.rename(old)
+    root.path.mkdir(mode=0o700)
+    root.path.chmod(0o700)
+    with pytest.raises(gate.ReleaseBuildError, match="raced after authorization"):
+        gate._write_failure_evidence(
+            root=root, inputs=inputs, attempt_id=_ATTEMPT_ID, failure=failure
+        )
+
+
+@pytest.mark.parametrize("replacement", ["symlink", "hardlink", "fifo"])
+def test_failure_bundle_rejects_leaf_replacement_race(
+    monkeypatch, tmp_path: Path, replacement: str,
+) -> None:
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    inputs = _failure_inputs(tmp_path)
+    original = gate._write_failure_file_exclusive
+    replaced = False
+
+    def replace_after_write(parent_fd, name, value):
+        nonlocal replaced
+        descriptor = original(parent_fd, name, value)
+        if name == gate.FAILURE_STDOUT_NAME and not replaced:
+            replaced = True
+            os.unlink(name, dir_fd=parent_fd)
+            if replacement == "symlink":
+                os.symlink("FAILURE_EVIDENCE.json", name, dir_fd=parent_fd)
+            elif replacement == "hardlink":
+                target = tmp_path / "race-target"
+                target.write_bytes(b"replacement")
+                os.link(target, name, dst_dir_fd=parent_fd)
+            else:
+                os.mkfifo(name, dir_fd=parent_fd)
+        return descriptor
+
+    monkeypatch.setattr(gate, "_write_failure_file_exclusive", replace_after_write)
+    with pytest.raises((gate.ReleaseBuildError, OSError)):
+        gate._write_failure_evidence(
+            root=root,
+            inputs=inputs,
+            attempt_id=_ATTEMPT_ID,
+            failure=gate.ReleaseCommandFailure(
+                command_role=gate.FAILURE_COMMAND_ROLE,
+                return_code=1,
+                stdout=b"failure",
+                junit=None,
+            ),
+        )
+
+
+def test_failure_receipt_is_created_last(monkeypatch, tmp_path: Path) -> None:
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    inputs = _failure_inputs(tmp_path)
+    original = gate._write_failure_file_exclusive
+    order = []
+
+    def record_order(parent_fd, name, value):
+        order.append(name)
+        return original(parent_fd, name, value)
+
+    monkeypatch.setattr(gate, "_write_failure_file_exclusive", record_order)
+    gate._write_failure_evidence(
+        root=root,
+        inputs=inputs,
+        attempt_id=_ATTEMPT_ID,
+        failure=gate.ReleaseCommandFailure(
+            command_role=gate.FAILURE_COMMAND_ROLE,
+            return_code=1,
+            stdout=b"failure",
+            junit=b"junit",
+        ),
+    )
+    assert order == [
+        gate.FAILURE_STDOUT_NAME,
+        gate.FAILURE_JUNIT_NAME,
+        gate.FAILURE_RECEIPT_NAME,
+    ]
+
+
+def test_failure_file_uses_exclusive_nofollow_and_fsync(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    parent = tmp_path / "bundle"
+    parent.mkdir()
+    parent_fd = gate._open_absolute_directory(parent)
+    real_open = gate.os.open
+    real_fsync = gate.os.fsync
+    opened_flags = []
+    synced = []
+
+    def capture_open(path, flags, *args, **kwargs):
+        if path == gate.FAILURE_STDOUT_NAME:
+            opened_flags.append(flags)
+        return real_open(path, flags, *args, **kwargs)
+
+    def capture_fsync(descriptor):
+        synced.append(descriptor)
+        return real_fsync(descriptor)
+
+    monkeypatch.setattr(gate.os, "open", capture_open)
+    monkeypatch.setattr(gate.os, "fsync", capture_fsync)
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
+    try:
+        descriptor = gate._write_failure_file_exclusive(
+            parent_fd, gate.FAILURE_STDOUT_NAME, b"exact"
+        )
+        try:
+            assert opened_flags[-1] & os.O_EXCL
+            assert opened_flags[-1] & os.O_CREAT
+            assert opened_flags[-1] & gate._O_NOFOLLOW
+            assert descriptor in synced
+            assert parent_fd in synced
+        finally:
+            os.close(descriptor)
+        with pytest.raises(FileExistsError):
+            gate._write_failure_file_exclusive(
+                parent_fd, gate.FAILURE_STDOUT_NAME, b"collision"
+            )
+    finally:
+        os.close(parent_fd)
+
+
+def test_failure_bundle_rejects_extra_entry_race(monkeypatch, tmp_path: Path) -> None:
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    inputs = _failure_inputs(tmp_path)
+    original = gate._write_failure_file_exclusive
+
+    def add_extra_after_receipt(parent_fd, name, value):
+        descriptor = original(parent_fd, name, value)
+        if name == gate.FAILURE_RECEIPT_NAME:
+            extra = os.open(
+                "unexpected",
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | gate._O_NOFOLLOW,
+                0o400,
+                dir_fd=parent_fd,
+            )
+            os.close(extra)
+        return descriptor
+
+    monkeypatch.setattr(gate, "_write_failure_file_exclusive", add_extra_after_receipt)
+    with pytest.raises(gate.ReleaseBuildError, match="unexpected state"):
+        gate._write_failure_evidence(
+            root=root,
+            inputs=inputs,
+            attempt_id=_ATTEMPT_ID,
+            failure=gate.ReleaseCommandFailure(
+                command_role=gate.FAILURE_COMMAND_ROLE,
+                return_code=1,
+                stdout=b"failure",
+                junit=None,
+            ),
+        )
+
+
+def test_dry_build_rejects_failure_write_arguments_without_mutation(
+    tmp_path: Path,
+) -> None:
+    inputs = _minimal_release_inputs(tmp_path, content_addressed=False)
+    with pytest.raises(gate.ReleaseBuildError, match="dry build forbids"):
+        gate.build_release(
+            inputs,
+            write=False,
+            authorized_release_input_sha256=None,
+            attempt_id=_ATTEMPT_ID,
+            failure_evidence_root=tmp_path / _ATTEMPT_ID,
+        )
+    assert not inputs.release_parent.exists()
+
+
+def test_write_build_requires_failure_authorization_before_mutation(tmp_path: Path) -> None:
+    inputs = _minimal_release_inputs(tmp_path, content_addressed=True)
+    with pytest.raises(gate.ReleaseBuildError, match="requires exact attempt ID"):
+        gate.build_release(
+            inputs,
+            write=True,
+            authorized_release_input_sha256=inputs.release_input_sha256,
+        )
+    assert not inputs.release_parent.exists()
+
+
+def test_attempt_id_is_exact_source_and_release_binding_before_write(
+    tmp_path: Path,
+) -> None:
+    inputs = _failure_inputs(tmp_path)
+    assert gate._expected_gate_a_attempt_id(inputs) == _ATTEMPT_ID
+    near_misses = [
+        "gate-a-0111111111111111-dddddddddddddddd",
+        "gate-a-1111111111111111-cddddddddddddddd",
+        "gate-a-1111111111111111-ddddddddddddddddd",
+    ]
+    for attempt_id in near_misses:
+        with pytest.raises(gate.ReleaseBuildError, match="identity binding"):
+            gate._validate_exact_gate_a_attempt_id(inputs, attempt_id)
+        with pytest.raises(gate.ReleaseBuildError, match="identity binding"):
+            gate._failure_receipt(
+                inputs=inputs,
+                attempt_id=attempt_id,
+                failure=gate.ReleaseCommandFailure(
+                    command_role=gate.FAILURE_COMMAND_ROLE,
+                    return_code=1,
+                    stdout=b"failed",
+                    junit=None,
+                ),
+            )
+
+
+def test_write_near_miss_attempt_and_root_path_fail_before_release_mutation(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    inputs = _minimal_release_inputs(tmp_path, content_addressed=True)
+    temporary_parent = tmp_path / "temporary"
+    temporary_parent.mkdir()
+    correct = gate._expected_gate_a_attempt_id(inputs)
+    near_miss = "gate-a-2111111111111111-dddddddddddddddd"
+    wrong_root = _failure_root(tmp_path, near_miss)
+    with pytest.raises(gate.ReleaseBuildError, match="identity binding"):
+        gate.build_release(
+            inputs,
+            write=True,
+            authorized_release_input_sha256=inputs.release_input_sha256,
+            temporary_parent=temporary_parent,
+            attempt_id=near_miss,
+            failure_evidence_root=wrong_root,
+        )
+    assert not inputs.release_parent.exists()
+
+    wrong_root.rmdir()
+    wrong_path = _failure_root(tmp_path, near_miss)
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
+    with pytest.raises(gate.ReleaseBuildError, match="bound to the attempt ID"):
+        gate.build_release(
+            inputs,
+            write=True,
+            authorized_release_input_sha256=inputs.release_input_sha256,
+            temporary_parent=temporary_parent,
+            attempt_id=correct,
+            failure_evidence_root=wrong_path,
+        )
+    assert not inputs.release_parent.exists()
+
+
+def test_disabled_validator_cannot_substitute_a_different_failure_root(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    inputs = _minimal_release_inputs(tmp_path, content_addressed=True)
+    temporary_parent = tmp_path / "temporary"
+    temporary_parent.mkdir()
+    authorized_path = _failure_root(tmp_path)
+    substitute_parent = tmp_path / "substitute"
+    substitute_parent.mkdir()
+    substitute_path = substitute_parent / _ATTEMPT_ID
+    substitute_path.mkdir(mode=0o700)
+    substitute_path.chmod(0o700)
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
+    substitute = gate._validate_failure_evidence_root(
+        substitute_path, attempt_id=_ATTEMPT_ID, protected_roots=()
+    )
+    monkeypatch.setattr(
+        gate, "_validate_failure_evidence_root",
+        lambda *_args, **_kwargs: substitute,
+    )
+    with pytest.raises(gate.ReleaseBuildError, match="exact authorized root"):
+        gate.build_release(
+            inputs,
+            write=True,
+            authorized_release_input_sha256=inputs.release_input_sha256,
+            temporary_parent=temporary_parent,
+            attempt_id=_ATTEMPT_ID,
+            failure_evidence_root=authorized_path,
+        )
+    assert not inputs.release_parent.exists()
 
 
 def test_network_isolation_fails_closed_off_linux(monkeypatch, tmp_path: Path) -> None:
@@ -1304,8 +2069,11 @@ def test_fake_runtime_build_writes_ready_then_real_verifier_reopens_chain(
     monkeypatch.setattr(gate, "_verify_runtime_evidence", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(gate, "_verify_executing_builder_is_bound", lambda _origin: None)
     monkeypatch.setattr(gate, "_network_isolation_contract", _fake_network)
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
     temporary_parent = tmp_path.parent / f"{tmp_path.name}-temporary"
     temporary_parent.mkdir()
+    attempt_id = gate._expected_gate_a_attempt_id(inputs)
+    failure_root = _failure_root(tmp_path, attempt_id)
     copied_interpreter = temporary_parent / "python"
     copied_interpreter.write_bytes(Path(sys._base_executable).resolve().read_bytes())
     copied_interpreter.chmod(0o755)
@@ -1313,16 +2081,399 @@ def test_fake_runtime_build_writes_ready_then_real_verifier_reopens_chain(
         inputs, write=True,
         authorized_release_input_sha256=inputs.release_input_sha256,
         interpreter=copied_interpreter, temporary_parent=temporary_parent,
+        attempt_id=attempt_id, failure_evidence_root=failure_root,
         runtime_executor=fake_runtime, runtime_verifier=lambda *_args, **_kwargs: None,
     )
     release = release_parent / "releases/sha256" / inputs.release_input_sha256
     assert result["status"] == "PASS"
+    assert list(failure_root.iterdir()) == []
     assert (release / gate.READY_NAME).is_file()
     reopened = gate.verify_sealed_release(release)
     assert reopened["ready_sha256"] == result["ready_sha256"]
     assert reopened["atlas_gate_e_runtime_receipt"] == result[
         "atlas_gate_e_runtime_receipt"
     ]
+    already_ready = gate.build_release(
+        inputs, write=True,
+        authorized_release_input_sha256=inputs.release_input_sha256,
+        interpreter=copied_interpreter, temporary_parent=temporary_parent,
+        attempt_id=attempt_id, failure_evidence_root=failure_root,
+        runtime_executor=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("ALREADY_READY must not execute runtime")
+        ),
+        runtime_verifier=lambda *_args, **_kwargs: None,
+    )
+    assert already_ready["status"] == "ALREADY_READY"
+    assert list(failure_root.iterdir()) == []
+
+    authorized_root = gate._validate_failure_evidence_root(
+        failure_root, attempt_id=attempt_id, protected_roots=()
+    )
+    monkeypatch.setattr(
+        gate, "_validate_failure_evidence_root",
+        lambda *_args, **_kwargs: authorized_root,
+    )
+    real_verify = gate.verify_sealed_release
+
+    def verify_then_dirty(release_dir):
+        verified = real_verify(release_dir)
+        (failure_root / "rogue").write_bytes(b"not success")
+        return verified
+
+    monkeypatch.setattr(gate, "verify_sealed_release", verify_then_dirty)
+    with pytest.raises(gate.ReleaseBuildError, match="nonempty at successful boundary"):
+        gate.build_release(
+            inputs, write=True,
+            authorized_release_input_sha256=inputs.release_input_sha256,
+            interpreter=copied_interpreter, temporary_parent=temporary_parent,
+            attempt_id=attempt_id, failure_evidence_root=failure_root,
+            runtime_executor=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("ALREADY_READY must not execute runtime")
+            ),
+            runtime_verifier=lambda *_args, **_kwargs: None,
+        )
+
+
+def test_write_build_persists_pytest_failure_before_temporary_cleanup(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    inputs = _failure_inputs(tmp_path)
+    inputs.release_parent.mkdir()
+    temporary_parent = tmp_path / "temporary"
+    temporary_parent.mkdir()
+    failure_root_path = _failure_root(tmp_path)
+    interpreter = tmp_path / "python"
+    interpreter.write_bytes(Path(sys._base_executable).resolve().read_bytes())
+    interpreter.chmod(0o755)
+    transient = None
+
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
+    monkeypatch.setattr(gate, "_network_isolation_contract", _fake_network)
+    monkeypatch.setattr(
+        gate, "_materialize_source_store", lambda *_args, **_kwargs: {"status": "READY"}
+    )
+    monkeypatch.setattr(gate, "_extract_tar_exact", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gate, "_copy_wheelhouse", lambda *_args, **_kwargs: None)
+
+    forged = object.__new__(gate.ValidatedCommandFailure)
+    object.__setattr__(forged, "command_role", "BAD")
+    object.__setattr__(forged, "return_code", 0)
+    object.__setattr__(forged, "stdout", "not-bytes")
+    object.__setattr__(forged, "junit_state", "PRESENT")
+    object.__setattr__(forged, "junit", None)
+    object.__setattr__(forged, "junit_unsafe_reason", "free text")
+    monkeypatch.setattr(
+        gate, "_validated_command_failure", lambda _failure: forged
+    )
+    monkeypatch.setattr(
+        gate,
+        "_failure_receipt_from_validated",
+        lambda **_kwargs: {"status": "BYPASSED"},
+    )
+
+    def fail_runtime(*, temporary_root, **_kwargs):
+        nonlocal transient
+        transient = temporary_root
+        (temporary_root / "ephemeral").write_bytes(b"removed after evidence write")
+        raise gate.ReleaseCommandFailure(
+            command_role=gate.FAILURE_COMMAND_ROLE,
+            return_code=1,
+            stdout=b"exact failed pytest output",
+            junit=b"<testsuites failures='1'/>\n",
+        )
+
+    with pytest.raises(gate.ReleaseCommandFailure, match="RELEASE_PYTEST"):
+        gate.build_release(
+            inputs,
+            write=True,
+            authorized_release_input_sha256=inputs.release_input_sha256,
+            interpreter=interpreter,
+            temporary_parent=temporary_parent,
+            attempt_id=_ATTEMPT_ID,
+            failure_evidence_root=failure_root_path,
+            runtime_executor=fail_runtime,
+        )
+    assert transient is not None and not transient.exists()
+    assert list(temporary_parent.iterdir()) == []
+    bundle = failure_root_path / gate.FAILURE_BUNDLE_NAME
+    assert (bundle / gate.FAILURE_STDOUT_NAME).read_bytes() == b"exact failed pytest output"
+    assert (bundle / gate.FAILURE_JUNIT_NAME).read_bytes() == b"<testsuites failures='1'/>\n"
+    receipt = gate._strict_json(
+        (bundle / gate.FAILURE_RECEIPT_NAME).read_bytes(), label="failure receipt"
+    )
+    assert receipt["status"] == "FAILED_CLOSED"
+    assert receipt["attempt_id"] == _ATTEMPT_ID
+    assert not (inputs.release_parent / "releases/sha256" / inputs.release_input_sha256 / gate.READY_NAME).exists()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "command_role",
+        "return_bool",
+        "return_zero",
+        "stdout_bytearray",
+        "stdout_subclass",
+        "state_unknown",
+        "present_without_bytes",
+        "present_with_reason",
+        "present_bytes_subclass",
+        "absent_with_bytes",
+        "absent_with_reason",
+        "unsafe_with_bytes",
+        "unsafe_without_reason",
+        "unsafe_free_reason",
+        "subclass",
+        "proxy_subclass",
+    ],
+)
+def test_full_build_rejects_mutated_or_nonexact_failure_before_bundle_write(
+    tmp_path: Path, monkeypatch, mutation: str,
+) -> None:
+    inputs = _failure_inputs(tmp_path)
+    inputs.release_parent.mkdir()
+    temporary_parent = tmp_path / "temporary"
+    temporary_parent.mkdir()
+    failure_root_path = _failure_root(tmp_path)
+    interpreter = tmp_path / "python"
+    interpreter.write_bytes(Path(sys._base_executable).resolve().read_bytes())
+    interpreter.chmod(0o755)
+
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
+    monkeypatch.setattr(gate, "_network_isolation_contract", _fake_network)
+    monkeypatch.setattr(
+        gate, "_materialize_source_store", lambda *_args, **_kwargs: {"status": "READY"}
+    )
+    monkeypatch.setattr(gate, "_extract_tar_exact", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gate, "_copy_wheelhouse", lambda *_args, **_kwargs: None)
+
+    forged = object.__new__(gate.ValidatedCommandFailure)
+    object.__setattr__(forged, "command_role", "BAD")
+    object.__setattr__(forged, "return_code", 0)
+    object.__setattr__(forged, "stdout", "not-bytes")
+    object.__setattr__(forged, "junit_state", "PRESENT")
+    object.__setattr__(forged, "junit", None)
+    object.__setattr__(forged, "junit_unsafe_reason", "free text")
+    monkeypatch.setattr(
+        gate, "_validated_command_failure", lambda _failure: forged
+    )
+    monkeypatch.setattr(
+        gate,
+        "_failure_receipt_from_validated",
+        lambda **_kwargs: {"status": "BYPASSED"},
+    )
+
+    class BytesSubclass(bytes):
+        pass
+
+    class FailureSubclass(gate.ReleaseCommandFailure):
+        pass
+
+    class FailureProxy(gate.ReleaseCommandFailure):
+        def __getattribute__(self, name):
+            if name == "stdout":
+                return b"proxy"
+            return super().__getattribute__(name)
+
+    def mutated_failure():
+        failure_class = (
+            FailureSubclass if mutation == "subclass"
+            else FailureProxy if mutation == "proxy_subclass"
+            else gate.ReleaseCommandFailure
+        )
+        failure = failure_class(
+            command_role=gate.FAILURE_COMMAND_ROLE,
+            return_code=1,
+            stdout=b"primary",
+            junit=b"junit",
+        )
+        if mutation == "command_role":
+            failure.command_role = "NOT_RELEASE_PYTEST"
+        elif mutation == "return_bool":
+            failure.return_code = True
+        elif mutation == "return_zero":
+            failure.return_code = 0
+        elif mutation == "stdout_bytearray":
+            failure.stdout = bytearray(b"primary")
+        elif mutation == "stdout_subclass":
+            failure.stdout = BytesSubclass(b"primary")
+        elif mutation == "state_unknown":
+            failure.junit_state = "UNKNOWN"
+        elif mutation == "present_without_bytes":
+            failure.junit = None
+        elif mutation == "present_with_reason":
+            failure.junit_unsafe_reason = "OBSERVATION_ERROR"
+        elif mutation == "present_bytes_subclass":
+            failure.junit = BytesSubclass(b"junit")
+        elif mutation == "absent_with_bytes":
+            failure.junit_state = "ABSENT"
+        elif mutation == "absent_with_reason":
+            failure.junit_state = "ABSENT"
+            failure.junit = None
+            failure.junit_unsafe_reason = "OBSERVATION_ERROR"
+        elif mutation == "unsafe_with_bytes":
+            failure.junit_state = "UNSAFE"
+            failure.junit_unsafe_reason = "OBSERVATION_ERROR"
+        elif mutation == "unsafe_without_reason":
+            failure.junit_state = "UNSAFE"
+            failure.junit = None
+        elif mutation == "unsafe_free_reason":
+            failure.junit_state = "UNSAFE"
+            failure.junit = None
+            failure.junit_unsafe_reason = "raw /tmp/path and free text"
+        return failure
+
+    def fail_runtime(**_kwargs):
+        raise mutated_failure()
+
+    with pytest.raises(gate.ReleaseBuildError):
+        gate.build_release(
+            inputs,
+            write=True,
+            authorized_release_input_sha256=inputs.release_input_sha256,
+            interpreter=interpreter,
+            temporary_parent=temporary_parent,
+            attempt_id=_ATTEMPT_ID,
+            failure_evidence_root=failure_root_path,
+            runtime_executor=fail_runtime,
+        )
+    assert list(failure_root_path.iterdir()) == []
+    assert not (failure_root_path / gate.FAILURE_BUNDLE_NAME).exists()
+
+
+def test_failure_receipt_and_writer_reject_plain_proxy_before_any_write(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    class PlainProxy:
+        command_role = gate.FAILURE_COMMAND_ROLE
+        return_code = 1
+        stdout = b"primary"
+        junit_state = "ABSENT"
+        junit = None
+        junit_unsafe_reason = None
+
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    inputs = _failure_inputs(tmp_path)
+    proxy = PlainProxy()
+    with pytest.raises(gate.ReleaseBuildError, match="exact ReleaseCommandFailure"):
+        gate._failure_receipt(
+            inputs=inputs, attempt_id=_ATTEMPT_ID, failure=proxy
+        )
+    monkeypatch.setattr(
+        gate, "_failure_receipt", lambda **_kwargs: {"status": "BYPASSED"}
+    )
+    with pytest.raises(gate.ReleaseBuildError, match="exact ReleaseCommandFailure"):
+        gate._write_failure_evidence(
+            root=root, inputs=inputs, attempt_id=_ATTEMPT_ID, failure=proxy
+        )
+    assert list(root.path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {
+            "command_role": "BAD", "return_code": 1, "stdout": b"x",
+            "junit_state": "ABSENT", "junit": None,
+            "junit_unsafe_reason": None,
+        },
+        {
+            "command_role": gate.FAILURE_COMMAND_ROLE, "return_code": 0,
+            "stdout": b"x", "junit_state": "ABSENT", "junit": None,
+            "junit_unsafe_reason": None,
+        },
+        {
+            "command_role": gate.FAILURE_COMMAND_ROLE, "return_code": 1,
+            "stdout": "not-bytes", "junit_state": "ABSENT", "junit": None,
+            "junit_unsafe_reason": None,
+        },
+        {
+            "command_role": gate.FAILURE_COMMAND_ROLE, "return_code": 1,
+            "stdout": b"x", "junit_state": "PRESENT", "junit": None,
+            "junit_unsafe_reason": None,
+        },
+    ],
+)
+def test_validated_failure_constructor_enforces_all_invariants(values) -> None:
+    with pytest.raises(gate.ReleaseBuildError):
+        gate.ValidatedCommandFailure(**values)
+
+
+def test_writer_rechecks_forged_snapshot_even_with_explicit_factory(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    forged = object.__new__(gate.ValidatedCommandFailure)
+    object.__setattr__(forged, "command_role", "BAD")
+    object.__setattr__(forged, "return_code", 0)
+    object.__setattr__(forged, "stdout", "not-bytes")
+    object.__setattr__(forged, "junit_state", "PRESENT")
+    object.__setattr__(forged, "junit", None)
+    object.__setattr__(forged, "junit_unsafe_reason", "free text")
+    root = _authorized_failure_root(tmp_path, monkeypatch)
+    with pytest.raises(gate.ReleaseBuildError):
+        gate._write_failure_evidence(
+            root=root,
+            inputs=_failure_inputs(tmp_path),
+            attempt_id=_ATTEMPT_ID,
+            failure=gate.ReleaseCommandFailure(
+                command_role=gate.FAILURE_COMMAND_ROLE,
+                return_code=1,
+                stdout=b"valid",
+                junit=None,
+            ),
+            _snapshot_factory=lambda _failure: forged,
+        )
+    assert list(root.path.iterdir()) == []
+
+
+def test_disabled_initial_validator_cannot_hide_runtime_rogue_success_artifact(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    inputs = _failure_inputs(tmp_path)
+    inputs.release_parent.mkdir()
+    temporary_parent = tmp_path / "temporary"
+    temporary_parent.mkdir()
+    failure_root_path = _failure_root(tmp_path)
+    interpreter = tmp_path / "python"
+    interpreter.write_bytes(Path(sys._base_executable).resolve().read_bytes())
+    interpreter.chmod(0o755)
+
+    monkeypatch.setattr(gate.os, "listxattr", lambda _fd: [], raising=False)
+    authorized = gate._validate_failure_evidence_root(
+        failure_root_path, attempt_id=_ATTEMPT_ID, protected_roots=()
+    )
+    monkeypatch.setattr(
+        gate, "_validate_failure_evidence_root",
+        lambda *_args, **_kwargs: authorized,
+    )
+    monkeypatch.setattr(gate, "_network_isolation_contract", _fake_network)
+    monkeypatch.setattr(
+        gate, "_materialize_source_store", lambda *_args, **_kwargs: {"status": "READY"}
+    )
+    monkeypatch.setattr(gate, "_extract_tar_exact", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gate, "_copy_wheelhouse", lambda *_args, **_kwargs: None)
+
+    def rogue_runtime(**_kwargs):
+        (failure_root_path / "rogue").write_bytes(b"must prevent READY")
+        return {}
+
+    with pytest.raises(gate.ReleaseBuildError, match="nonempty at successful boundary"):
+        gate.build_release(
+            inputs,
+            write=True,
+            authorized_release_input_sha256=inputs.release_input_sha256,
+            interpreter=interpreter,
+            temporary_parent=temporary_parent,
+            attempt_id=_ATTEMPT_ID,
+            failure_evidence_root=failure_root_path,
+            runtime_executor=rogue_runtime,
+        )
+    release = (
+        inputs.release_parent / "releases/sha256" / inputs.release_input_sha256
+    )
+    assert not (release / gate.READY_NAME).exists()
+    assert not (release / gate.RECEIPT_NAME).exists()
+    assert not (release / gate.BUILT_MANIFEST_NAME).exists()
 
 
 @pytest.mark.parametrize(
@@ -1693,3 +2844,37 @@ def test_release_builder_parser_disables_write_abbreviation() -> None:
     ]
     with pytest.raises(SystemExit):
         gate._parser().parse_args(["build", *common, "--wri"])
+
+
+def test_preflight_parser_forbids_failure_write_arguments() -> None:
+    common = [
+        "--repo-root", "/repo", "--source-archive", "/source.tar",
+        "--source-manifest", "/source.json", "--file-manifest", "/files.json",
+        "--wheelhouse", "/wheels", "--release-input-manifest", "/input.json",
+        "--release-parent", "/release",
+    ]
+    with pytest.raises(SystemExit):
+        gate._parser().parse_args(
+            ["preflight", *common, "--attempt-id", _ATTEMPT_ID]
+        )
+    with pytest.raises(SystemExit):
+        gate._parser().parse_args(
+            ["preflight", *common, "--failure-evidence-root", "/failure"]
+        )
+
+
+def test_build_parser_accepts_exact_failure_authorization_arguments() -> None:
+    common = [
+        "--repo-root", "/repo", "--source-archive", "/source.tar",
+        "--source-manifest", "/source.json", "--file-manifest", "/files.json",
+        "--wheelhouse", "/wheels", "--release-input-manifest", "/input.json",
+        "--release-parent", "/release",
+    ]
+    arguments = gate._parser().parse_args(
+        [
+            "build", *common, "--write", "--attempt-id", _ATTEMPT_ID,
+            "--failure-evidence-root", f"/failure/{_ATTEMPT_ID}",
+        ]
+    )
+    assert arguments.attempt_id == _ATTEMPT_ID
+    assert arguments.failure_evidence_root == Path(f"/failure/{_ATTEMPT_ID}")
