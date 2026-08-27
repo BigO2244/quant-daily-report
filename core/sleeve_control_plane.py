@@ -26,6 +26,23 @@ ENVELOPE_SCHEMA_VERSION = "caerus_sleeve_evaluation_v1"
 BATCH_SCHEMA_VERSION = "caerus_all_sleeve_evaluation_v1"
 TERMINAL_STATUSES = ("OK", "NO_OPPORTUNITY", "BLOCKED", "FAILED")
 ACTIVE_LIFECYCLE_STATUSES = frozenset({"research", "shadow", "paper"})
+ORION_DECISION_LINEAGE_SCHEMA = "caerus.orion_decision_lineage.v1"
+ORION_DECISION_LINEAGE_HASH_FIELDS = (
+    "market_data_hash",
+    "normalized_panel_hash",
+    "feature_hash",
+    "full_rank_history_hash",
+    "rank_table_hash",
+    "target_weights_hash",
+)
+ORION_DECISION_LINEAGE_STAGES = (
+    "market_data",
+    "normalized_panel",
+    "features",
+    "full_rank_history",
+    "current_rank_table",
+    "target_weights",
+)
 
 
 class SleeveRegistryIntegrityError(ValueError):
@@ -34,6 +51,243 @@ class SleeveRegistryIntegrityError(ValueError):
 
 class SleeveEvaluationBlocked(RuntimeError):
     """Expected inability to evaluate due to a declared dependency or gate."""
+
+
+def _canonical_payload_hash(payload: Any) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def validate_orion_decision_lineage(
+    source_payload: Mapping[str, Any],
+    *,
+    effective_trade_date: str,
+    previous_source_payload: Mapping[str, Any] | None = None,
+) -> list[str]:
+    """Validate Orion's causal computation chain for capital use.
+
+    An unchanged target is allowed when fresh feature/rank computation supports
+    it. A child stage that is byte-identical after its direct parent changed is
+    treated as suspicious and fails closed.
+    """
+
+    prefix = "orion_lineage"
+    if source_payload.get("decision_eligible") is not True:
+        failures = [f"{prefix}:source_decision_not_eligible"]
+    else:
+        failures = []
+    if source_payload.get("observation_status") != "OK":
+        failures.append(f"{prefix}:source_observation:not_ok")
+    if source_payload.get("data_status") != "OK":
+        failures.append(f"{prefix}:source_data:not_ok")
+    lineage = source_payload.get("decision_lineage")
+    if not isinstance(lineage, Mapping):
+        return [*failures, f"{prefix}:missing"]
+    if lineage.get("schema_version") != ORION_DECISION_LINEAGE_SCHEMA:
+        failures.append(f"{prefix}:invalid_schema")
+
+    for field in ORION_DECISION_LINEAGE_HASH_FIELDS:
+        value = str(lineage.get(field) or "")
+        if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+            failures.append(f"{prefix}:{field}:invalid")
+
+    for field in (
+        "trade_date",
+        "effective_trade_date",
+        "market_data_asof",
+        "generated_at_utc",
+        "model_version",
+        "source_variant",
+    ):
+        if not str(lineage.get(field) or "").strip():
+            failures.append(f"{prefix}:{field}:missing")
+    for field in ("parent_artifact_hashes", "coverage", "stage_diagnostics"):
+        if not isinstance(lineage.get(field), Mapping) or not lineage.get(field):
+            failures.append(f"{prefix}:{field}:missing")
+    if not isinstance(lineage.get("selection_trace"), (list, Mapping)):
+        failures.append(f"{prefix}:selection_trace:invalid")
+    if str(lineage.get("effective_trade_date") or "") != effective_trade_date:
+        failures.append(f"{prefix}:effective_trade_date:mismatch")
+    if str(lineage.get("trade_date") or "") != effective_trade_date:
+        failures.append(f"{prefix}:trade_date:mismatch")
+    if source_payload.get("coverage_status") != "OK":
+        failures.append(f"{prefix}:source_coverage:not_ok")
+    coverage = lineage.get("coverage")
+    if isinstance(coverage, Mapping):
+        if coverage.get("status") != "OK":
+            failures.append(f"{prefix}:coverage:not_ok")
+        if str(coverage.get("current_session") or "") != effective_trade_date:
+            failures.append(f"{prefix}:coverage:current_session_mismatch")
+        anchors = coverage.get("required_anchor_dates")
+        if not isinstance(anchors, (list, tuple)) or not anchors:
+            failures.append(f"{prefix}:coverage:required_anchor_dates_missing")
+        else:
+            for anchor in anchors:
+                try:
+                    if dt.date.fromisoformat(str(anchor)) >= dt.date.fromisoformat(
+                        effective_trade_date
+                    ):
+                        failures.append(f"{prefix}:coverage:anchor_not_prior")
+                except ValueError:
+                    failures.append(f"{prefix}:coverage:anchor_invalid")
+        if coverage.get("missing_current_session_symbols") != []:
+            failures.append(f"{prefix}:coverage:current_session_incomplete")
+        missing_anchors = coverage.get("missing_required_anchor_symbols")
+        if not isinstance(missing_anchors, Mapping) or any(
+            bool(symbols) for symbols in missing_anchors.values()
+        ):
+            failures.append(f"{prefix}:coverage:anchors_incomplete")
+
+    stage_diagnostics = lineage.get("stage_diagnostics")
+    if isinstance(stage_diagnostics, Mapping):
+        if set(stage_diagnostics) != set(ORION_DECISION_LINEAGE_STAGES):
+            failures.append(f"{prefix}:stage_diagnostics:stage_set_mismatch")
+        for stage in ORION_DECISION_LINEAGE_STAGES:
+            diagnostic = stage_diagnostics.get(stage)
+            stage_prefix = f"{prefix}:stage_diagnostics:{stage}"
+            if not isinstance(diagnostic, Mapping):
+                failures.append(f"{stage_prefix}:missing")
+                continue
+            if diagnostic.get("stage") != stage:
+                failures.append(f"{stage_prefix}:identity_mismatch")
+            if not str(diagnostic.get("source_identity") or "").strip():
+                failures.append(f"{stage_prefix}:source_identity_missing")
+            for count_field in ("row_count", "symbol_count"):
+                value = diagnostic.get(count_field)
+                minimum = 0 if stage == "target_weights" else 1
+                if (
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value < minimum
+                ):
+                    failures.append(f"{stage_prefix}:{count_field}_invalid")
+            if str(diagnostic.get("max_market_timestamp") or "") != effective_trade_date:
+                failures.append(f"{stage_prefix}:max_market_timestamp_mismatch")
+
+    try:
+        market_asof = dt.datetime.fromisoformat(
+            str(lineage.get("market_data_asof") or "").replace("Z", "+00:00")
+        )
+        if market_asof.date().isoformat() != effective_trade_date:
+            failures.append(f"{prefix}:market_data_asof:mismatch")
+    except ValueError:
+        failures.append(f"{prefix}:market_data_asof:invalid")
+    try:
+        generated_at = dt.datetime.fromisoformat(
+            str(lineage.get("generated_at_utc") or "").replace("Z", "+00:00")
+        )
+        if generated_at.tzinfo is None or generated_at.utcoffset() != dt.timedelta(0):
+            failures.append(f"{prefix}:generated_at_utc:not_utc")
+    except ValueError:
+        failures.append(f"{prefix}:generated_at_utc:invalid")
+
+    source_variant = str(source_payload.get("source_variant") or "").strip()
+    model_version = str(lineage.get("model_version") or "").strip()
+    if source_variant and model_version != source_variant:
+        failures.append(f"{prefix}:model_version:mismatch")
+    if source_variant and str(lineage.get("source_variant") or "") != source_variant:
+        failures.append(f"{prefix}:source_variant:mismatch")
+
+    parents = lineage.get("parent_artifact_hashes")
+    if isinstance(parents, Mapping):
+        expected_parents = {
+            "normalized_panel": lineage.get("market_data_hash"),
+            "features": lineage.get("normalized_panel_hash"),
+            "full_rank_history": lineage.get("feature_hash"),
+            "current_rank_table": lineage.get("full_rank_history_hash"),
+            "target_weights": lineage.get("rank_table_hash"),
+        }
+        for stage, expected_hash in expected_parents.items():
+            if parents.get(stage) != expected_hash:
+                failures.append(f"{prefix}:parent_artifact_hashes:{stage}:mismatch")
+
+    weights = source_payload.get("target_weights")
+    if isinstance(weights, Mapping):
+        try:
+            normalized_weights = {
+                str(symbol).strip().upper(): round(float(weight), 6)
+                for symbol, weight in sorted(weights.items(), key=lambda item: str(item[0]))
+            }
+            if _canonical_payload_hash(normalized_weights) != lineage.get(
+                "target_weights_hash"
+            ):
+                failures.append(f"{prefix}:target_weights_hash:mismatch")
+            target_diagnostic = (
+                stage_diagnostics.get("target_weights")
+                if isinstance(stage_diagnostics, Mapping)
+                else None
+            )
+            if isinstance(target_diagnostic, Mapping) and (
+                target_diagnostic.get("row_count") != len(normalized_weights)
+                or target_diagnostic.get("symbol_count") != len(normalized_weights)
+            ):
+                failures.append(f"{prefix}:target_weights_diagnostics:mismatch")
+        except (TypeError, ValueError):
+            failures.append(f"{prefix}:target_weights_hash:unverifiable")
+    else:
+        failures.append(f"{prefix}:target_weights:missing_or_invalid")
+
+    previous = (
+        previous_source_payload.get("decision_lineage")
+        if isinstance(previous_source_payload, Mapping)
+        else None
+    )
+    if previous_source_payload is None:
+        failures.append(f"{prefix}:prior_source_missing")
+    elif not isinstance(previous, Mapping):
+        failures.append(f"{prefix}:prior_lineage_missing_or_legacy")
+    else:
+        prior_only_anchor = (
+            previous_source_payload.get("decision_eligible") is False
+            and previous_source_payload.get("authority_scope")
+            == "PRIOR_LINEAGE_TRUST_ANCHOR"
+            and str(previous_source_payload.get("valid_as_prior_only_for") or "")
+            == effective_trade_date
+        )
+        try:
+            from paper.trading_calendar import prev_trading_day
+
+            expected_prior_date = prev_trading_day(effective_trade_date)
+            prior_failures = validate_orion_decision_lineage(
+                previous_source_payload,
+                effective_trade_date=expected_prior_date,
+                previous_source_payload=None,
+            )
+            prior_failures = [
+                item
+                for item in prior_failures
+                if item != f"{prefix}:prior_source_missing"
+                and not (
+                    prior_only_anchor
+                    and item == f"{prefix}:source_decision_not_eligible"
+                )
+            ]
+            if previous_source_payload.get("decision_eligible") is False and not prior_only_anchor:
+                failures.append(f"{prefix}:prior_anchor_scope_invalid")
+            failures.extend(
+                f"{prefix}:prior_invalid:{item.removeprefix(prefix + ':')}"
+                for item in prior_failures
+            )
+        except (TypeError, ValueError):
+            failures.append(f"{prefix}:prior_effective_trade_date_invalid")
+        stages = ORION_DECISION_LINEAGE_HASH_FIELDS
+        if all(lineage.get(field) == previous.get(field) for field in stages):
+            failures.append(f"{prefix}:copied_forward")
+        for parent, child in zip(stages, stages[1:]):
+            if (
+                lineage.get(parent) != previous.get(parent)
+                and lineage.get(child) == previous.get(child)
+                and child != "target_weights_hash"
+            ):
+                failures.append(
+                    f"{prefix}:stale_child:{child}:changed_parent:{parent}"
+                )
+    return failures
 
 
 @dataclass(frozen=True)
@@ -727,17 +981,17 @@ def _run_shadow_snapshot(
     root: Path,
 ) -> RunnerResult:
     del daily_snapshot
-    if definition.capital_eligible:
+    if definition.sleeve_id == "caerus_orion":
         from paper.trading_calendar import prev_trading_day
 
         exact = root / definition.source_artifact.format(trade_date=trade_date)
         source = exact
         payload = _read_json(exact) if exact.is_file() else {}
-        observation_status = str(payload.get("observation_status") or "OK").upper()
+        observation_status = str(payload.get("observation_status") or "").upper()
         exact_eligible = bool(
             payload
-            and payload.get("decision_eligible") is not False
-            and observation_status != "PENDING_SESSION_CLOSE"
+            and payload.get("decision_eligible") is True
+            and observation_status == "OK"
         )
         if not exact_eligible:
             prior_trade_date = prev_trading_day(trade_date)
@@ -745,13 +999,11 @@ def _run_shadow_snapshot(
                 trade_date=prior_trade_date
             )
             payload = _read_json(source) if source.is_file() else {}
-            observation_status = str(
-                payload.get("observation_status") or "OK"
-            ).upper()
+            observation_status = str(payload.get("observation_status") or "").upper()
         if (
             not payload
-            or payload.get("decision_eligible") is False
-            or observation_status == "PENDING_SESSION_CLOSE"
+            or payload.get("decision_eligible") is not True
+            or observation_status != "OK"
         ):
             raise SleeveEvaluationBlocked(
                 "paper authority has no decision-eligible current/prior snapshot"
@@ -765,9 +1017,11 @@ def _run_shadow_snapshot(
         )
         payload = _read_json(source)
         observation_status = str(payload.get("observation_status") or "OK").upper()
-    data_status = str(payload.get("data_status") or "OK").upper()
+    data_status = str(
+        payload.get("data_status") or ("" if definition.capital_eligible else "OK")
+    ).upper()
     data_reason = str(payload.get("data_reason") or payload.get("reason_code") or "").upper()
-    if data_status not in {"OK", "COMPLETE"} or data_reason in {
+    if data_status != "OK" or data_reason in {
         "PRICE_CACHE_STALE",
         "NO_DATA",
         "SOURCE_STALE",
@@ -779,6 +1033,43 @@ def _run_shadow_snapshot(
             opportunity={"available": False, "candidate_count": 0},
             source_paths=(source,),
         )
+    if definition.sleeve_id == "caerus_orion":
+        effective_trade_date = str(
+            payload.get("effective_trade_date") or payload.get("trade_date") or ""
+        )
+        previous_payload: Mapping[str, Any] | None = None
+        try:
+            from paper.trading_calendar import prev_trading_day
+
+            previous_date = prev_trading_day(effective_trade_date)
+            previous_path = root / definition.source_artifact.format(
+                trade_date=previous_date
+            )
+            if previous_path.is_file():
+                previous_payload = _read_json(previous_path)
+        except (TypeError, ValueError):
+            previous_payload = None
+        lineage_failures = validate_orion_decision_lineage(
+            payload,
+            effective_trade_date=effective_trade_date,
+            previous_source_payload=previous_payload,
+        )
+        if lineage_failures:
+            return RunnerResult(
+                status="BLOCKED",
+                reason_codes=("STALE_DECISION_SUSPECTED", *lineage_failures),
+                message="Orion decision lineage is incomplete or causally stale",
+                opportunity={
+                    "available": False,
+                    "candidate_count": 0,
+                    "decision_eligible": False,
+                    "decision_status": "STALE_DECISION_SUSPECTED",
+                    "freshness_status": "BLOCKED",
+                    "effective_trade_date": effective_trade_date,
+                    "lineage_failures": lineage_failures,
+                },
+                source_paths=(source,),
+            )
     weights = payload.get("target_weights")
     if not isinstance(weights, Mapping):
         raise ValueError("shadow snapshot target_weights is missing or invalid")
@@ -813,9 +1104,17 @@ def _run_shadow_snapshot(
             "effective_trade_date": payload.get("effective_trade_date")
             or payload.get("trade_date"),
             "observation_status": observation_status,
-            "decision_eligible": payload.get("decision_eligible") is not False
-            and observation_status != "PENDING_SESSION_CLOSE",
+            "decision_eligible": payload.get("decision_eligible") is True
+            and observation_status == "OK",
             "source_variant": payload.get("source_variant"),
+            "decision_lineage": (
+                dict(payload.get("decision_lineage") or {})
+                if definition.sleeve_id == "caerus_orion"
+                else None
+            ),
+            "freshness_status": (
+                "VERIFIED" if definition.capital_eligible else "OBSERVED"
+            ),
         },
         source_paths=(source,),
     )

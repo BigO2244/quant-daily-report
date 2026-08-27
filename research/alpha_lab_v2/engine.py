@@ -41,6 +41,7 @@ def build_target_snapshot(
             "estimated_holding_period_days": None,
             "holding_period_by_ticker": {},
             "rank_table": pd.DataFrame(),
+            "selection_trace": [],
         }
 
     frame = signals.copy()
@@ -57,6 +58,7 @@ def build_target_snapshot(
             "estimated_holding_period_days": None,
             "holding_period_by_ticker": {},
             "rank_table": pd.DataFrame(),
+            "selection_trace": [],
         }
 
     trading_dates = pd.DatetimeIndex(frame["date"].unique()).sort_values()
@@ -65,17 +67,23 @@ def build_target_snapshot(
     active_positions: dict[str, pd.Timestamp] = {}
     completed_holding_periods: list[int] = []
     expected_turnover = 0.0
+    selection_trace: list[dict] = []
 
     for dt in trading_dates:
         daily = frame[frame["date"] == dt].copy()
         if _should_rebalance(dt, spec.rebalance_mode):
-            new_weights = _select_portfolio(daily, spec, active_positions)
+            new_weights, daily_trace = _select_portfolio_with_trace(daily, spec, active_positions)
         else:
             new_weights = prev_weights.copy()
+            daily_trace = [
+                {"ticker": str(ticker), "action": "KEEP", "reason": "NO_REBALANCE_SESSION"}
+                for ticker in new_weights.index
+            ]
         turnover_value = _turnover(prev_weights, new_weights)
         _update_holding_periods(dt, prev_weights, new_weights, active_positions, completed_holding_periods)
         if dt == effective_trade_date:
             expected_turnover = turnover_value
+            selection_trace = daily_trace
         prev_weights = new_weights
 
     daily = frame[frame["date"] == effective_trade_date].copy()
@@ -101,6 +109,7 @@ def build_target_snapshot(
         "estimated_holding_period_days": estimated_holding_period,
         "holding_period_by_ticker": holding_period_by_ticker,
         "rank_table": rank_table,
+        "selection_trace": selection_trace,
     }
 
 
@@ -199,30 +208,78 @@ def run_backtest_prepared(frame: pd.DataFrame, returns_matrix: pd.DataFrame, tra
 
 
 def _select_portfolio(daily: pd.DataFrame, spec: StrategySpec, active_positions: dict[str, pd.Timestamp]) -> pd.Series:
+    weights, _trace = _select_portfolio_with_trace(daily, spec, active_positions)
+    return weights
+
+
+def _select_portfolio_with_trace(
+    daily: pd.DataFrame,
+    spec: StrategySpec,
+    active_positions: dict[str, pd.Timestamp],
+) -> tuple[pd.Series, list[dict]]:
     candidates = daily[daily["signal_ready"]].copy()
     if candidates.empty:
-        return pd.Series(dtype=float)
-    candidates = candidates.sort_values("momentum_score", ascending=False)
+        trace = [
+            {"ticker": str(ticker), "action": "EXIT", "reason": "SIGNAL_NOT_READY", "rank": None}
+            for ticker in sorted(active_positions)
+        ]
+        return pd.Series(dtype=float), trace
+    candidates = candidates.sort_values(["momentum_score", "ticker"], ascending=[False, True], kind="mergesort")
 
     selected: list[str]
+    trace: list[dict] = []
     if spec.use_rank_decay_exit:
         keep = []
         exit_cutoff = int(spec.top_n * spec.exit_rank_multiple)
         for ticker in list(active_positions):
             row = candidates[candidates["ticker"] == ticker]
-            if not row.empty and float(row["momentum_rank"].iloc[0]) <= exit_cutoff:
+            rank = float(row["momentum_rank"].iloc[0]) if not row.empty else None
+            if rank is not None and rank <= exit_cutoff:
                 keep.append(ticker)
+                trace.append({"ticker": ticker, "action": "KEEP", "reason": "WITHIN_EXIT_CUTOFF", "rank": rank})
+            else:
+                trace.append(
+                    {
+                        "ticker": ticker,
+                        "action": "EXIT",
+                        "reason": "MISSING_OR_BELOW_EXIT_CUTOFF",
+                        "rank": rank,
+                    }
+                )
         fill = [ticker for ticker in candidates["ticker"].astype(str).tolist() if ticker not in keep]
         selected = (keep + fill)[: spec.top_n]
+        kept = set(keep)
+        incumbents = set(active_positions)
+        for ticker in selected:
+            if ticker not in kept:
+                rank = float(candidates.loc[candidates["ticker"] == ticker, "momentum_rank"].iloc[0])
+                trace.append(
+                    {
+                        "ticker": ticker,
+                        "action": "FILL",
+                        "reason": "HIGHEST_RANKED_AVAILABLE",
+                        "rank": rank,
+                        "was_incumbent": ticker in incumbents,
+                    }
+                )
     else:
         selected = candidates.head(spec.top_n)["ticker"].astype(str).tolist()
+        trace = [
+            {
+                "ticker": ticker,
+                "action": "SELECT",
+                "reason": "TOP_N_RANK",
+                "rank": float(candidates.loc[candidates["ticker"] == ticker, "momentum_rank"].iloc[0]),
+            }
+            for ticker in selected
+        ]
 
     if not selected:
-        return pd.Series(dtype=float)
+        return pd.Series(dtype=float), trace
     weight = 1.0 / len(selected)
     if spec.max_position_weight is not None:
         weight = min(weight, float(spec.max_position_weight))
-    return pd.Series(weight, index=pd.Index(selected, dtype=str), dtype=float)
+    return pd.Series(weight, index=pd.Index(selected, dtype=str), dtype=float), trace
 
 
 def _should_rebalance(dt: pd.Timestamp, mode: str) -> bool:

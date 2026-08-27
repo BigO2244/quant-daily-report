@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import pandas as pd
@@ -153,7 +154,48 @@ def _orion_shadow(
     *,
     trade_date: str = "2026-06-22",
     weights: dict[str, float] | None = None,
+    _ensure_prior: bool = True,
 ) -> Path:
+    from paper.trading_calendar import prev_trading_day
+
+    target_weights = weights or {
+        "AAPL": 0.2,
+        "MSFT": 0.2,
+        "JNJ": 0.2,
+        "PNC": 0.2,
+        "SPG": 0.2,
+    }
+    def digest(value: object) -> str:
+        return hashlib.sha256(
+            json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    market_hash = digest({"stage": "market", "date": trade_date})
+    panel_hash = digest({"stage": "panel", "date": trade_date})
+    feature_hash = digest({"stage": "features", "date": trade_date})
+    history_hash = digest({"stage": "rank_history", "date": trade_date})
+    rank_hash = digest({"stage": "ranks", "date": trade_date})
+    weights_hash = digest(
+        {str(symbol).upper(): float(weight) for symbol, weight in target_weights.items()}
+    )
+    prior_date = prev_trading_day(trade_date)
+    stage_diagnostics = {
+        stage: {
+            "stage": stage,
+            "source_identity": f"fixture.{stage}",
+            "row_count": len(target_weights),
+            "symbol_count": len(target_weights),
+            "max_market_timestamp": trade_date,
+        }
+        for stage in (
+            "market_data",
+            "normalized_panel",
+            "features",
+            "full_rank_history",
+            "current_rank_table",
+            "target_weights",
+        )
+    }
     path = (
         tmp_path
         / "outputs"
@@ -170,8 +212,43 @@ def _orion_shadow(
                 "source_variant": "h2_rank_decay_exit_h6_top5",
                 "trade_date": trade_date,
                 "effective_trade_date": trade_date,
-                "target_weights": weights
-                or {"AAPL": 0.2, "MSFT": 0.2, "JNJ": 0.2, "PNC": 0.2, "SPG": 0.2},
+                "decision_eligible": True,
+                "observation_status": "OK",
+                "data_status": "OK",
+                "coverage_status": "OK",
+                "target_weights": target_weights,
+                "decision_lineage": {
+                    "schema_version": "caerus.orion_decision_lineage.v1",
+                    "trade_date": trade_date,
+                    "effective_trade_date": trade_date,
+                    "market_data_asof": f"{trade_date}T20:00:00+00:00",
+                    "market_data_hash": market_hash,
+                    "normalized_panel_hash": panel_hash,
+                    "feature_hash": feature_hash,
+                    "full_rank_history_hash": history_hash,
+                    "rank_table_hash": rank_hash,
+                    "target_weights_hash": weights_hash,
+                    "generated_at_utc": f"{trade_date}T22:00:00+00:00",
+                    "model_version": "h2_rank_decay_exit_h6_top5",
+                    "source_variant": "h2_rank_decay_exit_h6_top5",
+                    "parent_artifact_hashes": {
+                        "normalized_panel": market_hash,
+                        "features": panel_hash,
+                        "full_rank_history": feature_hash,
+                        "current_rank_table": history_hash,
+                        "target_weights": rank_hash,
+                    },
+                    "coverage": {
+                        "status": "OK",
+                        "current_session": trade_date,
+                        "required_anchor_dates": [prior_date],
+                        "missing_current_session_symbols": [],
+                        "missing_required_anchor_symbols": {},
+                        "symbol_count": len(target_weights),
+                    },
+                    "selection_trace": [{"symbol": symbol} for symbol in target_weights],
+                    "stage_diagnostics": stage_diagnostics,
+                },
             },
             indent=2,
             sort_keys=True,
@@ -179,6 +256,15 @@ def _orion_shadow(
         + "\n",
         encoding="utf-8",
     )
+    if _ensure_prior:
+        prior_path = path.parent.parent / prior_date / path.name
+        if not prior_path.is_file():
+            _orion_shadow(
+                tmp_path,
+                trade_date=prior_date,
+                weights=target_weights,
+                _ensure_prior=False,
+            )
     return path
 
 

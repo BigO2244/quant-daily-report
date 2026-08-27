@@ -51,6 +51,7 @@ WORKFLOW_DIR="${REPO_ROOT}/outputs/workflow/${REPORT_DATE}"
 SELF_HEAL_STATUS_PATH="${WORKFLOW_DIR}/precompute_self_heal.json"
 BUNDLE_VALIDATION_PATH="${WORKFLOW_DIR}/precompute_bundle_validation.json"
 EXECUTION_READINESS_CERTIFICATION_ENABLED="${EXECUTION_READINESS_CERTIFICATION_ENABLED:-1}"
+ORION_DEPENDENCY_GUARD_PATH="${WORKFLOW_DIR}/orion_precompute_dependency.json"
 
 # --- Suppress emails during precompute (planning only) ---
 export EMAIL_INLINE_REPORTS=0
@@ -73,9 +74,26 @@ if [[ "${SELF_HEAL_PRECOMPUTE_ONLY}" =~ ^(1|true|TRUE|yes|YES|y|Y)$ ]]; then
     echo "self_heal_precompute_only=1" | tee -a "${LOG_FILE}"
 fi
 
-# --- Run precompute planner ---
+# --- Require the completed post-close Orion decision chain ---
+# A same-dated/pre-close copy remains ineligible. Morning precompute consumes
+# the explicit readiness marker for the latest completed XNYS session, which
+# preserves the governed current/prior-session source policy.
 EXIT_CODE=0
-python3 daily_quant_report.py --plan-only --write-precompute-bundle >> "${LOG_FILE}" 2>&1 || EXIT_CODE=$?
+mkdir -p "${WORKFLOW_DIR}"
+if ! python3 -m core.orion_precompute_guard \
+    --repo-root "${REPO_ROOT}" \
+    --report-date "${REPORT_DATE}" \
+    --json-output "${ORION_DEPENDENCY_GUARD_PATH}" >> "${LOG_FILE}" 2>&1; then
+    echo "ERROR: Orion post-close dependency is not READY; precompute blocked; details=${ORION_DEPENDENCY_GUARD_PATH}" | tee -a "${LOG_FILE}"
+    EXIT_CODE=1
+else
+    echo "orion_dependency_guard=${ORION_DEPENDENCY_GUARD_PATH}" | tee -a "${LOG_FILE}"
+fi
+
+# --- Run precompute planner ---
+if [[ ${EXIT_CODE} -eq 0 ]]; then
+    python3 daily_quant_report.py --plan-only --write-precompute-bundle >> "${LOG_FILE}" 2>&1 || EXIT_CODE=$?
+fi
 
 # --- Seal the governed PAPER portfolio allocation ---
 # The legacy daily planner remains available as quarantined research evidence,

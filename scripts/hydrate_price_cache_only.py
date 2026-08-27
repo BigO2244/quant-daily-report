@@ -18,6 +18,13 @@ from core.price_hydration import (  # noqa: E402
     resolve_completed_trading_day,
     write_status,
 )
+from core.orion_decision_lineage import (  # noqa: E402
+    LINEAGE_SCHEMA,
+    build_readiness_payload,
+    canonical_hash,
+)
+from paper.trading_calendar import prev_trading_day  # noqa: E402
+from core.sleeve_control_plane import validate_orion_decision_lineage  # noqa: E402
 from research.flow_detection.data import ensure_price_panel, load_universe  # noqa: E402
 from scripts import refresh_shadow_scorecard_artifacts  # noqa: E402
 
@@ -192,6 +199,8 @@ def main(argv: list[str] | None = None) -> int:
             allow_download=True,
             chunk_size=args.chunk_size,
             ticker_exceptions_path=ticker_exceptions_path,
+            required_anchor_dates=[prev_trading_day(as_of_date)],
+            required_history_offsets=[1, 3, 21, 126, 252],
         )
     except Exception as exc:
         hydration_exit_code = 1
@@ -206,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         download_attempted=bool(panel_meta.get("download_performed", True)),
         provider="yfinance",
         hydration_source=args.hydration_source,
+        coverage_validation=panel_meta.get("coverage_validation"),
     )
     payload["cache_only"] = True
     payload["symbols_requested"] = len(symbols)
@@ -244,6 +254,53 @@ def main(argv: list[str] | None = None) -> int:
 
     write_status(status_path, payload)
     print(json.dumps(payload, indent=2, sort_keys=True))
+
+    if args.strict and payload.get("status") == "OK" and shadow_refresh is not None and shadow_refresh.get("status") == "OK":
+        orion_source_path = shadow_output_dir / as_of_date / "caerus_orion.json"
+        try:
+            source_payload = json.loads(orion_source_path.read_text(encoding="utf-8"))
+            lineage = source_payload.get("decision_lineage")
+            if not isinstance(lineage, dict) or lineage.get("schema_version") != LINEAGE_SCHEMA:
+                raise ValueError("completed Orion source artifact has no valid decision_lineage")
+            if source_payload.get("decision_eligible") is not True or source_payload.get("observation_status") != "OK":
+                raise ValueError("completed Orion source artifact is not explicitly Decision-eligible")
+            if str(lineage.get("effective_trade_date") or "") != as_of_date:
+                raise ValueError("Orion lineage effective date does not match completed hydration date")
+            if str(lineage.get("trade_date") or "") != as_of_date:
+                raise ValueError("Orion lineage trade date does not match completed hydration date")
+            if canonical_hash(source_payload.get("target_weights") or {}) != lineage.get("target_weights_hash"):
+                raise ValueError("Orion target_weights_hash does not match source artifact")
+            previous_source_payload = None
+            previous_source_path = (
+                shadow_output_dir
+                / prev_trading_day(as_of_date)
+                / "caerus_orion.json"
+            )
+            if previous_source_path.is_file():
+                previous_source_payload = json.loads(previous_source_path.read_text(encoding="utf-8"))
+            lineage_failures = validate_orion_decision_lineage(
+                source_payload,
+                effective_trade_date=as_of_date,
+                previous_source_payload=previous_source_payload,
+            )
+            if lineage_failures:
+                raise ValueError(
+                    "completed Orion source artifact failed canonical lineage validation: "
+                    + ",".join(lineage_failures)
+                )
+            readiness = build_readiness_payload(
+                trade_date=as_of_date,
+                source_artifact_path=orion_source_path,
+                decision_lineage=lineage,
+                hydration_status_path=status_path,
+                repo_root=_REPO_ROOT,
+            )
+            readiness_path = status_path.parent / "orion_decision_ready.json"
+            write_status(readiness_path, readiness)
+            print(json.dumps({"orion_decision_readiness": str(readiness_path), "status": "READY"}, sort_keys=True))
+        except Exception as exc:
+            print(f"[PRICE_CACHE_ONLY][WARN] Orion readiness not written: {exc}", file=sys.stderr)
+            return 1
 
     if args.strict and payload.get("status") != "OK":
         return 1

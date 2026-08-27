@@ -12,6 +12,7 @@ from core.sleeve_control_plane import (
     dispatch_all_sleeves,
     load_sleeve_control_registry,
 )
+from Tests.test_live_pilot_build_plan_from_precompute import _orion_shadow
 
 
 REQUIRED_FILES = BUNDLE_REQUIRED_FILES
@@ -40,19 +41,10 @@ def _write_bundle_file(bundle_dir: Path, name: str, trade_date: str = "2026-05-1
             / trade_date
             / "caerus_orion.json"
         )
-        orion.parent.mkdir(parents=True, exist_ok=True)
-        orion.write_text(
-            json.dumps(
-                {
-                    "trade_date": trade_date,
-                    "effective_trade_date": trade_date,
-                    "strategy_slug": "caerus_orion",
-                    "decision_eligible": True,
-                    "target_weights": {"AAPL": 1.0},
-                }
-            )
-            + "\n",
-            encoding="utf-8",
+        _orion_shadow(
+            runtime_root,
+            trade_date=trade_date,
+            weights={"AAPL": 1.0},
         )
         payload = dispatch_all_sleeves(
             trade_date=trade_date,

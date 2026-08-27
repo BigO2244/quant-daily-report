@@ -11,6 +11,7 @@ from core.sleeve_control_plane import (
     load_sleeve_control_registry,
 )
 from scripts.research.check_precompute_semantic_validation import inspect_precompute_semantics, render_markdown
+from Tests.test_live_pilot_build_plan_from_precompute import _orion_shadow
 
 
 TRADE_DATE = "2026-05-26"
@@ -53,19 +54,10 @@ def _write_bundle(bundle: Path, *, strategy: str = "caerus_polaris", malformed_o
             # capital authority had a decision-eligible opportunity.  Keep
             # this semantic-validation fixture production-faithful instead
             # of allowing an all-BLOCKED sidecar to masquerade as complete.
-            _write_json(
-                bundle.parents[2]
-                / "outputs"
-                / "shadow_candidates"
-                / TRADE_DATE
-                / "caerus_orion.json",
-                {
-                    "trade_date": TRADE_DATE,
-                    "effective_trade_date": TRADE_DATE,
-                    "decision_eligible": True,
-                    "observation_status": "OK",
-                    "target_weights": {"AAPL": 1.0},
-                },
+            _orion_shadow(
+                bundle.parents[2],
+                trade_date=TRADE_DATE,
+                weights={"AAPL": 1.0},
             )
             payload = dispatch_all_sleeves(
                 trade_date=TRADE_DATE,

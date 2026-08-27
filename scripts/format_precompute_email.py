@@ -35,6 +35,57 @@ def _number_or_zero(value: object) -> float:
         return 0.0
 
 
+def _hash_prefix(value: object) -> str:
+    text = str(value or "")
+    return text[:12] if text else "MISSING"
+
+
+def _changed(current: object, previous: object) -> str:
+    if not current or not previous:
+        return "UNAVAILABLE"
+    return "YES" if current != previous else "NO"
+
+
+def _orion_freshness_lines(payload: dict, trade_date: str) -> list[str]:
+    lineage = payload.get("decision_lineage") or {}
+    target_package = _load_json(
+        Path(f"outputs/precompute/{trade_date}/paper_target_package.json")
+    )
+    effective_date = str(target_package.get("effective_trade_date") or "")
+    previous_lineage: dict = {}
+    source = target_package.get("source_strategy_artifact") or {}
+    source_path = Path(str(source.get("path") or ""))
+    if effective_date and source_path:
+        try:
+            from paper.trading_calendar import prev_trading_day
+
+            previous_path = (
+                source_path.parent.parent
+                / prev_trading_day(effective_date)
+                / source_path.name
+            )
+            previous_lineage = _load_json(previous_path).get("decision_lineage") or {}
+        except (TypeError, ValueError):
+            previous_lineage = {}
+    deploy = _load_json(Path("outputs/deploy_state.json"))
+    deployed_sha = str(deploy.get("deployed_sha") or "UNKNOWN")
+    return [
+        "",
+        "ORION DECISION FRESHNESS",
+        f"  Market data as-of:    {lineage.get('market_data_asof') or 'MISSING'}",
+        f"  Orion generated-at:   {lineage.get('generated_at_utc') or 'MISSING'}",
+        f"  Market-data hash:     {_hash_prefix(lineage.get('market_data_hash'))}",
+        f"  Feature hash:         {_hash_prefix(lineage.get('feature_hash'))}",
+        f"  Rank hash:            {_hash_prefix(lineage.get('rank_table_hash'))}",
+        f"  Target hash:          {_hash_prefix(lineage.get('target_weights_hash'))}",
+        f"  Features recomputed:  {_changed(lineage.get('feature_hash'), previous_lineage.get('feature_hash'))}",
+        f"  Ranks recomputed:     {_changed(lineage.get('rank_table_hash'), previous_lineage.get('rank_table_hash'))}",
+        f"  Target changed:       {_changed(lineage.get('target_weights_hash'), previous_lineage.get('target_weights_hash'))}",
+        f"  Freshness:            {payload.get('decision_freshness_status') or 'BLOCKED — STALE_DECISION_SUSPECTED'}",
+        f"  Deployed Git SHA:     {deployed_sha}",
+    ]
+
+
 def _render_sealed_target(payload: dict, daily_snapshot: dict, trade_date: str) -> str:
     rows = payload.get("target_portfolio") or []
     lines = [
@@ -51,6 +102,7 @@ def _render_sealed_target(payload: dict, daily_snapshot: dict, trade_date: str) 
     for row in sorted(rows, key=lambda item: (-_number_or_zero(item.get("target_weight")), str(item.get("ticker") or item.get("symbol") or ""))):
         symbol = str(row.get("ticker") or row.get("symbol") or "")
         lines.append(f"  {symbol:<6} {_number_or_zero(row.get('target_weight')):>7.2%}")
+    lines.extend(_orion_freshness_lines(payload, trade_date))
     lines.extend(
         [
             "",
@@ -73,10 +125,16 @@ def main() -> None:
         print(f"[ERROR] Precompute payload not found: {payload_path}")
         sys.exit(1)
 
+    p = _load_json(payload_path)
+    sealed = p.get("schema_version") == "caerus.paper_precompute_handoff.v1"
     validation = validate_precompute_bundle(
         payload_path.parent,
         trade_date=trade_date,
-        required_files=(payload_path.name,),
+        **(
+            {"require_sealed_paper_target": True}
+            if sealed
+            else {"required_files": (payload_path.name,)}
+        ),
     )
     if validation["status"] != "OK":
         reasons = ", ".join(validation.get("validation_failures") or ["unknown_failure"])
@@ -86,7 +144,6 @@ def main() -> None:
         )
         sys.exit(2)
 
-    p = _load_json(payload_path)
     daily_snapshot = _load_json(daily_snapshot_path)
     if p.get("schema_version") == "caerus.paper_precompute_handoff.v1":
         print(_render_sealed_target(p, daily_snapshot, trade_date))

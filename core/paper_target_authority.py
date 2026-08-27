@@ -23,7 +23,10 @@ from core.portfolio_operating_model import (
     build_sleeve_decision_batch,
     validate_operating_model_lineage,
 )
-from core.sleeve_control_plane import load_sleeve_control_registry
+from core.sleeve_control_plane import (
+    load_sleeve_control_registry,
+    validate_orion_decision_lineage,
+)
 
 
 PAPER_TARGET_SCHEMA = "caerus.paper_target_package.v2"
@@ -303,6 +306,36 @@ def seal_paper_target_bundle(
             raise PaperTargetAuthorityError(
                 f"capital sleeve source date mismatch: {sleeve_id}"
             )
+        decision_lineage: dict[str, Any] | None = None
+        prior_decision_lineage: dict[str, Any] | None = None
+        if sleeve_id == "caerus_orion":
+            definition = control_registry.require(sleeve_id)
+            prior_effective_date = prev_trading_day(effective_date)
+            prior_source_path = repo_root / definition.source_artifact.format(
+                trade_date=prior_effective_date
+            )
+            prior_source_payload = (
+                _read_object(prior_source_path) if prior_source_path.is_file() else None
+            )
+            lineage_failures = validate_orion_decision_lineage(
+                source_payload,
+                effective_trade_date=effective_date,
+                previous_source_payload=prior_source_payload,
+            )
+            if lineage_failures:
+                raise PaperTargetAuthorityError(
+                    "STALE_DECISION_SUSPECTED: " + ",".join(lineage_failures)
+                )
+            decision_lineage = dict(source_payload["decision_lineage"])
+            prior_decision_lineage = {
+                "status": "BOUND",
+                "effective_trade_date": prior_effective_date,
+                "source_path": _display_path(repo_root, prior_source_path),
+                "source_sha256": _file_hash(prior_source_path),
+                "decision_lineage_hash": _payload_hash(
+                    prior_source_payload["decision_lineage"]
+                ),
+            }
         capital_sources.append(
             {
                 "sleeve_id": sleeve_id,
@@ -314,6 +347,8 @@ def seal_paper_target_bundle(
                     0 if effective_date == trade_date else 1
                 ),
                 "source_variant": source_variant,
+                "decision_lineage": decision_lineage,
+                "prior_decision_lineage": prior_decision_lineage,
             }
         )
     primary_id = control_registry.paper_capital_authority
@@ -327,6 +362,11 @@ def seal_paper_target_bundle(
     lag = primary_source["source_trading_session_lag"]
     source_variant = primary_source["source_variant"]
     source_session_policy = "SAME_OR_PREVIOUS_TRADING_SESSION"
+    orion_decision_lineage = dict(primary_source["decision_lineage"] or {})
+    orion_decision_lineage_hash = _payload_hash(orion_decision_lineage)
+    prior_orion_decision_lineage = dict(
+        primary_source["prior_decision_lineage"] or {}
+    )
 
     sealed_timestamp = sealed_at or dt.datetime.now(dt.timezone.utc).isoformat()
     research_pair_hash = _payload_hash(
@@ -375,6 +415,16 @@ def seal_paper_target_bundle(
             "freshness_status": "GOVERNED",
         },
     ]
+    session_inputs.append(
+        {
+            "name": "orion_prior_decision_lineage",
+            "path": prior_orion_decision_lineage["source_path"],
+            "sha256": prior_orion_decision_lineage["source_sha256"],
+            "required": True,
+            "as_of": prior_orion_decision_lineage["effective_trade_date"],
+            "freshness_status": "GOVERNED_PRIOR_LINEAGE",
+        }
+    )
     observed_sources: set[str] = set()
     for candidate_envelope in sleeve_payload.get("envelopes") or []:
         if not isinstance(candidate_envelope, Mapping):
@@ -458,6 +508,8 @@ def seal_paper_target_bundle(
             f"sha256:{row['sha256']}",
         )
     ) + (
+        prior_orion_decision_lineage["source_path"],
+        f"sha256:{prior_orion_decision_lineage['source_sha256']}",
         _display_path(repo_root, sleeve_path),
         f"sha256:{sleeve_hash}",
         _display_path(repo_root, session_path),
@@ -536,6 +588,10 @@ def seal_paper_target_bundle(
             row["sleeve_id"]: row["effective_trade_date"] for row in capital_sources
         },
         "source_variant": source_variant,
+        "decision_freshness_status": "VERIFIED",
+        "decision_lineage": orion_decision_lineage,
+        "decision_lineage_hash": orion_decision_lineage_hash,
+        "prior_decision_lineage": prior_orion_decision_lineage,
         "target_cash_weight": target_cash_weight,
         "target_attainment_policy": policy,
         "target_rows": target_projection,
@@ -548,6 +604,9 @@ def seal_paper_target_bundle(
             "decision_trade_date": trade_date,
             "source_trading_session_lag": lag,
             "source_session_policy": source_session_policy,
+            "decision_lineage": orion_decision_lineage,
+            "decision_lineage_hash": orion_decision_lineage_hash,
+            "prior_decision_lineage": prior_orion_decision_lineage,
         },
         "source_strategy_artifacts": [
             {
@@ -564,6 +623,13 @@ def seal_paper_target_bundle(
                     "source_trading_session_lag"
                 ],
                 "source_session_policy": source_session_policy,
+                "decision_lineage": row["decision_lineage"],
+                "decision_lineage_hash": (
+                    _payload_hash(row["decision_lineage"])
+                    if row["decision_lineage"] is not None
+                    else None
+                ),
+                "prior_decision_lineage": row["prior_decision_lineage"],
             }
             for row in capital_sources
         ],
@@ -603,6 +669,10 @@ def seal_paper_target_bundle(
         "paper_target_package_path": _display_path(repo_root, target_path),
         "paper_target_package_sha256": target_package_hash,
         "strategy_identity": identity,
+        "decision_freshness_status": "VERIFIED",
+        "decision_lineage": orion_decision_lineage,
+        "decision_lineage_hash": orion_decision_lineage_hash,
+        "prior_decision_lineage": prior_orion_decision_lineage,
         "meta": {
             "asof_date": effective_date,
             "authority": "DECISION",
@@ -637,6 +707,10 @@ def seal_paper_target_bundle(
         "source_sleeve_evaluations": _display_path(repo_root, sleeve_path),
         "source_sleeve_evaluations_sha256": sleeve_hash,
         "strategy_identity": identity,
+        "decision_freshness_status": "VERIFIED",
+        "decision_lineage": orion_decision_lineage,
+        "decision_lineage_hash": orion_decision_lineage_hash,
+        "prior_decision_lineage": prior_orion_decision_lineage,
         "target_attainment_policy": policy,
         "precompute_execution_authority": False,
         "exact_orders_deferred_to_0935": True,
@@ -657,6 +731,10 @@ def seal_paper_target_bundle(
     daily_snapshot["portfolio_allocation_path"] = _display_path(repo_root, allocation_path)
     daily_snapshot["paper_target_package_path"] = _display_path(repo_root, target_path)
     daily_snapshot["market_state_execution_authority"] = False
+    daily_snapshot["orion_decision_freshness_status"] = "VERIFIED"
+    daily_snapshot["orion_decision_lineage"] = orion_decision_lineage
+    daily_snapshot["orion_decision_lineage_hash"] = orion_decision_lineage_hash
+    daily_snapshot["orion_prior_decision_lineage"] = prior_orion_decision_lineage
     if isinstance(daily_snapshot.get("proposed_trades"), list):
         daily_snapshot["research_proposed_trades"] = daily_snapshot.get("proposed_trades")
         daily_snapshot["proposed_trades"] = []
@@ -698,6 +776,10 @@ def seal_paper_target_bundle(
             "allocation_id": allocation["allocation_id"],
             "allocation_content_hash": allocation["content_hash"],
             "precompute_execution_authority": False,
+            "decision_freshness_status": "VERIFIED",
+            "decision_lineage": orion_decision_lineage,
+            "decision_lineage_hash": orion_decision_lineage_hash,
+            "prior_decision_lineage": prior_orion_decision_lineage,
             "files": {
                 "daily_snapshot": "daily_snapshot.json",
                 "signals": "signals.json",
@@ -715,6 +797,7 @@ def seal_paper_target_bundle(
                 "target_cash_weight": target_cash_weight,
                 "exact_order_count": None,
                 "exact_orders_deferred_to_0935": True,
+                "decision_freshness_status": "VERIFIED",
             },
         }
     )
@@ -796,6 +879,7 @@ def validate_sealed_paper_target_bundle(
         package = _read_object(bundle_dir / str(files["paper_target_package"]))
         signals = _read_object(bundle_dir / str(files["signals"]))
         handoff = _read_object(bundle_dir / str(files["planned_execution_payload"]))
+        daily_snapshot = _read_object(bundle_dir / str(files["daily_snapshot"]))
         sleeve_payload = _read_object(bundle_dir / str(files["sleeve_evaluations"]))
         expected_package_schema = (
             PAPER_TARGET_SCHEMA
@@ -854,6 +938,58 @@ def validate_sealed_paper_target_bundle(
             failures.append("paper_target:precompute_execution_authority_not_false")
         if handoff.get("exact_orders_deferred_to_0935") is not True:
             failures.append("paper_target:exact_order_deferral_missing")
+        decision_lineage = package.get("decision_lineage")
+        if not isinstance(decision_lineage, Mapping):
+            failures.append("paper_target:orion_decision_lineage_missing")
+        else:
+            expected_lineage_hash = _payload_hash(decision_lineage)
+            lineage_surfaces = {
+                "contract": contract.get("decision_lineage"),
+                "signals": signals.get("decision_lineage"),
+                "handoff": handoff.get("decision_lineage"),
+                "daily_snapshot": daily_snapshot.get("orion_decision_lineage"),
+            }
+            for surface, observed_lineage in lineage_surfaces.items():
+                if observed_lineage != decision_lineage:
+                    failures.append(
+                        f"paper_target:orion_decision_lineage_mismatch:{surface}"
+                    )
+            lineage_hash_surfaces = {
+                "contract": contract.get("decision_lineage_hash"),
+                "package": package.get("decision_lineage_hash"),
+                "signals": signals.get("decision_lineage_hash"),
+                "handoff": handoff.get("decision_lineage_hash"),
+                "daily_snapshot": daily_snapshot.get(
+                    "orion_decision_lineage_hash"
+                ),
+            }
+            for surface, observed_hash in lineage_hash_surfaces.items():
+                if observed_hash != expected_lineage_hash:
+                    failures.append(
+                        f"paper_target:orion_decision_lineage_hash_mismatch:{surface}"
+                    )
+            prior_lineage_binding = package.get("prior_decision_lineage")
+            prior_binding_surfaces = {
+                "contract": contract.get("prior_decision_lineage"),
+                "signals": signals.get("prior_decision_lineage"),
+                "handoff": handoff.get("prior_decision_lineage"),
+                "daily_snapshot": daily_snapshot.get(
+                    "orion_prior_decision_lineage"
+                ),
+            }
+            if not isinstance(prior_lineage_binding, Mapping):
+                failures.append("paper_target:prior_orion_lineage_binding_missing")
+            else:
+                for surface, observed_binding in prior_binding_surfaces.items():
+                    if observed_binding != prior_lineage_binding:
+                        failures.append(
+                            f"paper_target:prior_orion_lineage_binding_mismatch:{surface}"
+                        )
+            if any(
+                payload.get("decision_freshness_status") != "VERIFIED"
+                for payload in (contract, package, signals, handoff)
+            ) or daily_snapshot.get("orion_decision_freshness_status") != "VERIFIED":
+                failures.append("paper_target:orion_decision_freshness_not_verified")
 
         if contract_schema == SEALED_PRECOMPUTE_SCHEMA_VERSION:
             session = _read_object(bundle_dir / str(files["session_manifest"]))
@@ -918,6 +1054,61 @@ def validate_sealed_paper_target_bundle(
                 source.get("sha256") or ""
             ):
                 failures.append("paper_target:source_strategy_hash_mismatch")
+                continue
+            source_payload = _read_object(source_path)
+            is_orion = (
+                str(source.get("sleeve_id") or package.get("approved_sleeve") or "")
+                == "caerus_orion"
+            )
+            if is_orion:
+                effective_date = str(source.get("source_effective_trade_date") or "")
+                previous_payload = None
+                try:
+                    from paper.trading_calendar import prev_trading_day
+
+                    previous_date = prev_trading_day(effective_date)
+                    previous_path = (
+                        repo_root
+                        / load_sleeve_control_registry()
+                        .require("caerus_orion")
+                        .source_artifact.format(trade_date=previous_date)
+                    )
+                    if previous_path.is_file():
+                        previous_payload = _read_object(previous_path)
+                except (TypeError, ValueError):
+                    pass
+                source_lineage_failures = validate_orion_decision_lineage(
+                    source_payload,
+                    effective_trade_date=effective_date,
+                    previous_source_payload=previous_payload,
+                )
+                failures.extend(
+                    f"paper_target:{item}" for item in source_lineage_failures
+                )
+                if (
+                    source.get("decision_lineage") != decision_lineage
+                    or source_payload.get("decision_lineage") != decision_lineage
+                ):
+                    failures.append("paper_target:source_orion_lineage_mismatch")
+                if source.get("decision_lineage_hash") != _payload_hash(
+                    decision_lineage
+                ):
+                    failures.append("paper_target:source_orion_lineage_hash_mismatch")
+                binding = source.get("prior_decision_lineage")
+                expected_binding = package.get("prior_decision_lineage")
+                if binding != expected_binding or not isinstance(binding, Mapping):
+                    failures.append("paper_target:source_prior_lineage_binding_mismatch")
+                elif previous_payload is not None:
+                    previous_path_display = _display_path(repo_root, previous_path)
+                    if (
+                        binding.get("status") != "BOUND"
+                        or binding.get("effective_trade_date") != previous_date
+                        or binding.get("source_path") != previous_path_display
+                        or binding.get("source_sha256") != _file_hash(previous_path)
+                        or binding.get("decision_lineage_hash")
+                        != _payload_hash(previous_payload.get("decision_lineage"))
+                    ):
+                        failures.append("paper_target:prior_lineage_binding_invalid")
         sleeve_ref = package.get("source_sleeve_evaluations") or {}
         if str(sleeve_ref.get("sha256") or "") != _file_hash(
             bundle_dir / str(files["sleeve_evaluations"])
@@ -955,6 +1146,11 @@ def validate_sealed_paper_target_bundle(
                     failures.append(
                         f"paper_target:capital_sleeve_not_eligible:{sleeve_id}"
                     )
+                if sleeve_id == "caerus_orion" and (
+                    (envelope.get("opportunity") or {}).get("decision_lineage")
+                    != decision_lineage
+                ):
+                    failures.append("paper_target:orion_envelope_lineage_mismatch")
         identity = package.get("strategy_identity")
         identity_check = validate_lane_strategy_identity(
             identity=identity if isinstance(identity, Mapping) else {},

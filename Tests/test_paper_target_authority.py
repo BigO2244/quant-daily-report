@@ -29,7 +29,7 @@ def _sealed_fixture(tmp_path: Path) -> Path:
             {"ticker": "BAC", "target_weight": 0.5, "sleeve": "sleeve_quality"},
         ],
         payload_trades=[
-            {
+                {
                 "ticker": "AMGN",
                 "side": "BUY",
                 "shares": 2,
@@ -198,8 +198,11 @@ def test_allocator_seal_supports_governed_multiple_capital_sleeves(
                 "trade_date": "2026-08-14",
                 "effective_trade_date": "2026-08-14",
                 "strategy_slug": "caerus_lyra",
-                "source_variant": lyra["shadow_tracking"]["source_variant"],
-                "target_weights": {"AAPL": 0.5, "GOOG": 0.5},
+                    "source_variant": lyra["shadow_tracking"]["source_variant"],
+                    "decision_eligible": True,
+                    "observation_status": "OK",
+                    "data_status": "OK",
+                    "target_weights": {"AAPL": 0.5, "GOOG": 0.5},
             }
         ),
         encoding="utf-8",

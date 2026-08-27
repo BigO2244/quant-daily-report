@@ -42,3 +42,29 @@ def build_alpha_lab_signal_frame(panel: pd.DataFrame) -> pd.DataFrame:
     df = df.merge(regime, on="date", how="left")
     df["spy_above_200dma"] = df["spy_above_200dma"].astype("boolean").fillna(False).astype(bool)
     return df
+
+
+def current_signal_readiness(
+    signals: pd.DataFrame,
+    *,
+    effective_date: str,
+    required_symbols: list[str],
+) -> dict:
+    required = sorted({str(symbol).upper() for symbol in required_symbols})
+    if signals.empty:
+        ready: set[str] = set()
+    else:
+        current = signals[pd.to_datetime(signals["date"]).dt.normalize() == pd.Timestamp(effective_date)]
+        ready = set(
+            current.loc[current["signal_ready"].fillna(False).astype(bool), "ticker"]
+            .astype(str)
+            .str.upper()
+        )
+    missing = sorted(set(required) - ready)
+    return {
+        "status": "OK" if not missing else "INCOMPLETE",
+        "effective_date": str(pd.Timestamp(effective_date).date()),
+        "symbols_required_count": len(required),
+        "symbols_signal_ready_count": len(required) - len(missing),
+        "missing_signal_ready_symbols": missing,
+    }

@@ -59,12 +59,22 @@ def build_status_payload(
     provider: str = "yfinance",
     hydration_exit_code: int = 0,
     hydration_source: str | None = None,
+    coverage_validation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if run_timestamp is None:
         run_timestamp = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    coverage_ok = coverage_validation is None or coverage_validation.get("status") == "OK"
     if max_cache_date is None:
         status = "FAILED"
         reason = "price cache missing or unreadable"
+    elif not coverage_ok:
+        status = "PARTIAL"
+        missing_current = coverage_validation.get("missing_current_session_symbols") or []
+        missing_anchors = coverage_validation.get("missing_required_anchor_symbols") or {}
+        reason = (
+            "per-symbol cache coverage incomplete: "
+            f"missing_current={missing_current}; missing_required_anchors={missing_anchors}"
+        )
     elif hydration_exit_code != 0 and max_cache_date >= as_of_date:
         status = "PARTIAL"
         reason = f"hydration command exited {hydration_exit_code}, but cache coverage is verified"
@@ -89,6 +99,8 @@ def build_status_payload(
     }
     if hydration_source:
         payload["hydration_source"] = hydration_source
+    if coverage_validation is not None:
+        payload["coverage_validation"] = coverage_validation
     return payload
 
 
