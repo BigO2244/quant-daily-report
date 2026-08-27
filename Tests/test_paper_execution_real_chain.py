@@ -93,7 +93,11 @@ def test_real_builder_authorizer_executor_chain_needs_no_fixture_authority_injec
     result = execute_exact_plan(
         plan_payload=exact.to_dict(),
         broker=broker,
-        env=_env(),
+        # This is a deterministic historical-chain replay, not a freshness
+        # test. Keep the real executor freshness gate enabled while widening
+        # only this fixture's maximum age so the fixed 2026-08-12 evidence does
+        # not expire as wall-clock time advances.
+        env={**_env(), "CAERUS_EXACT_MAX_PLAN_AGE_SECONDS": "315360000"},
         wal_root=tmp_path / "outputs" / "paper_lane" / "submission_wal",
         attempt_id="real-chain-simulated-submit",
         dry_run=False,
