@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import pandas as pd
+from paper.trading_calendar import prev_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +213,8 @@ def ensure_price_panel(
     allow_download: bool = True,
     chunk_size: int = 25,
     ticker_exceptions_path: str | Path = DEFAULT_TICKER_EXCEPTIONS_PATH,
+    required_anchor_dates: Sequence[str] = (),
+    required_history_offsets: Sequence[int] = (),
 ) -> tuple[pd.DataFrame, dict]:
     symbol_set = {str(sym).upper() for sym in symbols}
     exceptions = load_ticker_exceptions(ticker_exceptions_path)
@@ -267,6 +270,18 @@ def ensure_price_panel(
         sym for sym, meta in coverage.items()
         if sym in active_symbol_set and meta["max_date"] < pd.Timestamp(end_date)
     )
+    initial_validation = validate_symbol_coverage(
+        panel,
+        symbols=sorted(active_symbol_set),
+        current_session=end_date,
+        required_anchor_dates=required_anchor_dates,
+        required_history_offsets=required_history_offsets,
+    )
+    missing_anchor_dates_by_symbol: dict[str, list[str]] = {}
+    for anchor_date, missing_at_anchor in (initial_validation.get("missing_required_anchor_symbols") or {}).items():
+        for symbol in missing_at_anchor:
+            missing_anchor_dates_by_symbol.setdefault(symbol, []).append(anchor_date)
+    anchor_incomplete_symbols = sorted(set(missing_anchor_dates_by_symbol) - set(missing_symbols))
 
     fetched_frames: list[pd.DataFrame] = []
     fetched = pd.DataFrame()
@@ -274,13 +289,15 @@ def ensure_price_panel(
     download_start_date: str | None = None
     download_failed_symbols: list[str] = []
     download_errors: dict[str, str] = {}
-    download_symbols = sorted(set(missing_symbols + incomplete_symbols))
+    download_symbols = sorted(set(missing_symbols + incomplete_symbols + anchor_incomplete_symbols))
     needs_download = allow_download and bool(download_symbols)
     if needs_download:
         # Build per-symbol start dates: missing symbols need full history;
         # incomplete symbols can tail from their own max_date + 1 day.
         download_start_by_symbol = {
             sym: str(pd.Timestamp(start_date).date()) if sym in missing_symbols
+            else str(max(pd.Timestamp(start_date), pd.Timestamp(min(missing_anchor_dates_by_symbol[sym]))).date())
+            if sym in missing_anchor_dates_by_symbol
             else str(max(pd.Timestamp(start_date), coverage[sym]["max_date"] + pd.Timedelta(days=1)).date())
             for sym in download_symbols
         }
@@ -330,20 +347,45 @@ def ensure_price_panel(
                     else pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume"])
                 )
             present = {str(sym).upper() for sym in frame["ticker"].unique()} if not frame.empty and "ticker" in frame.columns else set()
-            for sym in group_symbols:
+            missing_from_success = [str(sym).upper() for sym in group_symbols if str(sym).upper() not in present]
+            retry_frames: list[pd.DataFrame] = []
+            # yfinance can return a successful but empty/partial batch. Treat
+            # omitted symbols exactly like a failed batch and retry each one.
+            for sym in missing_from_success:
                 sym_upper = str(sym).upper()
-                if sym_upper not in present:
+                provider_sym = group_aliases.get(sym_upper, sym_upper)
+                try:
+                    single = download_price_panel(
+                        symbols=[provider_sym],
+                        start_date=group_start_date,
+                        end_date=end_date,
+                        chunk_size=1,
+                    )
+                    single = apply_provider_aliases(
+                        single,
+                        {sym_upper: provider_sym} if provider_sym != sym_upper else {},
+                    )
+                except Exception as single_exc:
                     download_failed_symbols.append(sym_upper)
-                    download_errors[sym_upper] = "empty_download"
+                    download_errors[sym_upper] = str(single_exc)
+                    continue
+                if single.empty or sym_upper not in set(single.get("ticker", pd.Series(dtype=str)).astype(str).str.upper()):
+                    download_failed_symbols.append(sym_upper)
+                    download_errors[sym_upper] = "empty_download_after_individual_retry"
+                else:
+                    retry_frames.append(single)
+            if retry_frames:
+                frame = pd.concat([frame, *retry_frames], ignore_index=True)
             return frame
 
         if missing_symbols:
             fetched_frames.append(fetch_group(missing_symbols, start_date))
-        # Group incomplete symbols by their individual tail-start date to avoid
-        # leaving gaps when stale symbols have differing max_dates.
-        if incomplete_symbols:
+        # Group stale or anchor-incomplete symbols by their individual start
+        # date so historical holes are repaired instead of hidden by max_date.
+        tail_or_anchor_symbols = sorted(set(download_symbols) - set(missing_symbols))
+        if tail_or_anchor_symbols:
             groups: dict[str, list[str]] = {}
-            for sym in incomplete_symbols:
+            for sym in tail_or_anchor_symbols:
                 tail_start = download_start_by_symbol[sym]
                 groups.setdefault(tail_start, []).append(sym)
             for tail_start, group_syms in groups.items():
@@ -363,6 +405,13 @@ def ensure_price_panel(
             cache_write.to_parquet(cache_path_obj, index=False)
         panel = filter_panel_window(panel, start_date=start_date, end_date=end_date)
 
+    final_coverage = validate_symbol_coverage(
+        panel,
+        symbols=sorted(active_symbol_set),
+        current_session=end_date,
+        required_anchor_dates=required_anchor_dates,
+        required_history_offsets=required_history_offsets,
+    )
     meta = {
         "requested_start_date": start_date,
         "requested_end_date": end_date,
@@ -383,6 +432,7 @@ def ensure_price_panel(
         "cache_path": str(cache_path_obj) if cache_path_obj else None,
         "local_sources": [str(path) for path in DEFAULT_LOCAL_PANEL_PATHS if path.exists()],
         "cache_source": cache_source,
+        "coverage_validation": final_coverage,
     }
     return panel, meta
 
@@ -394,6 +444,65 @@ def _coverage_by_symbol(panel: pd.DataFrame) -> dict[str, dict[str, pd.Timestamp
     return {
         str(ticker): {"min_date": row["min"], "max_date": row["max"]}
         for ticker, row in grouped.iterrows()
+    }
+
+
+def validate_symbol_coverage(
+    panel: pd.DataFrame,
+    *,
+    symbols: Sequence[str],
+    current_session: str,
+    required_anchor_dates: Sequence[str] = (),
+    required_history_offsets: Sequence[int] = (),
+) -> dict:
+    requested = sorted({str(symbol).upper() for symbol in symbols})
+    normalized = standardize_panel(panel) if not panel.empty else panel
+    dates_by_symbol = {
+        str(ticker).upper(): {str(pd.Timestamp(value).date()) for value in group["date"]}
+        for ticker, group in normalized.groupby("ticker")
+    } if not normalized.empty else {}
+    current = str(pd.Timestamp(current_session).date())
+    anchors = {str(pd.Timestamp(value).date()) for value in required_anchor_dates}
+    offsets = sorted({int(offset) for offset in required_history_offsets if int(offset) > 0})
+    offset_anchors: dict[str, str | None] = {}
+    session = current
+    anchors_by_offset: dict[int, str] = {}
+    for step in range(1, max(offsets, default=0) + 1):
+        session = prev_trading_day(session)
+        anchors_by_offset[step] = session
+    for offset in offsets:
+        anchor = anchors_by_offset.get(offset)
+        offset_anchors[str(offset)] = anchor
+        anchors.add(anchor)
+    anchors = sorted(anchors)
+    missing_current = [symbol for symbol in requested if current not in dates_by_symbol.get(symbol, set())]
+    missing_anchors = {
+        anchor: [symbol for symbol in requested if anchor not in dates_by_symbol.get(symbol, set())]
+        for anchor in anchors
+    }
+    missing_anchors = {anchor: missing for anchor, missing in missing_anchors.items() if missing}
+    unresolved_offsets = [int(offset) for offset, anchor in offset_anchors.items() if anchor is None]
+    return {
+        "status": "OK" if not missing_current and not missing_anchors and not unresolved_offsets else "INCOMPLETE",
+        "current_session": current,
+        "required_anchor_dates": anchors,
+        "required_history_offsets": offsets,
+        "history_offset_anchor_dates": offset_anchors,
+        "symbols_required": requested,
+        "symbols_required_count": len(requested),
+        "symbols_current_count": len(requested) - len(missing_current),
+        "missing_current_session_symbols": missing_current,
+        "missing_required_anchor_symbols": missing_anchors,
+        "unresolved_history_offsets": unresolved_offsets,
+        "per_symbol": {
+            symbol: {
+                "min_date": min(dates_by_symbol[symbol]) if dates_by_symbol.get(symbol) else None,
+                "max_date": max(dates_by_symbol[symbol]) if dates_by_symbol.get(symbol) else None,
+                "has_current_session": current in dates_by_symbol.get(symbol, set()),
+                "anchors_present": [anchor for anchor in anchors if anchor in dates_by_symbol.get(symbol, set())],
+            }
+            for symbol in requested
+        },
     }
 
 

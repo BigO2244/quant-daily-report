@@ -14,7 +14,8 @@ import pandas as pd
 
 from core.feedback_loop_artifacts import write_feedback_loop_artifacts
 from core.strategy_registry import load_strategy_registry
-from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
+from core.orion_decision_lineage import build_decision_lineage, utc_now_iso
+from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame, current_signal_readiness
 from research.alpha_lab_v2.engine import build_target_snapshot
 from research.flow_detection.data import ensure_price_panel, load_universe
 from research.shadow_tracking.evidence_chain import write_alpha_evidence_chain_artifacts
@@ -44,10 +45,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start-date", default="2014-01-01")
     parser.add_argument("--output-dir", default="outputs/shadow_candidates")
     parser.add_argument("--price-cache-path", default="outputs/research/flow_detection_v1/price_panel.parquet")
+    parser.add_argument(
+        "--prior-lineage-anchor-for",
+        default=None,
+        help=(
+            "Migration-only: make this session's Orion replay ineligible for "
+            "capital and valid solely as the lineage anchor for the exact next "
+            "session."
+        ),
+    )
     return parser
 
 
-def _strategy_payload(*, definition: Any, snapshot: dict[str, Any], trade_date: str) -> dict[str, Any]:
+def _strategy_payload(
+    *,
+    definition: Any,
+    snapshot: dict[str, Any],
+    trade_date: str,
+    decision_lineage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     weights = snapshot["weights"]
     weights = weights[weights > 0].sort_values(ascending=False)
     rank_table = snapshot["rank_table"]
@@ -75,7 +91,7 @@ def _strategy_payload(*, definition: Any, snapshot: dict[str, Any], trade_date: 
         "hhi": _weight_hhi(weights),
         "effective_n": _effective_n(weights),
     }
-    return {
+    payload = {
         "strategy_name": definition.strategy_name,
         "strategy_slug": definition.strategy_slug,
         "source_variant": definition.source_variant,
@@ -92,6 +108,13 @@ def _strategy_payload(*, definition: Any, snapshot: dict[str, Any], trade_date: 
         "performance_summary": None,
         "scorecard_refresh_mode": "incremental_no_full_backtest",
     }
+    if decision_lineage is not None:
+        payload["decision_lineage"] = decision_lineage
+        payload["decision_eligible"] = True
+        payload["observation_status"] = "OK"
+        payload["data_status"] = "OK"
+        payload["coverage_status"] = (decision_lineage.get("coverage") or {}).get("status", "OK")
+    return payload
 
 
 def _weight_hhi(weights: pd.Series) -> float:
@@ -365,6 +388,15 @@ def _publish_latest(output_root: Path, trade_date: str) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     trade_date = pd.Timestamp(args.trade_date).strftime("%Y-%m-%d")
+    if args.prior_lineage_anchor_for:
+        from paper.trading_calendar import next_trading_day
+
+        expected_next = next_trading_day(trade_date)
+        if str(args.prior_lineage_anchor_for) != expected_next:
+            raise ValueError(
+                "--prior-lineage-anchor-for must be the exact next XNYS session "
+                f"({expected_next})"
+            )
     output_root = Path(args.output_dir)
     dated_dir = output_root / trade_date
     dated_dir.mkdir(parents=True, exist_ok=True)
@@ -377,16 +409,53 @@ def main(argv: list[str] | None = None) -> int:
         cache_path=args.price_cache_path,
         prefer_local=True,
         allow_download=False,
+        required_history_offsets=[1, 3, 21, 126, 252],
     )
     signals = build_alpha_lab_signal_frame(panel)
+    coverage_validation = dict(panel_meta.get("coverage_validation") or {})
+    signal_readiness = current_signal_readiness(
+        signals,
+        effective_date=trade_date,
+        required_symbols=list(coverage_validation.get("symbols_required") or sorted(set(universe + [BENCHMARK_SYMBOL]))),
+    )
+    coverage_validation["signal_readiness"] = signal_readiness
+    if signal_readiness["status"] != "OK":
+        coverage_validation["status"] = "INCOMPLETE"
+    if coverage_validation.get("status") not in (None, "OK"):
+        raise RuntimeError(
+            f"cannot refresh scorecard artifacts for {trade_date}: PER_SYMBOL_PRICE_COVERAGE_INCOMPLETE"
+        )
     if not shadow.trade_date_has_data(signals, trade_date=trade_date):
         reason = shadow.classify_no_data_reason(signals, trade_date=trade_date, allow_download=False)
         raise RuntimeError(f"cannot refresh scorecard artifacts for {trade_date}: {reason}")
 
     strategy_payloads: dict[str, dict[str, Any]] = {}
+    generated_at_utc = utc_now_iso()
     for definition in build_shadow_definitions(trade_date=trade_date):
         snapshot = build_target_snapshot(signals, definition.spec, trade_date=trade_date, start_date=args.start_date)
-        payload = _strategy_payload(definition=definition, snapshot=snapshot, trade_date=trade_date)
+        payload = _strategy_payload(
+            definition=definition,
+            snapshot=snapshot,
+            trade_date=trade_date,
+            decision_lineage=build_decision_lineage(
+                panel=panel,
+                signals=signals,
+                snapshot=snapshot,
+                model_version=definition.source_variant,
+                source_variant=definition.source_variant,
+                generated_at_utc=generated_at_utc,
+                coverage=coverage_validation,
+            ),
+        )
+        if (
+            args.prior_lineage_anchor_for
+            and definition.strategy_slug == "caerus_orion"
+        ):
+            payload["decision_eligible"] = False
+            payload["authority_scope"] = "PRIOR_LINEAGE_TRUST_ANCHOR"
+            payload["valid_as_prior_only_for"] = str(
+                args.prior_lineage_anchor_for
+            )
         strategy_payloads[definition.strategy_slug] = payload
         (dated_dir / f"{definition.strategy_slug}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

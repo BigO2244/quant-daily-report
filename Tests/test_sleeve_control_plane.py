@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from Tests.test_live_pilot_build_plan_from_precompute import _orion_shadow
 
 from core.sleeve_control_plane import (
     BATCH_SCHEMA_VERSION,
@@ -55,6 +56,11 @@ def _runtime_fixture(root: Path, trade_date: str = "2026-08-12") -> dict:
                 "target_weights": {"AAA": 0.6, "BBB": 0.4},
             },
         )
+    _orion_shadow(
+        root,
+        trade_date=trade_date,
+        weights={"AAA": 0.6, "BBB": 0.4},
+    )
     _write_json(
         shadow_root / "shadow_performance.json",
         {
@@ -259,23 +265,11 @@ def test_paper_authority_uses_prior_decision_eligible_snapshot_when_current_is_p
         }
     )
     _write_json(current_path, current)
-    prior = dict(current)
-    prior.update(
-        {
-            "trade_date": "2026-08-11",
-            "effective_trade_date": "2026-08-11",
-            "observation_status": "COMPLETE",
-            "decision_eligible": True,
-        }
+    prior_path = _orion_shadow(
+        tmp_path,
+        trade_date="2026-08-11",
+        weights={"AAA": 0.6, "BBB": 0.4},
     )
-    prior_path = (
-        tmp_path
-        / "outputs"
-        / "shadow_candidates"
-        / "2026-08-11"
-        / "caerus_orion.json"
-    )
-    _write_json(prior_path, prior)
 
     result = dispatch_all_sleeves(
         trade_date="2026-08-12",

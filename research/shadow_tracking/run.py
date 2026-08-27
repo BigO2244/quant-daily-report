@@ -12,7 +12,8 @@ from zoneinfo import ZoneInfo
 
 from alpha_stack.research.metrics import summarise_performance
 from core.strategy_registry import load_strategy_registry
-from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame
+from core.orion_decision_lineage import build_decision_lineage, utc_now_iso
+from research.alpha_lab_v1.signals import build_alpha_lab_signal_frame, current_signal_readiness
 from research.alpha_lab_v2.engine import build_target_snapshot, run_backtest
 from research.flow_detection.data import ensure_price_panel, load_universe
 
@@ -53,11 +54,23 @@ def main(argv: list[str] | None = None) -> int:
         end_date=args.end_date,
         cache_path=args.price_cache_path,
         allow_download=bool(args.allow_download),
+        required_history_offsets=[1, 3, 21, 126, 252],
     )
     signals = build_alpha_lab_signal_frame(panel)
+    coverage_validation = dict(panel_meta.get("coverage_validation") or {})
+    signal_readiness = current_signal_readiness(
+        signals,
+        effective_date=trade_date,
+        required_symbols=list(coverage_validation.get("symbols_required") or sorted(set(universe + [BENCHMARK_SYMBOL]))),
+    )
+    coverage_validation["signal_readiness"] = signal_readiness
+    if signal_readiness["status"] != "OK":
+        coverage_validation["status"] = "INCOMPLETE"
     print(resolve_trade_date(signals, requested_trade_date=args.trade_date, end_date=args.end_date))
     previous_trade_date = find_previous_trading_date(signals, trade_date=trade_date)
 
+    if coverage_validation.get("status") not in (None, "OK"):
+        print(f"[SHADOW] per-symbol coverage incomplete for trade_date={trade_date}")
     if not trade_date_has_data(signals, trade_date=trade_date):
         if write_preclose_reporting_snapshot(
             output_root=output_root,
@@ -121,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     definitions = build_shadow_definitions(trade_date=trade_date)
     strategy_payloads = {}
     backtest_results = {}
+    generated_at_utc = utc_now_iso()
     for definition in definitions:
         snapshot = build_target_snapshot(signals, definition.spec, trade_date=trade_date, start_date=args.start_date)
         backtest = run_backtest(signals, definition.spec, start_date=args.start_date, end_date=trade_date)
@@ -130,6 +144,16 @@ def main(argv: list[str] | None = None) -> int:
             snapshot=snapshot,
             backtest=backtest,
             trade_date=trade_date,
+            decision_lineage=build_decision_lineage(
+                panel=panel,
+                signals=signals,
+                snapshot=snapshot,
+                model_version=definition.source_variant,
+                source_variant=definition.source_variant,
+                generated_at_utc=generated_at_utc,
+                coverage=coverage_validation,
+            ),
+            decision_eligible=coverage_validation.get("status") in (None, "OK"),
         )
         strategy_payloads[definition.strategy_slug] = payload
         (dated_dir / f"{definition.strategy_slug}.json").write_text(json.dumps(payload, indent=2))
@@ -295,6 +319,7 @@ def write_preclose_reporting_snapshot(
                 "reporting_carried_from_trade_date": previous_trade_date,
                 "decision_eligible": False,
                 "decision_ineligibility_reason": "CURRENT_SESSION_CLOSE_NOT_AVAILABLE",
+                "decision_lineage_status": "CARRIED_PRIOR_INELIGIBLE",
             }
         )
         strategy_payloads[definition.strategy_slug] = carried
@@ -386,7 +411,15 @@ def write_preclose_reporting_snapshot(
     return True
 
 
-def build_strategy_payload(*, definition, snapshot: dict, backtest: dict, trade_date: str) -> dict:
+def build_strategy_payload(
+    *,
+    definition,
+    snapshot: dict,
+    backtest: dict,
+    trade_date: str,
+    decision_lineage: dict | None = None,
+    decision_eligible: bool | None = None,
+) -> dict:
     weights = snapshot["weights"]
     weights = weights[weights > 0].sort_values(ascending=False)
     rank_table = snapshot["rank_table"]
@@ -421,7 +454,7 @@ def build_strategy_payload(*, definition, snapshot: dict, backtest: dict, trade_
         performance_summary.get("avg_cash_weight"),
         concentration.get("gross_exposure"),
     )
-    return {
+    payload = {
         "strategy_name": definition.strategy_name,
         "strategy_slug": definition.strategy_slug,
         "source_variant": definition.source_variant,
@@ -437,6 +470,20 @@ def build_strategy_payload(*, definition, snapshot: dict, backtest: dict, trade_
         "alpha_per_dollar_deployed_proxy": performance_summary["alpha_per_dollar_deployed_proxy"],
         "performance_summary": performance_summary,
     }
+    if decision_lineage is not None:
+        eligible = (
+            bool(decision_eligible)
+            if decision_eligible is not None
+            else (decision_lineage.get("coverage") or {}).get("status") == "OK"
+        )
+        payload["decision_lineage"] = decision_lineage
+        payload["decision_eligible"] = eligible
+        payload["observation_status"] = "OK" if eligible else "INCOMPLETE_DATA"
+        payload["data_status"] = "OK" if eligible else "INCOMPLETE"
+        payload["coverage_status"] = (decision_lineage.get("coverage") or {}).get("status", "OK")
+        if not eligible:
+            payload["decision_ineligibility_reason"] = "ORION_CAUSAL_COVERAGE_INCOMPLETE"
+    return payload
 
 
 def classify_no_data_reason(signals: pd.DataFrame, *, trade_date: str, allow_download: bool = False) -> str:

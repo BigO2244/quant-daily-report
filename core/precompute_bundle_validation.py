@@ -202,6 +202,7 @@ def _sleeve_evaluation_failures(
                 failures.append(f"{item_prefix}:unauthorized_capital_use")
             if definition.capital_eligible:
                 opportunity = envelope.get("opportunity")
+                reason_codes = envelope.get("reason_codes") or []
                 source_artifacts = (
                     (envelope.get("provenance") or {}).get("source_artifacts")
                     if isinstance(envelope.get("provenance"), dict)
@@ -218,6 +219,12 @@ def _sleeve_evaluation_failures(
                     failures.append(f"{item_prefix}:capital_authority_not_decision_eligible")
                 if not isinstance(source_artifacts, list) or not source_artifacts:
                     failures.append(f"{item_prefix}:capital_authority_source_missing")
+                if "STALE_DECISION_SUSPECTED" in reason_codes or (
+                    isinstance(opportunity, dict)
+                    and opportunity.get("decision_status")
+                    == "STALE_DECISION_SUSPECTED"
+                ):
+                    failures.append(f"{item_prefix}:stale_decision_suspected")
 
     if actual_ids != expected_ids:
         failures.append(f"{prefix}:envelope_coverage_mismatch")
@@ -390,8 +397,19 @@ def validate_precompute_bundle(
     failures.extend(f"trade_date_mismatch:{item['file']}" for item in trade_date_mismatches)
 
     status = "OK" if not failures else "FAILED"
+    stale_decision_suspected = any(
+        "stale_decision" in failure.lower() or "orion_lineage" in failure.lower()
+        for failure in failures
+    )
     return {
         "status": status,
+        "decision_freshness_status": (
+            "STALE_DECISION_SUSPECTED"
+            if stale_decision_suspected
+            else "VERIFIED"
+            if status == "OK" and sealed_contract
+            else "BLOCKED"
+        ),
         "bundle_dir": str(bundle_dir),
         "trade_date": str(trade_date) if trade_date is not None else None,
         "validated_at": _utc_now(),
