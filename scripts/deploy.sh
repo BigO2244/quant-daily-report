@@ -78,11 +78,14 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
     python3 -m py_compile daily_quant_report.py core/live_pilot_guardrails.py \
         core/live_pilot_sha_guard.py core/precompute_contract.py \
         core/paper_target_authority.py core/precompute_bundle_validation.py \
+        core/orion_decision_lineage.py core/orion_precompute_guard.py \
         core/portfolio_operating_model.py core/causal_ownership_ledger.py \
         core/daily_portfolio_audit.py \
         scripts/finalize_deployment.py scripts/live_pilot_execute.py \
         scripts/live_pilot_build_plan_from_precompute.py \
         scripts/seal_paper_precompute_target.py \
+        scripts/hydrate_price_cache_only.py \
+        scripts/refresh_shadow_scorecard_artifacts.py \
         scripts/certify_execution_readiness.py \
         scripts/build_portfolio_history.py scripts/build_causal_paper_ledger.py \
         scripts/build_daily_portfolio_audit.py
@@ -92,6 +95,9 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         Tests/test_live_pilot_sha_guard.py \
         Tests/test_cron_live_pilot.py \
         Tests/test_paper_target_authority.py \
+        Tests/test_orion_upstream_freshness.py \
+        Tests/test_orion_downstream_freshness.py \
+        Tests/test_price_cache_only_hydrator.py \
         Tests/test_paper_execution_real_chain.py \
         Tests/test_portfolio_history_builder.py \
         Tests/test_portfolio_operating_model.py \
