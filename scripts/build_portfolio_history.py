@@ -523,8 +523,50 @@ def _build_nav(repo_root: Path, report_date: str | None) -> tuple[list[dict[str,
                 "turnover_dollars": None,
                 "turnover_pct": None,
                 "source": _relative(repo_root, source_path),
+                "source_as_of": str(raw.get("pulled_at_utc") or ""),
             }
         )
+
+    # Alpaca portfolio history can legitimately trail the just-completed
+    # session by one row.  The causal valuation is a same-pull broker account
+    # plus positions snapshot and is already required to reconcile before it
+    # is published.  Materialize that exact valuation as the current reporting
+    # row instead of weakening the same-as-of control or waiting for a later
+    # historical API response.  This does not rewrite daily_nav.csv.
+    valuation_path = repo_root / "outputs" / "ledger" / "paper" / "valuation_latest.json"
+    valuation = _read_json(valuation_path)
+    if isinstance(valuation, dict):
+        valuation_as_of = str(valuation.get("as_of") or "").strip()
+        valuation_date = _iso_date(valuation_as_of)
+        valuation_equity = _to_float(valuation.get("equity"))
+        reconciliation = valuation.get("reconciliation") or {}
+        if (
+            valuation.get("schema_version") == "caerus.causal_valuation.v1"
+            and reconciliation.get("status") == "PASS"
+            and valuation_date
+            and valuation_equity not in (None, 0)
+            and (not report_date or valuation_date == report_date)
+        ):
+            positions_value = _to_float(valuation.get("positions_market_value"))
+            gross_exposure = (
+                abs(float(positions_value)) / float(valuation_equity)
+                if positions_value is not None
+                else None
+            )
+            current_row = {
+                "date": valuation_date,
+                "equity": valuation_equity,
+                "cash": _to_float(valuation.get("cash")),
+                "gross_exposure": gross_exposure,
+                "net_exposure": gross_exposure,
+                "return_1d": None,
+                "turnover_dollars": None,
+                "turnover_pct": None,
+                "source": _relative(repo_root, valuation_path),
+                "source_as_of": valuation_as_of,
+            }
+            rows = [row for row in rows if row.get("date") != valuation_date]
+            rows.append(current_row)
     rows.sort(key=lambda row: row["date"])
     first_equity = next((row["equity"] for row in rows if row.get("equity") not in (None, 0)), None)
     prev_equity: float | None = None
@@ -881,13 +923,10 @@ def build_portfolio_history(
         )
 
     if positions_as_of and position_source and "valuation_latest.json" in position_source:
-        latest_nav_source_rows = _read_csv_rows(
-            root / "outputs" / "ledger" / "paper" / "daily_nav.csv"
-        )
-        latest_nav_source = latest_nav_source_rows[-1] if latest_nav_source_rows else {}
+        latest_nav_source = candidate_nav[-1] if candidate_nav else {}
         valuation_date = _iso_date(positions_as_of)
         if (
-            str(latest_nav_source.get("pulled_at_utc") or "") != positions_as_of
+            str(latest_nav_source.get("source_as_of") or "") != positions_as_of
             or _iso_date(latest_nav_source.get("date")) != valuation_date
             or (report_date and valuation_date != report_date)
         ):
