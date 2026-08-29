@@ -2,7 +2,8 @@
 # Morning Research Agent — 6:30 AM ET weekdays
 # Runs the Claude research agent to score overnight news, arxiv, and earnings.
 # Writes quant_research_agent/outputs/digest_YYYY-MM-DD.json
-# Consumed at 7:00 AM by the precompute pipeline via the thematic overlay.
+# Advisory research output only. Canonical precompute has no active digest
+# consumer, so success or failure cannot change capital or execution behavior.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -39,8 +40,8 @@ python3 -m quant_research_agent.main >> "${LOG_FILE}" 2>&1 || EXIT_CODE=$?
 if [[ ${EXIT_CODE} -eq 0 ]]; then
     echo "OK: research digest written to quant_research_agent/outputs/digest_${RUN_DATE}.json" | tee -a "${LOG_FILE}"
 else
-    echo "WARN: research agent failed (exit ${EXIT_CODE}) — thematic overlay will use prior digest" | tee -a "${LOG_FILE}"
-    # Non-fatal: thematic overlay accepts digests up to 3 days old
+    echo "WARN: advisory research agent failed (exit ${EXIT_CODE}) — canonical precompute is unaffected" | tee -a "${LOG_FILE}"
+    # Non-fatal: this advisory artifact has no canonical precompute consumer.
     EXIT_CODE=0
 fi
 

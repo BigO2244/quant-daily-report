@@ -186,14 +186,33 @@ non-trading Artifact Governance + Operational Telemetry backlog phase.
 
 ---
 
+## Workflow Authority Inventory
+
+Before declaring a Caerus workflow present, absent, active, or blocked, inspect
+all four authorities in `docs/governance/WORKFLOW_AUTHORITY_REGISTRY.md`:
+
+1. Codex automations under `$CODEX_HOME/automations/`;
+2. the nearest workspace and project `AGENTS.md` plus referenced operating
+   documents;
+3. deployed VM cron, runtime state, and current artifacts; and
+4. GitHub branches and workflows.
+
+Repository cron is not the sole automation authority. In particular, the
+owner-approved Alpha Lab weekend research cycle is an external Codex automation
+running Sunday from 00:05 through 05:00 America/New_York. Its versioned
+research contract lives on the canonical `project/alpha-lab` branch. Do not
+duplicate it as a GitHub Action or production VM cron job.
+
+---
+
 ## Scheduled Automation — Full Pipeline
 
-Five phases run on the VM weekdays. Install with `crontab scripts/crontab.txt`.
+The following production operations run on the VM. Install with
+`crontab scripts/crontab.txt`.
 
 | Time (ET) | Phase | Script | Output |
 |---|---|---|---|
-| 1:00 AM | 0a — Overnight agents | `scripts/cron_overnight.sh` | `outputs/overnight_signals/YYYY-MM-DD.json` |
-| 6:30 AM | 0b — Claude research digest | `scripts/cron_research.sh` | `quant_research_agent/outputs/digest_YYYY-MM-DD.json` |
+| 6:30 AM | Advisory research digest | `scripts/cron_research.sh` | `quant_research_agent/outputs/digest_YYYY-MM-DD.json`; non-capital and not consumed by canonical precompute |
 | 7:00 AM | 1 — Precompute | `scripts/cron_precompute.sh` | Immutable session + full sleeve decisions + one account allocation |
 | 9:35 AM | 2 — Order execution | `scripts/cron_execute.sh` | Exact Alpaca PAPER equity orders; options disabled |
 | 10:00 AM | 3 — Confirmation + email | `scripts/cron_confirm.sh` | Email report |
@@ -208,8 +227,10 @@ configured account allocation → independent Risk → exact execution → broke
 reconciliation → causal ownership → valuation → daily audit/reporting. The
 post-precompute shadow refresh is research-only and cannot mutate the seal.
 
-Overnight signals are accepted up to 3 days old; research digest up to 3 days
-old. Non-fatal failures in 0a/0b do not block Phase 1.
+There is no deployed 1:00 AM overnight-agent job. The 6:30 AM digest is an
+advisory research artifact and has no active consumer in canonical precompute;
+its success or failure cannot change the session, sleeve decisions, allocation,
+or execution plan.
 
 Shadow generation is best-effort only:
 - wrapper: `scripts/run_shadow_candidates_daily.sh`
@@ -337,43 +358,21 @@ Regime-switching multi-sleeve equity engine. Four components:
 | `ENABLE_MEAN_REVERSION` | `false` | Gated — shadow validation pending |
 | `ENABLE_VALUE_SLEEVE` | `false` | Gated — needs PIT-safe fundamentals |
 
-### Overnight Research Agents (`overnight_agents/`)
+### Retired overnight/thematic design
 
-Seven agents run nightly at 8 PM ET via `python -m overnight_agents.orchestrator`.
-Output: `outputs/overnight_signals/YYYY-MM-DD.json`.
-
-| Agent | Data Source | Signal |
-|---|---|---|
-| `liquidity` | FRED: WALCL, RRPONTSYD, WTREGEN, WRESBAL | Expanding / contracting Fed liquidity |
-| `gamma_regime` | SPY options chain (yfinance) + Black-Scholes GEX | Positive / negative / neutral gamma |
-| `etf_flows` | 11 sector ETFs + 4 broad ETFs (yfinance) | Sector rotation pressure |
-| `earnings_revision` | yfinance analyst recs + EPS estimates, 20 tickers | Positive / negative revision |
-| `commodity` | FRED: WTI, nat gas; yfinance: GLD, BDRY, DBA | Inflationary / deflationary pressure |
-| `insider_activity` | SEC EDGAR Form 4 XML (data.sec.gov/submissions API) | Cluster buys / sells, 21-day window |
-| `sentiment` | AAII survey XLS + research digest news tone | Contrarian sentiment signal |
-
-Orchestrator: `overnight_agents/orchestrator.py`
-- `run_all(as_of_date, agent_filter, dry_run)` — runs agents, writes JSON
-- `load_latest(as_of, max_age_days=3)` — consumed by thematic overlay
-- CLI: `python -m overnight_agents.orchestrator --agents gamma liquidity --dry-run`
-
-### Thematic Overlay (`alpha_stack/research_signal/thematic_overlay.py`)
-
-Bridges research signals into trend sleeve scoring. Merges two sources:
-- **Source 1**: Claude research digest (`quant_research_agent/outputs/digest_*.json`)
-  — max score per ticker across all items; bearish items get 50% haircut
-- **Source 2**: Overnight agent signals
-  — insider cluster buys → +0.75; gamma negative → +0.10 uniform; liquidity contracting → -0.10
-
-Combined boost applied **before** percentile rank in trend sleeve (weight: 0.15).
-Files accepted up to 3 days old.
+Earlier documentation described an `overnight_agents` package and thematic
+overlay that would feed precompute. Those modules and the corresponding cron
+job are not present in the canonical repository and are not deployed. Retain
+historical reports for lineage, but do not describe this design as operating
+behavior or infer a missing production input from its absence.
 
 ### Claude Research Agent (`quant_research_agent/`)
 
 Runs at 6:30 AM ET via `python -m quant_research_agent.main`.
 Ingests: arxiv papers, earnings releases, macro data, news headlines.
 Scores each item against 5 themes and 14-ticker watchlist using Claude.
-Items scoring ≥ 0.40 enter the digest JSON consumed by thematic overlay.
+Items scoring ≥ 0.40 enter the advisory digest JSON. Canonical precompute does
+not currently consume that artifact.
 
 Themes: `ai_energy_nexus`, `ai_infrastructure`, `defense_supercycle`,
 `earnings_catalyst`, `macro_regime`.
@@ -534,9 +533,6 @@ Four independent layers prevent position and regime whipsaw:
 | `alpha_stack/regime/hysteresis.py` | Anti-whipsaw hysteresis controller |
 | `alpha_stack/sleeves/trend.py` | Trend/momentum sleeve — primary alpha engine |
 | `alpha_stack/sleeves/quality.py` | Quality sleeve — ROE/ROIC/leverage |
-| `alpha_stack/research_signal/thematic_overlay.py` | Merges Claude digest + overnight signals into score boost |
-| `overnight_agents/orchestrator.py` | Runs all 7 overnight research agents |
-| `overnight_agents/base.py` | BaseAgent ABC — error handling, neutral stub |
 | `quant_research_agent/main.py` | Claude research digest producer |
 | `quant_research_agent/config/strategy_context.yaml` | Themes, watchlist, scoring calibration |
 | `core/options_overlay_shadow.py` | Options strategy selection + shadow artifacts |
@@ -548,8 +544,7 @@ Four independent layers prevent position and regime whipsaw:
 | `config/options_execution_policy.json` | Options execution gates — `allow_live_submission` flag |
 | `brokers/alpaca_broker.py` | Alpaca broker — equity + options order submission |
 | `scripts/crontab.txt` | Full cron schedule — install with `crontab scripts/crontab.txt` |
-| `scripts/cron_overnight.sh` | Phase 0a — runs overnight agents at 8 PM ET |
-| `scripts/cron_research.sh` | Phase 0b — runs Claude research agent at 6:30 AM ET |
+| `scripts/cron_research.sh` | Advisory Claude research digest at 6:30 AM ET; no canonical precompute consumer |
 | `scripts/cron_precompute.sh` | Phase 1 — 7:00 AM ET precompute |
 | `scripts/cron_execute.sh` | Phase 2 — 9:35 AM ET order execution |
 | `scripts/cron_confirm.sh` | Phase 3 — 10:00 AM ET confirmation + email |

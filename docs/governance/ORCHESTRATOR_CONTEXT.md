@@ -93,6 +93,7 @@ artifacts and an explicit research-to-production promotion ladder.
 
 ## Canonical Governance References
 
+- `docs/governance/WORKFLOW_AUTHORITY_REGISTRY.md`
 - `docs/governance/caerus_investment_doctrine.md`
 - `docs/governance/CURRENT_RESEARCH_ROADMAP.md`
 - `docs/governance/fr_active_backlog.md`
@@ -101,6 +102,15 @@ artifacts and an explicit research-to-production promotion ladder.
 - `docs/governance/CODEX_TASK_TEMPLATE.md`
 - `docs/governance/STRATEGIC_ESCALATION_POLICY.md`
 - `config/research/strategy_registry.json`
+
+## Cross-Authority Workflow Rule
+
+Workflow truth is resolved across Codex automations, workspace/project
+operating files, deployed VM state, and GitHub. Repository cron alone cannot
+prove that a research workflow is absent. The owner-approved Alpha Lab weekend
+research cycle runs through Codex Sunday at 00:05 America/New_York and remains
+research-only. Its presence does not grant automatic experiment, Shadow,
+Paper, Live, allocation, or execution authority.
 
 ## Current Priority Stack
 
