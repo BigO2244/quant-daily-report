@@ -7,11 +7,18 @@ production deployment, capital change, or strategy promotion was performed.
 
 ## Executive verdict
 
-Monday is **RED / fail closed under the new certification standard**. The most
-recent session proves five of six controls, but the security-universe input is
-explicitly labeled `NON_DECISION_GRADE_UNIVERSE`. The 20-session Trading
-Integrity Rate is therefore **0/20 (0%)**. This is a strict evidence result, not
-a claim that all twenty sessions traded incorrectly.
+Monday is **YELLOW / ready to trade within existing lane authority**. Lyra Live
+and Orion PAPER remain active; Shadow remains non-capital. The retrospective
+20-session Trading Integrity Rate is **0/20 (0%)** because the evidence standard
+is new and the most recent session proves five of six controls. That assurance
+baseline is not itself a trading halt or a change in capital authority.
+
+The remaining current-session exception is universe pedigree, explicitly
+labeled `NON_DECISION_GRADE_UNIVERSE`. It blocks a fully certified rating and
+blocks scaling or promotion claims. It does not show stale prices, a stale
+decision, artifact divergence, broker mismatch, or unsafe order lineage. Paper
+continues under its existing fail-closed execution controls while the PIT
+universe work is completed.
 
 The repeated Orion targets were investigated. The target did not remain static
 because computation froze: market, feature, and rank hashes changed daily.
@@ -192,7 +199,7 @@ and Live retain progressively higher evidence, control, and capital gates.
 | Dimension | Grade | Evidence |
 |---|---:|---|
 | Trading Integrity | D | 0/20 sessions fully certified; latest is 5/6 |
-| Operational Control | C | Fail-closed lineage exists and two root causes are repaired locally; PIT universe, historical NAV restatements, and deployment remain open |
+| Operational Control | C+ | Canonical lane truth is deployed and fail-closed lineage exists; PIT universe, historical NAV restatements, and hardening deployment remain open |
 | Alpha Quality | C- | Three sleeves are one highly correlated momentum family with severe drawdowns |
 | Research Throughput | D+ | No canonical research-event ledger, zero challenge reads, and most gates blocked; several hypotheses were nevertheless resolved honestly |
 
@@ -212,13 +219,15 @@ and Live retain progressively higher evidence, control, and capital gates.
 
 ## CIO brief for Monday
 
-**OPERATIONS: RED.** Trading Integrity Rate 0/20. Current exceptions: non-PIT
-decision universe; 38 unresolved historical NAV restatements; hardening commit
-not deployed.
+**OPERATIONS: YELLOW.** Trading Integrity Rate 0/20 is a retrospective evidence
+baseline, not a halt. No current transaction-lineage or broker-reconciliation
+failure is known. Exceptions: non-PIT decision-universe pedigree; 38 unresolved
+historical NAV restatements; hardening commit not deployed.
 
-**CAPITAL.** Live remains blocked. Paper Orion remains PAPER but should fail
-closed under the certification rule until the universe exception is resolved or
-explicitly governed. Shadow remains research-only; no promotion was made.
+**CAPITAL.** Lyra Live is active, funded, and recurring. Orion PAPER is active
+and should continue trading under its existing authority and execution gates.
+Shadow remains non-capital; no promotion was made. The disabled legacy FR-104
+Live pilot is a separate lane and does not negate Lyra Live.
 
 **ALPHA.** Best relative evidence: Lyra, but not independent of Orion/Polaris.
 Worst deterioration: Orion, -6.40% over 3M and -5.92% over the latest ten
@@ -234,10 +243,9 @@ control.
 
 ## CIO decisions — maximum three
 
-1. Decide whether Monday PAPER must remain halted under strict certification,
-   or explicitly accept the current non-PIT 200-name universe as a temporary,
-   forward-only operational exception with an expiry date. Atlas recommends the
-   halt; an unlabeled exception would invalidate the framework.
+1. No capital decision is required for Monday: keep Lyra Live and Orion PAPER
+   operating under their current independent authorities; do not scale either
+   while the certification window is incomplete.
 2. Authorize the scoped hardening commit for normal deployment review and the
    audited historical NAV restatement procedure. No direct production mutation
    should occur outside that path.

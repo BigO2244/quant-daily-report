@@ -24,6 +24,13 @@ Trading Integrity Rate is:
 The target is 20/20 sessions and 120/120 control observations. This is not an
 average-quality score: 119/120 still means the window is RED.
 
+The certifier is a read-only assurance score, not mutation authority and not an
+automatic capital-lane halt. A low historical rate cannot revoke an existing
+Live or PAPER owner decision. Current-session transaction lineage, artifact,
+execution, and reconciliation gates continue to fail closed at their existing
+boundaries. A bounded universe-pedigree gap prevents full certification and
+capital scaling, but does not by itself prove that a current order is unsafe.
+
 ## Run
 
 ```bash
@@ -43,7 +50,12 @@ a fully GREEN window.
   market/features/ranks differ from the prior computation and the target is a
   deterministic output of the governed selection rule.
 - `legacy_current_universe` and `NON_DECISION_GRADE_UNIVERSE` fail the Data/PIT
-  control. Fresh prices cannot compensate for non-decision-grade membership.
+  control. Fresh prices cannot compensate for non-decision-grade membership,
+  and no scaling or promotion claim may use that session as fully certified.
+- Do not translate a retrospective RED certification window into “PAPER is
+  halted” or “Live is blocked.” Capital-lane authority comes from the operating
+  lane registry and its scoped owner decisions. A halt requires an applicable
+  current-session safety gate, reconciliation failure, or explicit owner action.
 - A correct fail-closed no-trade day is operationally safe, but it is not a
   certified session when the upstream decision or artifact did not exist.
 - Historical sessions are never retroactively upgraded without their original

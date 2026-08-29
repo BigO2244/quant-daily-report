@@ -31,15 +31,18 @@ CIO ATTENTION (maximum three)
 
 - `GREEN`: 20/20 sessions certified and no unresolved capital, broker, or
   research-integrity exception.
-- `YELLOW`: no current-session execution integrity failure, but at least one
-  bounded exception or evidence gap remains.
-- `RED`: the current session is uncertified, lineage cannot be proved, broker
-  reconciliation is not green, or a required control is unavailable. Trading
-  fails closed.
+- `YELLOW`: no current-session transaction-lineage or broker-integrity failure,
+  but at least one bounded exception, historical certification gap, or
+  universe-pedigree limitation remains. No scaling occurs.
+- `RED`: current-session decision/artifact/execution lineage cannot be proved,
+  broker reconciliation is not green, or another applicable execution safety
+  gate fails. The affected lane fails closed; other independently governed
+  lanes are not inferred to be halted.
+- The certification window is an assurance metric, not capital authority. A
+  retrospective RED window does not by itself halt an active lane.
 - Unchanged state is omitted. Counts of builds, variants, and experiments are
   not operating metrics.
 - Research throughput is terminal verdicts on credible independent hypothesis
   families per calendar month. Parameter variants do not count.
 - Atlas must state a challenge when the evidence contradicts CIO intuition; an
   agreeable summary is not a substitute for the challenge.
-
