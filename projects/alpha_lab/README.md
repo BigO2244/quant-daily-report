@@ -4,6 +4,11 @@ Alpha Lab is a dedicated place to discuss and test investment strategies
 without mixing strategy research with execution, deployment, or live-pilot
 operations.
 
+Its product is a better investment decision: a novel candidate, a fast and
+honest falsification, a terminal evidence verdict, or a precise request for
+owner support. Data collection and research infrastructure are useful only
+when they directly produce one of those outcomes.
+
 ## The question
 
 For every idea, Alpha Lab asks:
@@ -28,14 +33,63 @@ The default is discussion. When an idea is ready to become a controlled research
 claim, say `FREEZE HYPOTHESIS`. When its preregistration is complete and you want
 the frozen test executed, say `RUN EXPERIMENT`.
 
+Alpha Lab should also originate ideas proactively. It should not wait for Brett
+or Atlas to provide every thesis. New proposals are screened for novelty and
+data feasibility before they are presented as actionable.
+
+## Operating loop
+
+For each active idea, Alpha Lab follows a deliberately small loop:
+
+```text
+Review institutional memory
+→ build an opportunity map from successes, failures, blockers, and combinations
+→ generate candidates from that evidence
+→ check novelty and data feasibility
+→ propose cheapest honest falsifier
+→ freeze and run only with Brett's transition instruction
+→ deliver a verdict or one exact support request
+→ advance, iterate once, or park
+```
+
+A blocker may consume one review cycle. If it does not materially improve,
+Alpha Lab must pivot to a bounded alternative, ask Brett for the missing
+authority or resource, or park the idea and originate a more feasible one. It
+must not turn a blocked thesis into an open-ended infrastructure program.
+
+The target cadence is weekly: screen no more than three ideas, select no more
+than one for a cheap falsifier, and run the bounded research window Sunday from
+00:05 through 05:00 America/New_York. The weekly output is one rejection,
+freeze-ready candidate, authorized experiment result, or exact owner-support
+request. New blockers are reviewed for notification at 07:15 on weekdays.
+Formal trials and holdout access remain subject to the existing explicit owner
+authorization rules.
+
+The executable Sunday schedule lives in Codex automation state. Its durable,
+auditable scope and rollback boundary are recorded in
+`AUTOMATION_CONTRACT.md`.
+
 ## Durable surfaces
 
 - `CURRENT_STATE.md` — honest baseline of what Caerus presently knows.
 - `STRATEGY_BACKLOG.md` — candidate mechanisms, not a leaderboard of Sharpe.
-- `EXPERIMENT_LEDGER.md` — append-only record of every frozen experiment.
+- `EXPERIMENT_LEDGER.md` — preserved human experiment history and projection.
+- `MODEL_COMPENDIUM.md` — readable inventory of every experiment and registered
+  model, with reusable positive, negative, blocked, and lifecycle lessons.
+- `RESEARCH_IDEA_GENERATION_WORKFLOW.md` — mandatory memory-first workflow used
+  before Alpha generates or freezes a new model candidate.
+- `AUTOMATION_CONTRACT.md` — bounded Alpha Sunday scope, prohibitions, review,
+  and rollback contract for the external Codex automation.
+- `factory/research_ledger.py` — typed global wave/family/experiment/trial,
+  verified-inference, single-use challenge, and independent-review authority
+  backed by the GCP append-only event chain.
 - `DECISION_LOG.md` — owner decisions to pursue, park, or kill.
 - `templates/HYPOTHESIS.md` — preregistration contract.
 - `templates/ALPHA_CARD.md` — standard evidence and classification packet.
+- `templates/LEGACY_MODEL_INTAKE.md` — provenance-safe intake for research that
+  predates Alpha Lab, including the pending short-MA study.
+- `legacy_model_intakes/` — completed, hashed legacy-study review packets that
+  must be searched before a new hypothesis can freeze.
 - `hypotheses/` — immutable frozen specifications.
 - `factory/` — PIT contracts, provider gates, deterministic manifests, and the
   append-only evidence store.
@@ -76,6 +130,12 @@ Alpha Lab reuses rather than duplicates the parent repo's:
 
 Alpha Lab can produce research evidence. It cannot change production behavior
 or confer promotion authority.
+
+When owner support is needed, the existing Alpha Lab CIO review automation may
+notify Brett even before a candidate reaches promotion readiness. The notice
+must ask for one specific decision, give realistic choices and costs, and state
+what happens if support is declined. Unchanged healthy or blocked states remain
+quiet.
 
 ## Four-lane factory command
 

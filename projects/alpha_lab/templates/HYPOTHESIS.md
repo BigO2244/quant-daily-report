@@ -1,5 +1,30 @@
 # HYP-YYYY-NNN — Hypothesis Title
 
+## Memory-derived opportunity map and prior-model review — required before freeze
+
+- Model compendium path and SHA-256:
+- Experiment ledger reviewed at:
+- Strategy backlog reviewed at:
+- Completed legacy-intake directory reviewed at:
+- Closest registered experiment IDs:
+- Closest registered strategy IDs:
+- Relevant completed legacy intake IDs, or `NONE`:
+- Applicable negative or positive lessons:
+- Opportunity-map gaps or combinations considered:
+- Why institutional memory led to this proposal:
+- Proposed relationship: `NEW_MECHANISM`, `CHILD_EXPERIMENT`,
+  `COMBINED_MECHANISMS`, or `DUPLICATE_REJECT`:
+- Material economic difference from the closest prior work:
+- For `COMBINED_MECHANISMS`, incremental claim beyond each standalone model:
+- For `COMBINED_MECHANISMS`, standalone and simple-allocation baselines:
+- Parameter-only similarities that are not novel:
+- Prior construction or failure mode this test must not repeat:
+- Prior-model review completed by:
+- Prior-model review completed at:
+
+`DUPLICATE_REJECT`, missing source hashes, or an incomplete search blocks
+`FROZEN` status and outcome-bearing testing.
+
 ## Claim
 
 One falsifiable sentence.
@@ -44,13 +69,23 @@ Choose one: `ALPHA_CANDIDATE`, `FACTOR_HARVEST_CANDIDATE`,
 
 ## Frozen experiment
 
+- Hypothesis family ID:
+- Family generation / experiment ID:
+- Parent family or experiment IDs:
+- Exploratory wave ID and frozen membership:
+- Family scope hash:
 - Primary metric:
+- Expected direction, null value, and minimum economic hurdle:
+- Frozen primary variant ID:
 - Secondary diagnostics:
 - Walk-forward design:
-- Untouched challenge period:
+- Resampling/independence unit and effective-sample floor:
+- Untouched challenge epoch ID, exact period, and panel hash:
 - Cost and capacity assumptions:
-- Maximum variants in this family:
-- Multiple-testing correction:
+- Maximum statistical trial units in this family generation:
+- Nested ML selection-trial budget, if applicable:
+- Within-family FWER method:
+- Wave-level multiple-testing method and alpha/q:
 
 ## Pass criteria
 

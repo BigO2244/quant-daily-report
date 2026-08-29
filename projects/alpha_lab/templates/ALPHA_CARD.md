@@ -59,6 +59,17 @@ operational checkpoints from statistically meaningful performance evidence.
 
 Strongest objection, any broken claims, surviving claims, and unresolved gaps.
 
+## Reusable lessons
+
+- Evidence type: `POSITIVE`, `NEGATIVE`, `INCONCLUSIVE`, or `DATA_BLOCKED`.
+- What the result establishes:
+- What the result does not establish:
+- Failure or success mechanism:
+- Do not repeat:
+- Adjacent hypothesis still worth testing:
+- Revisit only if:
+- Compendium entry updated: `YES` / `NO`.
+
 ## Verdict
 
 Research verdict: `REJECT`, `ITERATE`, or
