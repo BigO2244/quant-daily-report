@@ -98,6 +98,39 @@ def test_sealed_target_tamper_fails_closed(tmp_path: Path) -> None:
     assert "paper_target:file_hash_mismatch:signals" in failures
 
 
+def test_seal_is_independent_of_mutable_shadow_publication(tmp_path: Path) -> None:
+    payload_path = _sealed_fixture(tmp_path)
+    bundle = payload_path.parent
+    package = json.loads((bundle / "paper_target_package.json").read_text())
+    source_ref = package["source_strategy_artifact"]
+    sealed_source = tmp_path / source_ref["path"]
+    mutable_source = (
+        tmp_path
+        / "outputs"
+        / "shadow_candidates"
+        / "2026-08-14"
+        / "caerus_orion.json"
+    )
+
+    assert sealed_source == bundle / "sealed_source_caerus_orion.json"
+    assert sealed_source.read_bytes() == mutable_source.read_bytes()
+
+    mutable_source.write_text('{"rebuilt": true}\n', encoding="utf-8")
+    assert validate_sealed_paper_target_bundle(
+        bundle_dir=bundle,
+        trade_date="2026-08-14",
+        repo_root=tmp_path,
+    ) == []
+
+    sealed_source.write_text('{"tampered": true}\n', encoding="utf-8")
+    failures = validate_sealed_paper_target_bundle(
+        bundle_dir=bundle,
+        trade_date="2026-08-14",
+        repo_root=tmp_path,
+    )
+    assert "paper_target:source_strategy_hash_mismatch" in failures
+
+
 def test_readiness_certifies_target_not_fake_preopen_orders(tmp_path: Path) -> None:
     payload_path = _sealed_fixture(tmp_path)
     broker = FakeBroker(_account())

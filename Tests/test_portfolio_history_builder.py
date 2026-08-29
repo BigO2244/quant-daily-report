@@ -187,3 +187,60 @@ def test_append_only_can_be_disabled(tmp_path: Path) -> None:
     payload = build_portfolio_history(tmp_path, report_date="2026-03-05", append_only=False)
     nav_dates = {row["date"] for row in payload["nav"]}
     assert "2026-02-27" not in nav_dates  # not merged when append_only is off
+
+
+def test_causal_valuation_materializes_lagging_current_nav_row(tmp_path: Path) -> None:
+    ledger_dir = tmp_path / "outputs" / "ledger" / "paper"
+    ledger_dir.mkdir(parents=True)
+    (ledger_dir / "daily_nav.csv").write_text(
+        "date,equity,profit_loss,profit_loss_pct,base_value,source,pulled_at_utc\n"
+        "2026-08-26,10500,,,,alpaca_portfolio_history,2026-08-27T23:15:00Z\n",
+        encoding="utf-8",
+    )
+    (ledger_dir / "daily_state_latest.json").write_text(
+        json.dumps(
+            {
+                "days": [
+                    {
+                        "date": "2026-08-26",
+                        "cash": 500,
+                        "positions_market_value": 10000,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    valuation = {
+        "schema_version": "caerus.causal_valuation.v1",
+        "as_of": "2026-08-27T23:15:00Z",
+        "equity": 10625,
+        "cash": 625,
+        "positions_market_value": 10000,
+        "positions": [],
+        "reconciliation": {"status": "PASS"},
+    }
+    (ledger_dir / "valuation_latest.json").write_text(
+        json.dumps(valuation), encoding="utf-8"
+    )
+    (ledger_dir / "ownership_latest.json").write_text(
+        json.dumps(
+            {
+                "as_of": valuation["as_of"],
+                "reconciliation": {"status": "PASS"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_portfolio_history(
+        tmp_path,
+        report_date="2026-08-27",
+        require_causal_valuation=True,
+    )
+
+    assert payload["nav"][-1]["date"] == "2026-08-27"
+    assert payload["nav"][-1]["equity"] == 10625
+    assert payload["nav"][-1]["cash"] == 625
+    assert payload["nav"][-1]["source"].endswith("valuation_latest.json")
+    assert "Canonical NAV and causal valuation do not share one reporting as-of." not in payload["summary"]["warnings"]

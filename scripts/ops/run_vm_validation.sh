@@ -69,9 +69,11 @@ echo "[VM_VALIDATION] py_compile"
   core/operating_truth.py \
   core/lyra_live_portfolio.py \
   core/lyra_live_execution.py \
+  core/trading_integrity_certification.py \
   scripts/build_operating_truth.py \
   scripts/run_lyra_live_portfolio.py \
   scripts/manage_lyra_live_cron.py \
+  scripts/certify_trading_integrity.py \
   research_registry/sleeves/manifest.py \
   research_registry/sleeves/evidence.py \
   scripts/research/validate_sleeve_manifest.py \
@@ -87,6 +89,7 @@ echo "[VM_VALIDATION] targeted_pytest"
   Tests/test_operating_truth.py \
   Tests/test_lyra_live_portfolio.py \
   Tests/test_cron_command_validation.py \
+  Tests/test_trading_integrity_certification.py \
   -q
 
 echo "[VM_VALIDATION] operating_truth"

@@ -351,6 +351,39 @@ def seal_paper_target_bundle(
                 "prior_decision_lineage": prior_decision_lineage,
             }
         )
+
+    # Seal byte-identical copies of every capital-authoritative source inside
+    # the immutable precompute bundle.  Post-close shadow refreshes may replace
+    # dated publication paths; morning execution and later audits must never
+    # depend on those mutable paths.
+    sealed_source_paths: dict[str, Path] = {}
+    sealed_prior_source_path: Path | None = None
+    for row in capital_sources:
+        sleeve_id = str(row["sleeve_id"])
+        original_path = Path(row["path"])
+        sealed_path = bundle_dir / f"sealed_source_{sleeve_id}.json"
+        sealed_path.write_bytes(original_path.read_bytes())
+        if _file_hash(sealed_path) != str(row["sha256"]):
+            raise PaperTargetAuthorityError(
+                f"sealed capital sleeve source hash mismatch: {sleeve_id}"
+            )
+        row["original_path"] = original_path
+        row["path"] = sealed_path
+        sealed_source_paths[sleeve_id] = sealed_path
+        binding = row.get("prior_decision_lineage")
+        if sleeve_id == "caerus_orion" and isinstance(binding, dict):
+            original_prior = _resolve_repo_path(repo_root, binding.get("source_path"))
+            sealed_prior_source_path = bundle_dir / "sealed_prior_source_caerus_orion.json"
+            sealed_prior_source_path.write_bytes(original_prior.read_bytes())
+            if _file_hash(sealed_prior_source_path) != str(
+                binding.get("source_sha256") or ""
+            ):
+                raise PaperTargetAuthorityError(
+                    "sealed prior Orion source hash mismatch"
+                )
+            binding["source_path"] = _display_path(
+                repo_root, sealed_prior_source_path
+            )
     primary_id = control_registry.paper_capital_authority
     primary_source = next(
         row for row in capital_sources if row["sleeve_id"] == primary_id
@@ -436,6 +469,12 @@ def seal_paper_target_bundle(
             if not isinstance(candidate_source, Mapping) or not candidate_source.get("exists"):
                 continue
             raw_path = str(candidate_source.get("path") or "").strip()
+            if sleeve_id in sealed_source_paths and bool(
+                (candidate_envelope.get("eligibility") or {}).get(
+                    "capital_eligible"
+                )
+            ):
+                raw_path = _display_path(repo_root, sealed_source_paths[sleeve_id])
             if not raw_path or raw_path in observed_sources:
                 continue
             observed_sources.add(raw_path)
@@ -443,7 +482,11 @@ def seal_paper_target_bundle(
                 {
                     "name": f"sleeve_source:{sleeve_id}:{index}",
                     "path": raw_path,
-                    "sha256": candidate_source.get("sha256"),
+                    "sha256": (
+                        _file_hash(sealed_source_paths[sleeve_id])
+                        if sleeve_id in sealed_source_paths
+                        else candidate_source.get("sha256")
+                    ),
                     "required": bool(
                         (candidate_envelope.get("eligibility") or {}).get(
                             "capital_eligible"
@@ -742,21 +785,36 @@ def seal_paper_target_bundle(
     snapshot_path.write_text(_pretty_json(daily_snapshot), encoding="utf-8")
     signals_path.write_text(_pretty_json(signals_payload), encoding="utf-8")
     handoff_path.write_text(_pretty_json(handoff_payload), encoding="utf-8")
+    audit_artifacts: list[dict[str, Any]] = [
+        {"name": "session_manifest", "path": session_path},
+        {"name": "sleeve_evaluations", "path": sleeve_path},
+        {"name": "sleeve_decisions", "path": sleeve_decisions_path},
+        {"name": "portfolio_allocation", "path": allocation_path},
+        {"name": "paper_target_package", "path": target_path},
+        {"name": "daily_snapshot", "path": snapshot_path},
+        {"name": "signals", "path": signals_path},
+        {"name": "planned_execution_payload", "path": handoff_path},
+    ]
+    audit_artifacts.extend(
+        {
+            "name": f"sealed_source_{sleeve_id}",
+            "path": path,
+        }
+        for sleeve_id, path in sorted(sealed_source_paths.items())
+    )
+    if sealed_prior_source_path is not None:
+        audit_artifacts.append(
+            {
+                "name": "sealed_prior_source_caerus_orion",
+                "path": sealed_prior_source_path,
+            }
+        )
     audit_manifest = build_audit_manifest(
         trade_date=trade_date,
         session_id=session_manifest["session_id"],
         approved_target_hash=decision.content_hash,
         repo_root=repo_root,
-        artifacts=(
-            {"name": "session_manifest", "path": session_path},
-            {"name": "sleeve_evaluations", "path": sleeve_path},
-            {"name": "sleeve_decisions", "path": sleeve_decisions_path},
-            {"name": "portfolio_allocation", "path": allocation_path},
-            {"name": "paper_target_package", "path": target_path},
-            {"name": "daily_snapshot", "path": snapshot_path},
-            {"name": "signals", "path": signals_path},
-            {"name": "planned_execution_payload", "path": handoff_path},
-        ),
+        artifacts=tuple(audit_artifacts),
         generated_at=sealed_timestamp,
     )
     audit_manifest_path = bundle_dir / "audit_manifest.json"
@@ -1062,20 +1120,21 @@ def validate_sealed_paper_target_bundle(
             )
             if is_orion:
                 effective_date = str(source.get("source_effective_trade_date") or "")
+                binding = source.get("prior_decision_lineage")
                 previous_payload = None
+                previous_path: Path | None = None
+                previous_date = ""
                 try:
                     from paper.trading_calendar import prev_trading_day
 
                     previous_date = prev_trading_day(effective_date)
-                    previous_path = (
-                        repo_root
-                        / load_sleeve_control_registry()
-                        .require("caerus_orion")
-                        .source_artifact.format(trade_date=previous_date)
-                    )
+                    if isinstance(binding, Mapping):
+                        previous_path = _resolve_repo_path(
+                            repo_root, binding.get("source_path")
+                        )
                     if previous_path.is_file():
                         previous_payload = _read_object(previous_path)
-                except (TypeError, ValueError):
+                except (AttributeError, TypeError, ValueError):
                     pass
                 source_lineage_failures = validate_orion_decision_lineage(
                     source_payload,
@@ -1094,11 +1153,12 @@ def validate_sealed_paper_target_bundle(
                     decision_lineage
                 ):
                     failures.append("paper_target:source_orion_lineage_hash_mismatch")
-                binding = source.get("prior_decision_lineage")
                 expected_binding = package.get("prior_decision_lineage")
                 if binding != expected_binding or not isinstance(binding, Mapping):
                     failures.append("paper_target:source_prior_lineage_binding_mismatch")
-                elif previous_payload is not None:
+                elif previous_payload is None or previous_path is None:
+                    failures.append("paper_target:prior_lineage_binding_unreadable")
+                else:
                     previous_path_display = _display_path(repo_root, previous_path)
                     if (
                         binding.get("status") != "BOUND"

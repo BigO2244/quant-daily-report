@@ -307,7 +307,9 @@ def test_paper_lane_uses_exact_governed_orion_snapshot(tmp_path: Path) -> None:
 
     assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
     assert {row["symbol"] for row in plan["target_portfolio"]} == {"AAPL", "MSFT", "JNJ", "PNC", "SPG"}
-    assert plan["decision_source_artifact"]["path"] == str(source_path.relative_to(tmp_path))
+    assert plan["decision_source_artifact"]["path"] == str(
+        (payload_path.parent / "sealed_source_caerus_orion.json").relative_to(tmp_path)
+    )
     assert len(plan["decision_source_artifact"]["sha256"]) == 64
     assert plan["cash_target_weight"] == pytest.approx(0.05)
     assert plan["strategy_identity_validation"]["status"] == "PASS"
@@ -357,7 +359,9 @@ def test_paper_lane_uses_immediately_previous_trading_session_snapshot(
 
     assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
     source = plan["decision_source_artifact"]
-    assert source["path"] == str(source_path.relative_to(tmp_path))
+    assert source["path"] == str(
+        (payload_path.parent / "sealed_source_caerus_orion.json").relative_to(tmp_path)
+    )
     assert source["source_trade_date"] == "2026-08-07"
     assert source["source_effective_trade_date"] == "2026-08-07"
     assert source["decision_trade_date"] == trade_date
@@ -366,8 +370,11 @@ def test_paper_lane_uses_immediately_previous_trading_session_snapshot(
     assert source["source_session_policy"] == "SAME_OR_PREVIOUS_TRADING_SESSION"
     assert len(source["sha256"]) == 64
     identity = json.loads(Path(plan["source_signals"]).read_text())["strategy_identity"]
-    assert identity["execution_target_source"] == str(source_path.relative_to(tmp_path))
-    assert identity["shadow_baseline_source"] == str(source_path.relative_to(tmp_path))
+    sealed_source = str(
+        (payload_path.parent / "sealed_source_caerus_orion.json").relative_to(tmp_path)
+    )
+    assert identity["execution_target_source"] == sealed_source
+    assert identity["shadow_baseline_source"] == sealed_source
     assert identity["shadow_baseline_source_sha256"] == source["sha256"]
     assert identity["shadow_baseline_source_trade_date"] == "2026-08-07"
 
@@ -405,7 +412,9 @@ def test_paper_lane_skips_current_preclose_reporting_snapshot(
     )
 
     assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
-    assert plan["decision_source_artifact"]["path"] == str(prior_path.relative_to(tmp_path))
+    assert plan["decision_source_artifact"]["path"] == str(
+        (payload_path.parent / "sealed_source_caerus_orion.json").relative_to(tmp_path)
+    )
     assert plan["decision_source_artifact"]["source_trading_session_lag"] == 1
     policy = plan["target_attainment_policy"]
     assert policy["target_cash_weight"] == 0.05
@@ -597,7 +606,9 @@ def test_paper_lane_previous_session_rule_skips_exchange_holiday(
     )
 
     assert plan["status"] == "READY_FOR_MANUAL_APPROVAL"
-    assert plan["decision_source_artifact"]["path"] == str(source_path.relative_to(tmp_path))
+    assert plan["decision_source_artifact"]["path"] == str(
+        (payload_path.parent / "sealed_source_caerus_orion.json").relative_to(tmp_path)
+    )
     assert plan["decision_source_artifact"]["source_trade_date"] == "2026-09-04"
     assert plan["decision_source_artifact"]["source_trading_session_lag"] == 1
 

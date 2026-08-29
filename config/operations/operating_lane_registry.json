@@ -193,7 +193,18 @@
       "forbidden_claims": [
         "Live capital remains blocked"
       ]
+    },
+    {
+      "path": "docs/reports/2026-08-28-harden-discover-monday-readiness.md",
+      "required_claims": [
+        "Lyra Live is active, funded, and recurring.",
+        "Orion PAPER is active"
+      ],
+      "forbidden_claims": [
+        "Live remains blocked",
+        "Monday PAPER must remain halted"
+      ]
     }
   ],
-  "content_hash": "973c0576e0fd445bf4a25869b31c60403e4da7aca80d4f605dc7be5ea413b3a5"
+  "content_hash": "fc3e518335b0c812144270643429cc87f3c2e0c498c7c5dca7feacee5c6b4c7c"
 }
