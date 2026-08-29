@@ -1,0 +1,35 @@
+{
+  "schema_version": "caerus_alpha_lab_candidate_snapshot_v1",
+  "hypothesis_id": "HYP-YYYY-NNN",
+  "experiment_id": "EXP-YYYY-NNNN",
+  "title": "Candidate title",
+  "technique_family": "EVENT_STUDY",
+  "economic_mechanism": "The falsifiable economic mechanism.",
+  "classification": "UNPROVEN",
+  "captured_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "research_verdict": "PENDING",
+  "research_gates": {
+    "point_in_time_integrity": false,
+    "deterministic_replay": false,
+    "benchmark_and_factor_model": false,
+    "holdout_integrity": false,
+    "costs_and_capacity": false,
+    "independent_review": false
+  },
+  "owner_research_decision": "PENDING",
+  "shadow_status": "NOT_REQUESTED",
+  "shadow_observation_days": 0,
+  "shadow_review_checkpoints": [20, 60],
+  "last_reviewed_shadow_checkpoint": 0,
+  "shadow_gates": {
+    "artifact_freshness": false,
+    "nav_continuity": false,
+    "signal_and_holdings_validity": false,
+    "net_performance_passes_frozen_criteria": false,
+    "operational_reliability": false,
+    "portfolio_utility": false,
+    "adversarial_review": false
+  },
+  "data_requirements": [],
+  "evidence": []
+}

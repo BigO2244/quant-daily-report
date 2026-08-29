@@ -1,0 +1,18 @@
+{
+  "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+  "hypothesis_id": "HYP-2026-008",
+  "evaluator_id": "short_horizon_reversal_v1",
+  "technique_family": "CROSS_SECTIONAL",
+  "module": "projects.alpha_lab.evaluators.price_families",
+  "callable_name": "evaluate_short_horizon_reversal",
+  "maximum_variants": 3,
+  "primary_metric": "worst_case_annualized_excess_return_after_costs",
+  "data_contract_ids": [
+    "pit_observed_prices_v1",
+    "terminal_return_sensitivity_v1",
+    "pit_characteristics_v1",
+    "factor_panel_v1"
+  ],
+  "challenge_period": "2025-01-01/2026-06-30",
+  "spec_hash": "5ad51abf382683231c6f388806c6ed350a321a32544e50e0cee372f023c51b1a"
+}

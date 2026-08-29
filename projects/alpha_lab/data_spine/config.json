@@ -1,0 +1,70 @@
+{
+  "schema_version": "caerus_alpha_lab_data_spine_config_v1",
+  "output_root": "outputs/research/alpha_lab/data_spine",
+  "production_integration": false,
+  "sec": {
+    "user_agent_env": "SEC_USER_AGENT",
+    "forms": ["4", "4/A", "8-K", "8-K/A"],
+    "index_start_year": 2011
+  },
+  "sharadar": {
+    "api_key_env": "NASDAQ_DATA_LINK_API_KEY",
+    "required_tables": ["TICKERS", "SEP", "ACTIONS", "SF1", "DAILY"],
+    "urgent_capture_tables": ["TICKERS", "ACTIONS"]
+  },
+  "french": {
+    "datasets": {
+      "ff5_daily": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_5_Factors_2x3_daily_CSV.zip",
+      "momentum_daily": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Momentum_Factor_daily_CSV.zip",
+      "short_term_reversal_daily": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_ST_Reversal_Factor_daily_CSV.zip",
+      "industry_49_daily": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/49_Industry_Portfolios_daily_CSV.zip"
+    }
+  },
+  "aqr": {
+    "datasets": {
+      "bab_daily": "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Betting-Against-Beta-Equity-Factors-Daily.xlsx",
+      "qmj_daily": "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/Quality-Minus-Junk-Factors-Daily.xlsx"
+    }
+  },
+  "fred": {
+    "api_key_env": "FRED_API_KEY",
+    "series": [
+      "DGS2", "DGS10", "BAMLH0A0HYM2", "WALCL", "RRPONTSYD",
+      "WTREGEN", "WRESBAL", "CPIAUCSL", "UNRATE", "VIXCLS", "DCOILWTICO", "DHHNGSP"
+    ]
+  },
+  "bea": {
+    "api_key_env": "BEA_API_KEY",
+    "dataset": "InputOutput",
+    "classification": "INDUSTRY_LEVEL_CURRENT_VINTAGE_PROXY_ONLY"
+  },
+  "alpha_vantage": {
+    "api_key_env": "ALPHA_VANTAGE_API_KEY",
+    "daily_free_request_limit": 25,
+    "classification": "CURRENT_AGGREGATE_FORWARD_PROXY_ONLY"
+  },
+  "eia": {
+    "api_key_env": "EIA_API_KEY",
+    "bulk": {
+      "natural_gas": "https://api.eia.gov/bulk/NG.zip",
+      "petroleum": "https://api.eia.gov/bulk/PET.zip",
+      "electricity": "https://api.eia.gov/bulk/ELEC.zip"
+    },
+    "maximum_automatic_bulk_bytes": 75000000
+    ,"control_series": [
+      "NG.RNGWHHD.D",
+      "NG.NW2_EPG0_SWO_R48_BCF.W",
+      "PET.WCRSTUS1.W",
+      "PET.WCRFPUS2.W",
+      "PET.WPULEUS3.W"
+    ]
+  },
+  "occ": {
+    "information_memos": "https://infomemo.theocc.com/infomemo/search-memo",
+    "special_settlements": "https://www.theocc.com/market-data/market-data-reports/series-and-trading-data/equity-special-settlements"
+  },
+  "vendor_samples": {
+    "analyst_estimates": "outputs/research/alpha_lab/vendor_inputs/analyst_estimates",
+    "supply_chain": "outputs/research/alpha_lab/vendor_inputs/supply_chain"
+  }
+}

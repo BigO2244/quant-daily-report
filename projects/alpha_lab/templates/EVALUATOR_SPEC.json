@@ -1,0 +1,13 @@
+{
+  "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+  "hypothesis_id": "HYP-YYYY-NNN",
+  "evaluator_id": "hyp_yyyy_nnn_evaluator_v1",
+  "technique_family": "EVENT_STUDY",
+  "module": "projects.alpha_lab.evaluators.hyp_yyyy_nnn",
+  "callable_name": "evaluate",
+  "maximum_variants": 1,
+  "primary_metric": "frozen_primary_metric",
+  "data_contract_ids": ["frozen_data_contract_v1"],
+  "challenge_period": "YYYY-MM-DD/YYYY-MM-DD",
+  "spec_hash": "SHA256_OF_THE_DOCUMENT_WITHOUT_THIS_FIELD"
+}

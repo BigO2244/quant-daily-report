@@ -1,0 +1,17 @@
+{
+  "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+  "hypothesis_id": "HYP-2026-010",
+  "evaluator_id": "executive_tone_surprise_v1",
+  "technique_family": "EVENT_STUDY",
+  "module": "projects.alpha_lab.evaluators.blocked_families",
+  "callable_name": "evaluate_executive_tone_surprise",
+  "maximum_variants": 3,
+  "primary_metric": "validation_60d_factor_residual_car_after_costs",
+  "data_contract_ids": [
+    "executive_transcript_history_v1",
+    "pit_earnings_events_v1",
+    "pit_observed_prices_v1"
+  ],
+  "challenge_period": "2025-01-01/2026-06-30",
+  "spec_hash": "7abd3af239041875162c99bfc55562a84fc6d78ca8af9374692e53e2534838bd"
+}

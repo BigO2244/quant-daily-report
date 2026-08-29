@@ -1,0 +1,17 @@
+{
+  "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+  "hypothesis_id": "HYP-2026-007",
+  "evaluator_id": "stock_specific_seasonality_v1",
+  "technique_family": "CROSS_SECTIONAL",
+  "module": "projects.alpha_lab.evaluators.price_families",
+  "callable_name": "evaluate_stock_specific_seasonality",
+  "maximum_variants": 2,
+  "primary_metric": "worst_case_annualized_excess_return_after_costs",
+  "data_contract_ids": [
+    "pit_observed_prices_v1",
+    "terminal_return_sensitivity_v1",
+    "factor_panel_v1"
+  ],
+  "challenge_period": "2025-01-01/2026-06-30",
+  "spec_hash": "f3c57c585f01e669901d54b73115e144968e5b76ad716ff932d24e21b2f3f4d9"
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+  "hypothesis_id": "HYP-2026-006",
+  "evaluator_id": "residual_momentum_v1",
+  "technique_family": "CROSS_SECTIONAL",
+  "module": "projects.alpha_lab.evaluators.price_families",
+  "callable_name": "evaluate_residual_momentum",
+  "maximum_variants": 3,
+  "primary_metric": "worst_case_annualized_excess_return_after_costs",
+  "data_contract_ids": [
+    "pit_observed_prices_v1",
+    "terminal_return_sensitivity_v1",
+    "pit_characteristics_v1",
+    "factor_panel_v1"
+  ],
+  "challenge_period": "2025-01-01/2026-06-30",
+  "spec_hash": "207baa5b0af9ad8c739ef29cce6fb55ed6676e0209fb02b59626e0955c843422"
+}
