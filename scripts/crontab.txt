@@ -4,7 +4,7 @@
 # All times are America/New_York (handles EST/EDT automatically).
 # Runs weekdays only (Mon-Fri = 1-5).
 #
-# Phase 0b: Claude Research Agent (morning digest) — 6:30 AM ET
+# Advisory Claude Research Agent (morning digest) — 6:30 AM ET
 # Phase 1:  Precompute (signals, recon, position check) — 7:00 AM ET
 # Phase 2:  Order Execution (Alpaca paper API + gated options overlay) — 9:35 AM ET
 # Phase 3:  Confirmation (verify trades, send email) — 10:00 AM ET
@@ -13,13 +13,13 @@ CRON_TZ=America/New_York
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 
-# Phase 0b: Claude Research Agent (before precompute — 6:30 AM ET)
+# Advisory research digest — non-capital and not consumed by canonical precompute
 30 6 * * 1-5 $HOME/quant-daily-report/scripts/cron_research.sh >> $HOME/quant-daily-report/logs/cron_research.log 2>&1
 
 # Security master refresh (artifact-only; before precompute final plan)
 45 6 * * 1-5 $HOME/quant-daily-report/scripts/cron_security_master.sh >> $HOME/quant-daily-report/logs/cron_security_master.log 2>&1
 
-# Phase 1: Precompute (consumes research digest)
+# Phase 1: Canonical precompute (independent of the advisory research digest)
 0 7 * * 1-5 $HOME/quant-daily-report/scripts/cron_precompute.sh >> $HOME/quant-daily-report/logs/cron_precompute.log 2>&1
 
 # Phase 2: Order Execution

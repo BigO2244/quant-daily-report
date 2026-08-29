@@ -39,6 +39,14 @@ Machine authority: `config/operations/operating_lane_registry.json`. Current
 runtime truth: `outputs/operating_state/current/operating_truth.json`. Generated
 human view: `docs/CURRENT_OPERATING_STATE.md`.
 
+## Upstream Research Automation
+
+The owner-approved Alpha Lab weekend research cycle is a Codex automation,
+not a production VM cron job or GitHub Action. It runs Sunday from 00:05 through
+05:00 America/New_York against the dedicated Alpha Lab project and remains
+research-only. The complete four-authority discovery rule and schedule map are
+recorded in `docs/governance/WORKFLOW_AUTHORITY_REGISTRY.md`.
+
 ## Seven-Layer Architecture
 
 1. Data Layer: yfinance OHLCV plus snapshot fundamentals; FRED macro integration is planned.
