@@ -66,6 +66,12 @@ echo "[VM_VALIDATION] operational_validation"
 
 echo "[VM_VALIDATION] py_compile"
 "${PYTHON_BIN}" -m py_compile \
+  core/operating_truth.py \
+  core/lyra_live_portfolio.py \
+  core/lyra_live_execution.py \
+  scripts/build_operating_truth.py \
+  scripts/run_lyra_live_portfolio.py \
+  scripts/manage_lyra_live_cron.py \
   research_registry/sleeves/manifest.py \
   research_registry/sleeves/evidence.py \
   scripts/research/validate_sleeve_manifest.py \
@@ -78,6 +84,16 @@ echo "[VM_VALIDATION] targeted_pytest"
   Tests/test_governance_hygiene_agent.py \
   Tests/test_sleeve_numeric_diagnostics.py \
   Tests/test_target_attainment.py \
+  Tests/test_operating_truth.py \
+  Tests/test_lyra_live_portfolio.py \
+  Tests/test_cron_command_validation.py \
   -q
+
+echo "[VM_VALIDATION] operating_truth"
+"${PYTHON_BIN}" scripts/build_operating_truth.py \
+  --repo-root "$(pwd)" \
+  --home "${HOME}" \
+  --output-dir outputs/operating_state/current \
+  --strict >/dev/null
 
 echo "[VM_VALIDATION][PASS]"

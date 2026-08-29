@@ -49,6 +49,30 @@ DISPLAY_NAMES = {
 }
 
 
+def _render_operating_capital_state(repo_root: Path) -> str:
+    payload = _read_json(
+        repo_root / "outputs" / "operating_state" / "current" / "operating_truth.json"
+    )
+    if not payload:
+        return "=== CAPITAL LANES ===\nOperating truth unavailable; context is not certified."
+    lines = ["=== CAPITAL LANES ==="]
+    for lane in payload.get("lanes") or []:
+        kind = str(lane.get("lane_kind") or "UNKNOWN")
+        if kind not in {"LIVE", "PAPER", "SHADOW"}:
+            continue
+        strategies = ", ".join(
+            str(item).replace("caerus_", "").replace("_", " ").title()
+            for item in lane.get("strategy_ids") or []
+        ) or "None"
+        lines.append(
+            f"{kind}: {strategies} — {lane.get('operating_status', 'UNKNOWN')} "
+            f"(authority {((lane.get('authority') or {}).get('status') or 'UNKNOWN')})"
+        )
+    integrity = payload.get("context_integrity") or {}
+    lines.append(f"Context integrity: {integrity.get('status', 'UNKNOWN')}")
+    return "\n".join(lines)
+
+
 @dataclass(frozen=True)
 class ModelSnapshot:
     slug: str
@@ -1200,6 +1224,7 @@ def build_report(repo_root: Path = _REPO_ROOT) -> ShadowCioReport:
         as_of_comparison,
         publication_gate.reason_code if publication_gate.withheld else None,
     )
+    body = f"{_render_operating_capital_state(repo_root)}\n\n{body}"
     return ShadowCioReport(
         trade_date=trade_date,
         as_of_date=as_of_date,

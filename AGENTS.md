@@ -39,6 +39,9 @@ Safety boundaries:
   `ssh caerus-vm 'cd ~/quant-daily-report && ./scripts/ops/run_vm_validation.sh'`
 
 Required pre-work before editing:
+- Run `python3 scripts/build_operating_truth.py --strict` before any fund-level,
+  capital, readiness, lane, or strategy-state assessment. Resolve every
+  `CONTEXT_CONFLICT` before recommending action.
 - Read `docs/governance/ORCHESTRATOR_CONTEXT.md`.
 - Read the files named by the task and any immediately referenced governance
   documents.
@@ -80,6 +83,9 @@ CURRENT STRATEGY STATE
 Paper (Active):
 - Caerus Orion (owner-approved PAPER authority as of 2026-08-08)
 
+Live (Active, Separate):
+- Caerus Lyra (owner-approved 2026-08-19; funded Tuesday recurring portfolio)
+
 Shadow (Daily, Non-Blocking):
 - Caerus Polaris (historical research control)
 - Caerus Lyra (Challenger)
@@ -98,8 +104,10 @@ Execution:
 - Trader consumes only the hash-verified approved execution package
 - Broker fills preserve exact-order and sleeve-decision provenance through the
   causal ownership ledger, valuation, and read-only daily audit
-- Live capital remains blocked; the PAPER promotion does not arm FR-104 or
-  modify live credentials
+- Lyra Live is active, funded, recurring, and separately governed.
+- Orion is the active PAPER capital sleeve.
+- The legacy FR-104/generic Live lanes remain disabled; Orion's PAPER promotion
+  does not arm either legacy lane or modify Lyra Live authority.
 
 Automation:
 - Shadow runs automatically after precompute via:
@@ -122,7 +130,7 @@ non-trading Artifact Governance + Operational Telemetry backlog phase.
 
 - **Project**: Caerus Quant / Alpha Stack quantitative trading platform
 - **Scope**: US long-only equities + options overlay, paper trading through Alpaca
-- **Production posture**: paper only, no shorting, no leverage
+- **Production posture**: Lyra Live plus Orion PAPER; long-only, no leverage
 - **Promotion ladder**: research → backtest → shadow → paper → live
 - **Test suite**: 955 passing, 0 failing (as of 2026-04-20)
 - **Hard rule**: do not change production trading behavior casually; bias toward
@@ -139,9 +147,9 @@ non-trading Artifact Governance + Operational Telemetry backlog phase.
   - exact same-day shadow snapshot is wrapped into immutable Decision/Risk/Execution packages
   - 5% target cash and 2% target-attainment tolerance; live remains disabled
 - **Caerus Lyra** (`caerus_lyra`)
-  - secondary shadow challenger
+  - active, separately governed Live portfolio and secondary Shadow challenger
   - derived from Alpha Lab v2 challenger: H1 weekly rebalance + H6 top-5 concentration
-  - not promoted to paper
+  - not promoted to PAPER; Live authority is an independent owner decision
 - **SPY** (`spy_benchmark`)
   - benchmark symbol and comparison anchor
   - remains `SPY` in code and artifacts
@@ -264,6 +272,8 @@ Legacy planner targets are quarantined research evidence.
 
 - **PAPER portfolio**: registry allocator, currently with Orion as the sole
   capital sleeve and 100% of sleeve risk budget
+- **LIVE portfolio**: owner-scoped Lyra weekly portfolio, independently funded
+  and scheduled Tuesday at 09:35 ET
 - **Historical research control**: Caerus Polaris
 - **Shadow daily models**: Caerus Polaris, Caerus Orion, Caerus Lyra
 - **Default FR-104 `LIVE_PILOT` sleeve**: Caerus Orion, only when all
@@ -272,7 +282,7 @@ Legacy planner targets are quarantined research evidence.
 - **Promotion state**:
   - Polaris: shadow research control
   - Orion: PAPER-only authority; live disabled and separately gated
-  - Lyra: shadow only
+  - Lyra: Shadow-observed and independently Live-authorized
 
 Named strategy labels are governance identities. They are distinct from
 functional alpha-stack sleeves and from the capped FR-104 live-pilot execution
@@ -822,7 +832,8 @@ Runtime separation:
 ## Ops Handoff
 
 - Scheduler host path: `~/quant-daily-report`
-- Cron source: `scripts/crontab.txt` — install with `crontab scripts/crontab.txt`
+- Cron source: `scripts/crontab.txt` — it includes the canonical Lyra recurring
+  entry; validate operating truth before and after `crontab scripts/crontab.txt`
 - Canonical deploy source: `origin/main`
 - Standard VM deploy: run `scripts/deploy.sh`; raw pull/merge is not a complete deployment
 - SCP is exception-only; reconcile any SCP hotfix back through git before
@@ -835,8 +846,9 @@ Runtime separation:
   `python3 scripts/check_shadow_scorecard_health.py --baseline-date 2026-05-11 --baseline-valid-days 16 --strict`.
 - For promotion governance review, run
   `python3 scripts/audit_shadow_promotion_readiness.py`; Polaris remains the
-  historical research baseline, Orion is the PAPER-only execution authority,
-  live remains separately blocked, and Lyra remains an artifact-only challenger.
+  historical research baseline, Orion is the PAPER execution authority, Lyra
+  is Shadow-observed and independently Live-active, and the legacy FR-104 lane
+  remains separately disabled.
 - The VM cron is the production scheduler for precompute/live execution; GitHub
   daily precompute/live schedules are dispatch-only to avoid duplicate runs
 - Successful precompute triggers `scripts/run_shadow_candidates_daily.sh` for

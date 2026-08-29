@@ -25,4 +25,9 @@ LOG_DIR="${REPO_ROOT}/logs"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/weekly_review.log"
 
+python3 scripts/build_operating_truth.py \
+    --repo-root "${REPO_ROOT}" \
+    --home "${HOME}" \
+    --output-dir "${REPO_ROOT}/outputs/operating_state/current" \
+    --strict >> "${LOG_FILE}" 2>&1
 python3 scripts/weekly_model_review.py >> "${LOG_FILE}" 2>&1

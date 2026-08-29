@@ -12,6 +12,7 @@ import core.lyra_live_portfolio as subject
 from brokers.alpaca_broker import AlpacaBroker, _LYRA_LIVE_PORTFOLIO_CAPABILITY
 from core.lyra_live_execution import _mutation_context, execute_portfolio_plan
 from scripts.manage_lyra_live_cron import INIT_LINE, WEEKLY_LINE, render
+from scripts.run_lyra_live_portfolio import persist_blocked_attempt
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -156,6 +157,70 @@ def test_initialization_is_hash_and_symbol_pinned(monkeypatch):
     monkeypatch.setattr(subject, "INITIALIZATION_TARGET_SHA256", __import__("hashlib").sha256(raw).hexdigest())
     target = subject.validate_target_source(raw, mode="initialization", execution_session="2026-08-20")
     assert set(target["weights"]) == subject.TARGET_SYMBOLS
+
+
+def test_stale_effective_date_has_specific_prebroker_failure():
+    payload = json.loads(_target())
+    payload["effective_trade_date"] = "2026-08-21"
+    with pytest.raises(subject.LyraLivePortfolioError, match="effective date differs"):
+        subject.validate_target_source(
+            json.dumps(payload).encode(),
+            mode="recurring",
+            execution_session="2026-08-25",
+        )
+
+
+def test_blocked_attempt_is_immutable_and_hash_bound(tmp_path):
+    target = tmp_path / "target.json"
+    target.write_bytes(_target())
+    decision = tmp_path / "decision.json"
+    decision.write_text(json.dumps(OWNER), encoding="utf-8")
+    state = tmp_path / "state"
+    error = subject.LyraLivePortfolioError("Lyra target effective date differs")
+    artifact = persist_blocked_attempt(
+        state_root=state,
+        execution_session="2026-08-25",
+        mode="recurring",
+        target_source_path=target,
+        owner_decision_path=decision,
+        submit=True,
+        observed_at="2026-08-25T13:35:00+00:00",
+        error=error,
+    )
+    assert artifact["reason_code"] == "target_effective_date_stale_or_mismatched"
+    assert artifact["broker_write_performed"] is False
+    assert artifact["broker_write_status"] == "PROVEN_NONE_PREMUTATION"
+    path = Path(artifact["artifact_path"])
+    assert json.loads(path.read_text()) == {k: v for k, v in artifact.items() if k != "artifact_path"}
+    assert persist_blocked_attempt(
+        state_root=state,
+        execution_session="2026-08-25",
+        mode="recurring",
+        target_source_path=target,
+        owner_decision_path=decision,
+        submit=True,
+        observed_at="2026-08-25T13:35:00+00:00",
+        error=error,
+    )["content_hash"] == artifact["content_hash"]
+
+
+def test_blocked_attempt_does_not_claim_no_write_after_mutation_boundary(tmp_path):
+    target = tmp_path / "target.json"
+    target.write_bytes(_target())
+    decision = tmp_path / "decision.json"
+    decision.write_text(json.dumps(OWNER), encoding="utf-8")
+    state = tmp_path / "state"
+    session = state / "2026-08-25"
+    session.mkdir(parents=True)
+    (session / "mutation-00.json").write_text("{}", encoding="utf-8")
+    artifact = persist_blocked_attempt(
+        state_root=state, execution_session="2026-08-25", mode="recurring",
+        target_source_path=target, owner_decision_path=decision, submit=True,
+        observed_at="2026-08-25T13:35:00+00:00",
+        error=RuntimeError("broker timeout"),
+    )
+    assert artifact["broker_write_performed"] is None
+    assert artifact["broker_write_status"] == "UNPROVEN_CHECK_BROKER_BY_CLIENT_ORDER_ID"
 
 
 def test_live_broker_boundary_accepts_fractional_notional_only_with_capability(monkeypatch):
