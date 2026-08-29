@@ -1,5 +1,12 @@
 # Orchestrator Context
 
+> Alpha Lab branch boundary: this branch controls research work, not production
+> lanes or schedules. Reconcile Codex automation state, the nearest project
+> operating files, deployed VM truth, and the canonical GitHub branch before
+> making workflow claims. The Alpha Sunday exception is defined in
+> `projects/alpha_lab/AUTOMATION_CONTRACT.md`; production state must be verified
+> against the VM and canonical main branch.
+
 ## Purpose
 
 This document is durable context for AI-assisted Caerus work. Codex should read

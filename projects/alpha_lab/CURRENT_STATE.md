@@ -1,5 +1,41 @@
 # Alpha Lab Current State
 
+## Operating reset — 2026-08-27
+
+Alpha Lab has not yet delivered enough CIO value. Its data and governance work
+has exposed real defects and prevented weak claims, but it has not produced a
+positive owner-reviewable Alpha Card or a sufficiently independent stream of
+new investment ideas. Infrastructure completion is no longer treated as a
+substitute for investment research output.
+
+The active operating contract is now value-first:
+
+- originate distinct ideas rather than waiting for Brett or Atlas to supply
+  every thesis;
+- verify novelty and data feasibility before proposing formal work;
+- prefer the cheapest honest falsifier using existing data;
+- allow a blocker one review cycle before pivoting, requesting exact owner
+  support, or parking the candidate; and
+- measure useful verdicts and decision latency instead of framework volume.
+
+The first discussion-stage candidate under this reset is industry
+earnings-information diffusion: test whether a large, volume-confirmed reaction
+to an early industry reporter predicts delayed returns in same-industry peers
+that have not yet reported. It is not frozen, authorized, or promotion-eligible.
+Its initial read-only feasibility audit passed: the canonical GCP store has
+313,449 hydrated original 8-K/8-K-A filings with parsed acceptance timestamps,
+and `provider_readiness/pit_observed_prices_v1.json` certifies a 21,840,452-row
+price/volume panel as PIT-ready. The only identified pre-freeze data check is a
+sample audit of event-time SIC/industry extraction from original SEC filing
+headers. No new collector or paid dataset is currently required for the cheap
+falsification test.
+
+Atlas remains the authority for the cross-repository phase program. Its current
+Phase 1 owner gate is not bypassed by this reset. Alpha Lab may continue
+strategy discussion and produce concise owner-support requests, but it may not
+independently advance Atlas phase status, schedule the research factory, or
+perform a lifecycle transition.
+
 As of 2026-07-24 UTC, the correct classification is:
 
 > Caerus has a plausible weak broad-selection signal and positive short-window

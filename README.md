@@ -8,11 +8,15 @@ Alpha Stack is the Caerus quantitative trading platform for US long-only equitie
 ## Current State
 
 - Daily orchestrator: `daily_quant_report.py`
-- Paper execution posture: Alpaca paper only
-- Current paper execution control: **Caerus Polaris**
-- Primary shadow candidate: **Caerus Orion**
-- Secondary shadow challenger: **Caerus Lyra**
+- Approved live execution model: **Caerus Lyra**
+- Approved paper execution model: **Caerus Orion**
+- Historical control / comparison model: **Caerus Polaris**
 - Benchmark: **SPY**
+
+This `project/alpha-lab` branch governs research, not production runtime. Verify
+current lanes against the production VM and canonical main branch before
+making an operating-state claim. The external Sunday research schedule is
+governed by `projects/alpha_lab/AUTOMATION_CONTRACT.md`.
 
 ## Named Strategies
 
@@ -28,9 +32,9 @@ Alpha Stack is the Caerus quantitative trading platform for US long-only equitie
   - benchmark only
 
 Current promotion state:
-- Polaris remains the active paper model
-- Orion is shadow only
-- Lyra is shadow only
+- Lyra is the approved live model
+- Orion is the approved paper model
+- Polaris is retained as a historical control/comparison model
 - Shadow is artifact-only and non-blocking
 
 ## Seven-Layer Architecture
