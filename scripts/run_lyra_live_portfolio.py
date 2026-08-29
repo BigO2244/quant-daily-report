@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import subprocess
@@ -20,6 +21,7 @@ from brokers.alpaca_broker import AlpacaBroker  # noqa: E402
 from core.lyra_live_execution import _write_exclusive, execute_portfolio_plan  # noqa: E402
 from core.lyra_live_portfolio import (  # noqa: E402
     build_portfolio_plan,
+    content_hash,
     validate_owner_decision,
     validate_plan,
     validate_target_source,
@@ -27,6 +29,69 @@ from core.lyra_live_portfolio import (  # noqa: E402
 
 
 ET = ZoneInfo("America/New_York")
+
+
+def _blocked_reason_code(message: str) -> str:
+    if "target effective date differs" in message:
+        return "target_effective_date_stale_or_mismatched"
+    if "target identity differs" in message:
+        return "target_strategy_or_variant_mismatch"
+    if "runtime gate differs" in message or "runtime owner pin differs" in message:
+        return "runtime_authority_mismatch"
+    if "broker account is not active/unblocked" in message:
+        return "broker_account_unavailable"
+    if "latest trade is stale" in message:
+        return "market_data_stale"
+    return "prebroker_or_execution_guard_blocked"
+
+
+def persist_blocked_attempt(
+    *, state_root: Path, execution_session: str, mode: str,
+    target_source_path: Path, owner_decision_path: Path, submit: bool,
+    observed_at: str, error: Exception,
+) -> dict:
+    target_sha = None
+    try:
+        target_sha = hashlib.sha256(target_source_path.read_bytes()).hexdigest()
+    except OSError:
+        pass
+    session_root = state_root / execution_session
+    receipt_exists = any(session_root.glob("receipt-*.json"))
+    mutation_exists = any(session_root.glob("mutation-*.json"))
+    if not submit:
+        broker_write: bool | None = False
+        broker_write_status = "PROVEN_NONE_DRY_RUN"
+    elif receipt_exists:
+        broker_write = True
+        broker_write_status = "PROVEN_WRITE"
+    elif mutation_exists:
+        broker_write = None
+        broker_write_status = "UNPROVEN_CHECK_BROKER_BY_CLIENT_ORDER_ID"
+    else:
+        broker_write = False
+        broker_write_status = "PROVEN_NONE_PREMUTATION"
+    body = {
+        "schema_version": "caerus.lyra_live_blocked_attempt.v1",
+        "execution_session": execution_session,
+        "mode": mode,
+        "observed_at": observed_at,
+        "status": "BLOCKED",
+        "reason_code": _blocked_reason_code(str(error)),
+        "reason": str(error),
+        "submit_requested": bool(submit),
+        "broker_write_performed": broker_write,
+        "broker_write_status": broker_write_status,
+        "target_source_path": str(target_source_path),
+        "target_source_sha256": target_sha,
+        "owner_decision_path": str(owner_decision_path),
+    }
+    body["content_hash"] = content_hash(body)
+    path = (
+        state_root / execution_session / "blocked_attempts"
+        / f"{body['content_hash']}.json"
+    ).resolve()
+    _write_exclusive(path, body)
+    return {**body, "artifact_path": str(path)}
 
 
 def _read_json(path: Path) -> dict:
@@ -152,6 +217,7 @@ def main() -> int:
     action.add_argument("--dry-run", action="store_true")
     action.add_argument("--submit", action="store_true")
     args = parser.parse_args()
+    observed = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     try:
         result = run(
             mode=args.mode, execution_session=args.execution_session,
@@ -160,10 +226,33 @@ def main() -> int:
             state_root=args.state_root.resolve(), submit=args.submit,
         )
     except Exception as exc:
-        print(json.dumps({
+        blocked = {
             "status": "BLOCKED_NO_SUBMIT" if not args.submit else "BLOCKED",
-            "reason": str(exc), "broker_write_performed": False,
-        }, sort_keys=True))
+            "reason": str(exc), "broker_write_performed": None,
+        }
+        try:
+            artifact = persist_blocked_attempt(
+                state_root=args.state_root.resolve(),
+                execution_session=args.execution_session,
+                mode=args.mode,
+                target_source_path=args.target_source.resolve(),
+                owner_decision_path=args.owner_decision.resolve(),
+                submit=args.submit,
+                observed_at=observed,
+                error=exc,
+            )
+            blocked.update(
+                {
+                    "reason_code": artifact["reason_code"],
+                    "blocked_attempt_path": artifact["artifact_path"],
+                    "blocked_attempt_hash": artifact["content_hash"],
+                    "broker_write_performed": artifact["broker_write_performed"],
+                    "broker_write_status": artifact["broker_write_status"],
+                }
+            )
+        except Exception as persistence_exc:
+            blocked["blocked_attempt_persistence_error"] = str(persistence_exc)
+        print(json.dumps(blocked, sort_keys=True))
         return 2
     print(json.dumps(result, sort_keys=True))
     return 0 if result["execution"]["status"] in {"DRY_RUN_READY", "COMPLETE"} else 2

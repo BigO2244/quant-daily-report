@@ -80,7 +80,8 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         core/paper_target_authority.py core/precompute_bundle_validation.py \
         core/orion_decision_lineage.py core/orion_precompute_guard.py \
         core/portfolio_operating_model.py core/causal_ownership_ledger.py \
-        core/daily_portfolio_audit.py \
+        core/daily_portfolio_audit.py core/operating_truth.py \
+        core/lyra_live_portfolio.py core/lyra_live_execution.py \
         scripts/finalize_deployment.py scripts/live_pilot_execute.py \
         scripts/live_pilot_build_plan_from_precompute.py \
         scripts/seal_paper_precompute_target.py \
@@ -88,7 +89,9 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         scripts/refresh_shadow_scorecard_artifacts.py \
         scripts/certify_execution_readiness.py \
         scripts/build_portfolio_history.py scripts/build_causal_paper_ledger.py \
-        scripts/build_daily_portfolio_audit.py
+        scripts/build_daily_portfolio_audit.py \
+        scripts/build_operating_truth.py scripts/run_lyra_live_portfolio.py \
+        scripts/manage_lyra_live_cron.py
     python3 -m pytest \
         Tests/test_live_pilot_guardrails.py \
         Tests/test_live_pilot_client_order_id.py \
@@ -106,7 +109,15 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         Tests/test_sleeve_control_plane.py \
         Tests/test_shadow_daily_wrapper.py \
         Tests/test_caerus_daily_health_check.py \
+        Tests/test_operating_truth.py \
+        Tests/test_lyra_live_portfolio.py \
+        Tests/test_cron_command_validation.py \
         -q
+    python3 scripts/build_operating_truth.py \
+        --repo-root "${VALIDATION_WORKTREE}" \
+        --home "${HOME}" \
+        --crontab-file scripts/crontab.txt \
+        --strict >/dev/null
     python3 scripts/finalize_deployment.py \
         --repo-root "${VALIDATION_WORKTREE}" \
         --expected-sha "${TARGET_SHA}" \

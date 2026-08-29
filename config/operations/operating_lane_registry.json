@@ -1,0 +1,199 @@
+{
+  "schema_version": "caerus.operating_lane_registry.v1",
+  "registry_id": "caerus-operating-lanes:2026-08-29",
+  "effective_at": "2026-08-29T10:00:00-04:00",
+  "owner": "Brett Olson",
+  "truth_precedence": [
+    "owner_decision_or_scoped_registry_authority",
+    "deployed_runtime_gates",
+    "installed_schedule",
+    "immutable_execution_result",
+    "broker_ledger_and_reconciliation",
+    "generated_reporting",
+    "narrative_documentation"
+  ],
+  "lanes": [
+    {
+      "lane_id": "shadow_comparison",
+      "lane_kind": "SHADOW",
+      "declared_state": "ACTIVE",
+      "strategy_ids": [
+        "caerus_lyra",
+        "caerus_orion",
+        "caerus_orion_alpha",
+        "caerus_polaris",
+        "caerus_polaris_alpha"
+      ],
+      "authority": {
+        "kind": "strategy_registry_shadow",
+        "path": "config/research/strategy_registry.json"
+      },
+      "schedule": {
+        "marker": "scripts/cron_precompute.sh",
+        "cadence": "WEEKDAYS_AFTER_PRECOMPUTE_AND_POST_CLOSE",
+        "timezone": "America/New_York"
+      },
+      "broker_environment": "NONE",
+      "performance_surface": "outputs/shadow_candidates/performance/shadow_performance.json"
+    },
+    {
+      "lane_id": "orion_paper",
+      "lane_kind": "PAPER",
+      "declared_state": "ACTIVE",
+      "strategy_ids": [
+        "caerus_orion"
+      ],
+      "authority": {
+        "kind": "strategy_registry_paper",
+        "path": "config/research/strategy_registry.json",
+        "owner_approved_at": "2026-08-08",
+        "approval_scope": "PAPER_ONLY"
+      },
+      "schedule": {
+        "marker": "scripts/cron_execute.sh",
+        "cadence": "WEEKDAYS_09_35_ET",
+        "timezone": "America/New_York"
+      },
+      "broker_environment": "ALPACA_PAPER",
+      "performance_surface": "outputs/ledger/paper/performance.json",
+      "broker_manifest": "outputs/ledger/paper/manifest.json"
+    },
+    {
+      "lane_id": "lyra_live",
+      "lane_kind": "LIVE",
+      "declared_state": "ACTIVE",
+      "strategy_ids": [
+        "caerus_lyra"
+      ],
+      "authority": {
+        "kind": "owner_decision",
+        "path": "docs/governance/decision_records/lyra_live_owner_decision_20260819.json",
+        "decision_id": "lyra-live-owner-decision:20260819",
+        "content_hash": "4d553b1e56c947bc76951b33fc612a0c9aa4b8c5e1ecff0e5f58ac689c2e0f6d"
+      },
+      "schedule": {
+        "marker": "# CAERUS_LYRA_LIVE_WEEKLY=TUESDAY",
+        "cadence": "TUESDAY_09_35_ET_FROM_MONDAY_CLOSE",
+        "timezone": "America/New_York"
+      },
+      "runtime": {
+        "env_path": ".caerus/lyra_live.env",
+        "required_gates": {
+          "CAERUS_LYRA_LIVE_ENABLED": "1",
+          "CAERUS_LYRA_LIVE_SUBMIT_APPROVED": "1",
+          "CAERUS_LYRA_LIVE_OWNER_DECISION_HASH": "4d553b1e56c947bc76951b33fc612a0c9aa4b8c5e1ecff0e5f58ac689c2e0f6d"
+        },
+        "state_root": ".caerus/lyra_live_state"
+      },
+      "broker_environment": "ALPACA_LIVE",
+      "performance_surface": "outputs/ledger/live/performance.json",
+      "broker_manifest": "outputs/ledger/live/manifest.json"
+    },
+    {
+      "lane_id": "legacy_fr104_live_pilot",
+      "lane_kind": "LIVE",
+      "declared_state": "DISABLED",
+      "strategy_ids": [],
+      "authority": {
+        "kind": "legacy_runtime_gates",
+        "path": ".caerus/live_pilot.env"
+      },
+      "schedule": {
+        "marker": "scripts/cron_live_pilot_execute.sh",
+        "cadence": "WEEKDAYS_09_36_ET_GATED",
+        "timezone": "America/New_York"
+      },
+      "runtime": {
+        "env_path": ".caerus/live_pilot.env",
+        "disabled_when_any": {
+          "CAERUS_LIVE_PILOT_SCHEDULE_ENABLED": "0",
+          "CAERUS_LIVE_PILOT_SUBMIT_APPROVED": "0",
+          "CAERUS_LIVE_PILOT_KILL_SWITCH": "1"
+        }
+      },
+      "broker_environment": "ALPACA_LIVE",
+      "performance_surface": "outputs/perf/live_overlay_nav_series.csv"
+    }
+  ],
+  "narrative_surfaces": [
+    {
+      "path": "AGENTS.md",
+      "required_claims": [
+        "Lyra Live is active, funded, recurring, and separately governed.",
+        "Orion is the active PAPER capital sleeve."
+      ],
+      "forbidden_claims": [
+        "Live capital remains blocked",
+        "Lyra remains an artifact-only challenger"
+      ]
+    },
+    {
+      "path": "README.md",
+      "required_claims": [
+        "Live: Caerus Lyra",
+        "Paper: Caerus Orion"
+      ],
+      "forbidden_claims": [
+        "Current paper execution control: **Caerus Polaris**",
+        "Polaris remains the active paper model",
+        "Lyra is shadow only"
+      ]
+    },
+    {
+      "path": "docs/governance/ORCHESTRATOR_CONTEXT.md",
+      "required_claims": [
+        "Lyra Live is active, funded, recurring, and separately governed from Orion PAPER."
+      ],
+      "forbidden_claims": [
+        "Lyra is the shadow challenger."
+      ]
+    },
+    {
+      "path": "docs/CURRENT_OPERATING_STATE.md",
+      "required_claims": [
+        "| LIVE | Lyra |",
+        "| PAPER | Orion |"
+      ],
+      "forbidden_claims": []
+    },
+    {
+      "path": "docs/governance/CURRENT_RESEARCH_ROADMAP.md",
+      "required_claims": [
+        "Lyra Live is active, funded, and separately owner-governed."
+      ],
+      "forbidden_claims": [
+        "Live capital remains blocked",
+        "Lyra is the shadow challenger."
+      ]
+    },
+    {
+      "path": "docs/Alpha_Stack_Architecture_Reference.md",
+      "required_claims": [
+        "Orion = PAPER plus Shadow comparison",
+        "Lyra = funded, recurring Live plus Shadow comparison"
+      ],
+      "forbidden_claims": [
+        "Lyra remains an artifact-only challenger"
+      ]
+    },
+    {
+      "path": "docs/precompute_semantic_validation.md",
+      "required_claims": [
+        "Lyra Live is a separate lane"
+      ],
+      "forbidden_claims": [
+        "Lyra is shadow only"
+      ]
+    },
+    {
+      "path": "docs/operational_health_examples.md",
+      "required_claims": [
+        "Orion is PAPER-authorized and Lyra is independently Live-authorized"
+      ],
+      "forbidden_claims": [
+        "Live capital remains blocked"
+      ]
+    }
+  ],
+  "content_hash": "973c0576e0fd445bf4a25869b31c60403e4da7aca80d4f605dc7be5ea413b3a5"
+}

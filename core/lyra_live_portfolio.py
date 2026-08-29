@@ -158,9 +158,10 @@ def validate_target_source(
     if (
         target.get("strategy_slug") != "caerus_lyra"
         or target.get("source_variant") != LYRA_VARIANT
-        or target.get("effective_trade_date") != signal
     ):
         raise LyraLivePortfolioError("Lyra target identity differs")
+    if target.get("effective_trade_date") != signal:
+        raise LyraLivePortfolioError("Lyra target effective date differs")
     try:
         signal_date = dt.date.fromisoformat(signal)
         execution_date = dt.date.fromisoformat(execution_session)
