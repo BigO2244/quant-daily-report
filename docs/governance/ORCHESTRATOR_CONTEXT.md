@@ -20,8 +20,13 @@ strategy, review, and task delegation.
 
 ## Current System State
 
-Caerus is a paper-traded quantitative investment platform with deterministic
+Caerus is a quantitative investment platform with separately governed Live,
+PAPER, and Shadow lanes, deterministic
 artifacts and an explicit research-to-production promotion ladder.
+
+- Lyra Live is active, funded, recurring, and separately governed from Orion PAPER.
+- Orion is the active PAPER capital sleeve. Polaris, Orion, and Lyra also run in
+  Shadow for modeled comparison; Shadow status does not negate capital authority.
 
 - The owner-approved 2026-08-14 portfolio operating-model migration is
   implemented. Precompute admits one immutable session, produces one terminal
@@ -44,7 +49,8 @@ artifacts and an explicit research-to-production promotion ladder.
   account/position valuation shares one `pulled_at_utc`. The strict 19:45 build
   has no model fallback and writes the end-of-day portfolio audit.
 - Polaris remains the historical research baseline and daily shadow comparison control.
-- Lyra is the shadow challenger.
+- Lyra is the Shadow challenger and independently operates the owner-approved
+  Live weekly portfolio.
 - Adaptive Shadow v1 candidate hash `0ee486...` is owner-approved for
   observation only across Polaris and Lyra. All preregistered readiness gates
   remain binding; the first enabled readiness result fails closed to static
@@ -52,9 +58,9 @@ artifacts and an explicit research-to-production promotion ladder.
   constraint inputs are incomplete. It grants no PAPER/Live or execution
   authority.
 - SPY is the benchmark anchor.
-- Orion sends PAPER orders only after immutable package validation. The `$500`
-  FR-104 live-pilot lane remains blocked and separately governed; no live
-  credential, approval, or kill-switch state is changed by the PAPER promotion.
+- Orion sends PAPER orders only after immutable package validation. The legacy
+  FR-104 live-pilot lane remains blocked and separately governed; that fact
+  does not disable Lyra Live.
 - Execution integrity and target attainment are in observation after the June
   12 FR-070 remediation. New FR-070 implementation work requires classified
   evidence from the next run.

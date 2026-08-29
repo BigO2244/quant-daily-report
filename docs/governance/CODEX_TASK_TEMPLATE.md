@@ -7,6 +7,14 @@ documentation, or validation work to Codex.
 
 State the concrete outcome Codex should produce.
 
+## Mandatory Operating-Truth Preflight
+
+Before diagnosing or changing Caerus, read `AGENTS.md`, the nearest scoped
+`AGENTS.md`, `config/operations/operating_lane_registry.json`, and
+`docs/CURRENT_OPERATING_STATE.md`. Run `scripts/build_operating_truth.py`
+with `--strict`. Report Live, Paper, and Shadow independently; a restriction in
+one lane is not evidence that another lane is blocked.
+
 ## Scope
 
 List the intended work boundaries, including whether the task is documentation,

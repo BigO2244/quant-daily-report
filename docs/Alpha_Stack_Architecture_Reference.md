@@ -5,12 +5,12 @@ This document is the current architecture reference for Alpha Stack. It reflects
 ## Current Named Strategy State
 
 - `Caerus Polaris` / `caerus_polaris`
-  - current paper baseline / operational control
+  - historical Shadow research baseline / operational comparison control
 - `Caerus Orion` / `caerus_orion`
-  - primary shadow candidate
+  - active PAPER capital sleeve and Shadow comparison
   - derived from the Alpha Lab v2 lead combination: H2 rank-decay exit + H6 top-5 concentration
 - `Caerus Lyra` / `caerus_lyra`
-  - secondary shadow challenger
+  - active separately governed Live portfolio and Shadow challenger
   - derived from the Alpha Lab v2 challenger combination: H1 weekly rebalance + H6 top-5 concentration
 - `Cassiopeia` / `caerus_cassiopeia`
   - research-only event-driven identity; not an execution sleeve
@@ -18,10 +18,9 @@ This document is the current architecture reference for Alpha Stack. It reflects
   - benchmark
 
 Current promotion state:
-- Polaris = paper
-- Orion = shadow challenger; default FR-104 `LIVE_PILOT` sleeve only when all
-  live-pilot approval gates pass
-- Lyra = shadow challenger
+- Polaris = historical Shadow control
+- Orion = PAPER plus Shadow comparison; legacy FR-104 remains separately gated
+- Lyra = funded, recurring Live plus Shadow comparison
 - Cassiopeia = research only
 - promotion ladder remains `research -> backtest -> shadow -> paper -> live`
 

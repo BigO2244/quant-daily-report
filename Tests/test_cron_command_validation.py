@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from scripts.validate_cron_commands import validate_cron_text
+from scripts.manage_lyra_live_cron import WEEKLY_LINE, WEEKLY_MARKER, render
 
 
 def _write(path: Path, text: str) -> None:
@@ -59,3 +60,11 @@ def test_comments_and_env_lines_are_ignored(tmp_path: Path) -> None:
     )
 
     assert validate_cron_text(text, repo_root=tmp_path) == []
+
+
+def test_canonical_crontab_preserves_exactly_one_lyra_live_schedule() -> None:
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "scripts/crontab.txt").read_text(encoding="utf-8")
+    assert text.count(WEEKLY_MARKER) == 1
+    assert WEEKLY_LINE in text
+    assert render(text, install=True).count(WEEKLY_MARKER) == 1

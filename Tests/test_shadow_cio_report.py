@@ -4,10 +4,29 @@ import csv
 import json
 from pathlib import Path
 
-from scripts.send_shadow_cio_report import build_report
+from scripts.send_shadow_cio_report import _render_operating_capital_state, build_report
 
 
 TRADE_DATE = "2026-01-13"
+
+
+def test_cio_capital_state_keeps_live_paper_and_shadow_separate(tmp_path: Path) -> None:
+    _write_json(
+        tmp_path / "outputs/operating_state/current/operating_truth.json",
+        {
+            "context_integrity": {"status": "PASS"},
+            "lanes": [
+                {"lane_kind": "LIVE", "strategy_ids": ["caerus_lyra"], "operating_status": "ACTIVE", "authority": {"status": "PROVED"}},
+                {"lane_kind": "PAPER", "strategy_ids": ["caerus_orion"], "operating_status": "ACTIVE", "authority": {"status": "PROVED"}},
+                {"lane_kind": "SHADOW", "strategy_ids": ["caerus_lyra", "caerus_orion"], "operating_status": "ACTIVE", "authority": {"status": "PROVED"}},
+            ],
+        },
+    )
+    text = _render_operating_capital_state(tmp_path)
+    assert "LIVE: Lyra — ACTIVE" in text
+    assert "PAPER: Orion — ACTIVE" in text
+    assert "SHADOW: Lyra, Orion — ACTIVE" in text
+    assert "Context integrity: PASS" in text
 
 
 def _write_json(path: Path, payload: dict) -> None:

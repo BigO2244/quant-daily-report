@@ -100,8 +100,9 @@ editing code or specs.
   governed inputs and holds the static Polaris modeled control. It emits no
   adaptive performance evidence and grants no Paper, Live, promotion,
   execution, or automatic-recovery authority.
-- **Live posture:** blocked. Orion's PAPER authority does not approve FR-104 live
-  submission and does not change credentials, endpoint pins, or kill-switches.
+- **Live posture:** Lyra Live is active, funded, and separately owner-governed.
+  The legacy FR-104/generic Live lanes remain blocked; Orion's PAPER authority
+  does not approve those lanes or change Lyra Live authority.
 - **Concentration alpha shadows:** Polaris_Alpha (`caerus_polaris_alpha`) and
   Orion_Alpha (`caerus_orion_alpha`) are forward shadow-only concentration
   variants activated 2026-06-23. Polaris_Alpha is Top 4 / 20% cap versus the
@@ -159,7 +160,7 @@ framework, and FR-065 dashboard decision-grade consolidation.
 | Polaris_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 4 / 20% cap; compare only against preserved Polaris baseline; no capital |
 | Orion | security_selection / core_momentum | paper | h2_rank_decay_exit_h6_top5 | — | yes | no | PAPER-only execution authority; immutable package handoff; live disabled |
 | Orion_Alpha | security_selection / core_momentum | shadow | (variant) | — | yes | yes | official_shadow_concentration_variant; Top 3 / 25% cap; compare only against preserved Orion baseline; no capital |
-| Lyra | security_selection / core_momentum | shadow | constrained_lyra.py | yes | yes | yes | shadow_only |
+| Lyra | security_selection / core_momentum | shadow | constrained_lyra.py | yes | yes | yes | Shadow-observed; independently active in owner-governed Live lane |
 | Phoenix | security_selection / crisis_reversal | research / not_viable_current_phase_b | phoenix.py | run_phoenix_research.py | no | no | research_module / produces_artifacts; PIT liquidity evidence is decision-grade but current Phase B candidate fails 5% ADV capacity policy; not Shadow-readiness eligible |
 | Cygnus | security_selection / earnings_drift | research | research/cygnus | run_cygnus_research.py | no | no | v0_shelved_after_stage2_fail; v1_vendor_gated |
 | Cassiopeia | security_selection / event_driven | research | none (spec-only) | none | no | no | spec_only — canonical EVENT-DRIVEN strategy (FR-052); selector code re-homed to Argo 2026-06-08 |

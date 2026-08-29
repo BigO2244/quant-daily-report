@@ -1,37 +1,43 @@
 # Alpha Stack
 
 Alpha Stack is the Caerus quantitative trading platform for US long-only equities plus a gated options overlay. The current operating reality is:
-- paper execution remains active and unchanged
+- Live: Caerus Lyra — active, funded, recurring Tuesday rebalance
+- Paper: Caerus Orion — active, full-current-account PAPER lane
+- Shadow: Polaris, Orion, Lyra, and concentration comparisons
 - new strategy variants are validated through research and shadow lanes first
 - promotion stays explicit: `research -> backtest -> shadow -> paper -> live`
 
 ## Current State
 
 - Daily orchestrator: `daily_quant_report.py`
-- Paper execution posture: Alpaca paper only
-- Current paper execution control: **Caerus Polaris**
-- Primary shadow candidate: **Caerus Orion**
-- Secondary shadow challenger: **Caerus Lyra**
+- Capital lanes: **Caerus Lyra Live** and **Caerus Orion PAPER**
+- Research control: **Caerus Polaris**
+- Lyra and Orion also remain in Shadow for modeled comparison; lane state and
+  research lifecycle are separate axes.
 - Benchmark: **SPY**
 
 ## Named Strategies
 
 - `Caerus Polaris` / `caerus_polaris`
-  - current paper baseline / operational control
+  - historical research baseline / Shadow control; no capital authority
 - `Caerus Orion` / `caerus_orion`
-  - primary shadow candidate
+  - active PAPER capital sleeve and simultaneous Shadow comparison
   - Alpha Lab v2 lead candidate: H2 rank-decay exit + H6 top-5 concentration
 - `Caerus Lyra` / `caerus_lyra`
-  - secondary shadow challenger
+  - active, separately governed Live portfolio and simultaneous Shadow comparison
   - Alpha Lab v2 challenger: H1 weekly rebalance + H6 top-5 concentration
 - `SPY` / `spy_benchmark`
   - benchmark only
 
 Current promotion state:
-- Polaris remains the active paper model
-- Orion is shadow only
-- Lyra is shadow only
+- Orion is PAPER-authorized and Shadow-observed
+- Lyra is Live-authorized and Shadow-observed
+- Polaris is the historical Shadow research control
 - Shadow is artifact-only and non-blocking
+
+Machine authority: `config/operations/operating_lane_registry.json`. Current
+runtime truth: `outputs/operating_state/current/operating_truth.json`. Generated
+human view: `docs/CURRENT_OPERATING_STATE.md`.
 
 ## Seven-Layer Architecture
 

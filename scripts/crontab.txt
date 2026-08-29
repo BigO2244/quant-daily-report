@@ -25,6 +25,10 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # Phase 2: Order Execution
 35 9 * * 1-5 $HOME/quant-daily-report/scripts/cron_execute.sh >> $HOME/quant-daily-report/logs/cron_execute.log 2>&1
 
+# Independent owner-approved Lyra Live portfolio. This is not the legacy
+# LIVE_PILOT lane and must survive canonical crontab installation.
+35 9 * * 2 /home/brettolson/quant-daily-report/scripts/cron_lyra_live_portfolio.sh recurring >> /home/brettolson/quant-daily-report/logs/lyra_live.log 2>&1 # CAERUS_LYRA_LIVE_WEEKLY=TUESDAY
+
 # Phase 2b: LIVE_PILOT automated lane. Disabled unless
 # CAERUS_LIVE_PILOT_SCHEDULE_ENABLED=1, and live submission still requires
 # CAERUS_LIVE_PILOT_CRON_APPROVED=1 plus CAERUS_LIVE_PILOT_SUBMIT_APPROVED=1.
@@ -37,7 +41,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
 0 10 * * 1-5 $HOME/quant-daily-report/scripts/cron_confirm.sh >> $HOME/quant-daily-report/logs/cron_confirm.log 2>&1
 
 # Shadow CIO model scorecard email
-0 21 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 -m scripts.send_shadow_cio_report >> logs/shadow_cio_report.log 2>&1
+0 21 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 scripts/build_operating_truth.py --repo-root $HOME/quant-daily-report --home $HOME --output-dir outputs/operating_state/current --strict && python3 -m scripts.send_shadow_cio_report >> logs/shadow_cio_report.log 2>&1
 
 # Post-close artifact-only price cache hydration for shadow/reporting reads
 30 18 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts --strict >> logs/price_hydration.cron.log 2>&1

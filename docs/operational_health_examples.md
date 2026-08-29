@@ -125,7 +125,8 @@ Provenance confidence health: LOW
 - Shadow artifacts are present and fresh.
 - Operational shadow NAV remains LOW confidence pending timing semantics
   governance.
-- Orion and Lyra remain shadow-only challengers.
+- Orion is PAPER-authorized and Lyra is independently Live-authorized; both
+  remain Shadow-observed for research comparison.
 
 Interpretation:
 The shadow lane ran successfully, but performance claims should be treated as
