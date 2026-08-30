@@ -1,0 +1,52 @@
+{
+  "schema_version": "caerus_alpha_lab_hyp_2026_015_evaluator_spec_v1",
+  "hypothesis_id": "HYP-2026-015",
+  "experiment_id": "EXP-2026-0015",
+  "family_id": "FAMILY-2026-0015",
+  "wave_id": "WAVE-2026-003-ORTHOGONAL-EVENT-01",
+  "statistical_trial_id": "FAMILY-2026-0015-T001",
+  "module": "projects.alpha_lab.evaluators.industry_earnings_diffusion",
+  "callable": "evaluate_primary_v1",
+  "ordered_variant_census": [
+    "PRIMARY_V1"
+  ],
+  "maximum_family_trial_units": 1,
+  "selection_trial_units": 0,
+  "internal_search_census": [],
+  "primary_metric": "mean_5_session_base_cost_net_peer_minus_industry_return",
+  "expected_direction": "GREATER_THAN",
+  "null_value": 0.0,
+  "economic_hurdle": 0.005,
+  "discovery_period": "2012-01-01/2018-12-31",
+  "validation_period": "2019-01-01/2024-12-31",
+  "challenge_period": "2025-01-01/2026-06-30",
+  "challenge_state": "SEALED_UNOPENED",
+  "inference": {
+    "unit": "reporter_set_id_x_sic4_x_reaction_calendar_quarter",
+    "method": "one_sample_student_t_one_sided",
+    "confidence_lower_bound": 0.9,
+    "holm_alpha": 0.1,
+    "by_q": 0.1
+  },
+  "floors": {
+    "independent_validation_units": 150,
+    "unique_validation_peers": 100,
+    "unique_validation_sic4": 20
+  },
+  "variant_definition": {
+    "reporter_return_threshold": 0.05,
+    "abnormal_dollar_volume_threshold": 2.0,
+    "minimum_newly_allocatable_peers": 3,
+    "price_floor_dollars": 5.0,
+    "median_adv_floor_dollars": 10000000.0,
+    "entry": "next_regular_session_open",
+    "exit": "fifth_regular_session_close",
+    "weighting": "equal_weight_before_overlap_and_capacity_with_residual_cash",
+    "primary_capital_dollars": 1000000.0,
+    "capacity_fraction_of_adv": 0.05,
+    "base_one_way_cost": 0.0015,
+    "stress_one_way_cost": 0.003
+  },
+  "orders_submitted": false,
+  "trading_behavior_changed": false
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": "caerus_alpha_lab_hyp015_code_manifest_v1",
+  "hypothesis_id": "HYP-2026-015",
+  "variant_id": "PRIMARY_V1",
+  "files": [
+    {
+      "path": "projects/alpha_lab/evaluators/industry_earnings_diffusion.py",
+      "sha256": "b6753a39f3ece5e2879627658b11871daae78ca25c21faba511a6333ff2b88eb"
+    },
+    {
+      "path": "projects/alpha_lab/experiments/run_hyp_2026_015_evaluator.py",
+      "sha256": "44b795aa73ca3071f36e4353fe6eb62655b7df55ce7987e727c8372439aa5ec2"
+    },
+    {
+      "path": "projects/alpha_lab/experiments/evaluator_specs/HYP-2026-015.json",
+      "sha256": "f5221329ea2380227f867ab8e2a23d3bbe8d133fc3bee06472cd1c584e350c08"
+    }
+  ],
+  "challenge_period_accessed": false,
+  "orders_submitted": false,
+  "trading_behavior_changed": false
+}
