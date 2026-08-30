@@ -44,7 +44,7 @@ This is not a parallel strategy registry or research ledger. Authority remains:
 | `EXP-2026-0011` | Net payout/share issuance | `DATA_BLOCKED` | Certified filing-time feature panel missing | Raw accounting facts are not model-ready until units, fiscal periods, restatements, and availability are resolved. |
 | `EXP-2026-0012` | Asset growth/investment | `DATA_BLOCKED` | Certified filing-time asset-growth panel missing | Factor familiarity does not excuse point-in-time feature construction; treat it as factor harvest unless residual evidence says otherwise. |
 | `EXP-2026-0013` | AI power/grid commitments | `ACTIVE_RESEARCH` / `DATA_BLOCKED` | Source-audited event tape still required; returns and challenge unread | The investable object must be an attributable, timestamped commitment with direct issuer exposure—not an AI/grid narrative or current-vintage control. |
-| `EXP-2026-0015` | Industry earnings-information diffusion | `FROZEN` / `NOT_RUN` | Freeze recorded; no outcome, holdout, challenge, or formal trial accessed | Use the reporter's causal post-filing reaction and event-time same-SIC peers; do not substitute analyst revisions, a relationship graph, generic momentum, or a threshold grid. |
+| `EXP-2026-0015` | Industry earnings-information diffusion | `DATA_BLOCKED` | Frozen source gate found 313,449/313,450 originals; the sole missing accession is in the Item 2.02 tape, so the run stopped before outcomes | A nearly complete bundle is still incomplete under a 100% causal-source gate. Recover and rebind the exact original; do not delete the event or infer the missing bytes. |
 
 ## Strategy-registry inventory
 
@@ -131,9 +131,10 @@ freeze.
 
 The frozen `HYP-2026-015` industry earnings-information diffusion idea is
 potentially informative because it replaces unavailable analyst revisions and
-supplier graphs with observable, timestamped reporter reactions. It remains
-`UNPROVEN` and not authorized to run; it must still show that peer returns are
-not ordinary industry or raw momentum.
+supplier graphs with observable, timestamped reporter reactions. Its authorized
+no-return gate stopped `BLOCKED_DATA` on one missing Item 2.02 original. It
+remains `UNPROVEN`; after source and governance repair it must still show that
+peer returns are not ordinary industry or raw momentum.
 
 ## Legacy-study intake queue
 
