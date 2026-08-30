@@ -965,6 +965,20 @@ def execute_preregistered(
     ]
     if event_types not in allowed_states:
         raise EventStoreIntegrityError("run cannot be recovered from its current event state")
+    if (
+        (run_dir / "evaluator_result.json").exists()
+        and "outcome_access_started" not in event_types
+    ):
+        raise EventStoreIntegrityError(
+            "evaluator result exists before outcome-access event"
+        )
+    if (
+        (run_dir / "trial_result.json").exists()
+        and "validation_evaluation_completed" not in event_types
+    ):
+        raise EventStoreIntegrityError(
+            "trial result exists before validation-complete event"
+        )
 
     inputs = _load_json(run_dir / "input_manifest.json")
     gate_dir = (repo_root / inputs["gate"]["gate_manifest"]["path"]).parent

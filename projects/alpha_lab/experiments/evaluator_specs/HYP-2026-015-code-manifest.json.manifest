@@ -9,7 +9,7 @@
     },
     {
       "path": "projects/alpha_lab/experiments/run_hyp_2026_015_evaluator.py",
-      "sha256": "a17f36ed01905bb3e34ec3ae160f7dce3f7457daaa6e193fcc21f6267ead121a"
+      "sha256": "ca231ff72cfccaf891986528996e547514d44d940571f721efab4be9ff133271"
     },
     {
       "path": "projects/alpha_lab/experiments/evaluator_specs/HYP-2026-015.json.frozen",
