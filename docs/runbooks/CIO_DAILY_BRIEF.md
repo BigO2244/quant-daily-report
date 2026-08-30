@@ -46,3 +46,29 @@ CIO ATTENTION (maximum three)
   families per calendar month. Parameter variants do not count.
 - Atlas must state a challenge when the evidence contradicts CIO intuition; an
   agreeable summary is not a substitute for the challenge.
+
+## Deterministic builder
+
+Build the reporting-only artifact explicitly; it is not yet scheduled or sent
+by email:
+
+```bash
+python3 scripts/build_cio_daily_brief.py --report-date YYYY-MM-DD
+```
+
+The command reads the dated trading-integrity certification, current compiled
+operating truth, the prior dated brief, and the canonical Alpha Lab research
+projection when available. It writes an immutable, hash-bound bundle under
+`outputs/governance/cio_daily_brief/YYYY-MM-DD/` containing `brief.json`,
+`brief.md`, and `manifest.json`. Rebuilding identical inputs is idempotent;
+different bytes at the same date fail closed.
+
+Missing or malformed certification or operating truth degrades explicitly and
+never changes capital authority. If the owner-ratified canonical research
+projection is absent, or lacks family resolution timestamps, research
+throughput is `UNAVAILABLE`, not zero. The builder never creates a parallel
+research ledger and counts one terminal verdict per credible family, not
+strategy wrappers, experiments, or parameter variants.
+
+Email and cron integration remain separate, unimplemented steps. Any future
+sender must consume the exact persisted bundle rather than recompute it.
