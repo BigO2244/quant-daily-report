@@ -22,7 +22,7 @@ capital, or production behavior.
 | 12 | Asset growth / investment | `FROZEN_BLOCKED_DATA` | `UNPROVEN` | Does conservative balance-sheet expansion predict returns beyond CMA and value? | Materialize certified filing-time asset-growth features |
 | — | Defense procurement-intent events | `DISCUSS_SOURCE_READINESS` | `UNPROVEN` | Do public sources-sought, pre-solicitation, solicitation, budget-program, and company-confirmation events create delayed, explainable reactions in mapped defense issuers? | Timestamped SAM opportunity archive/API availability, official-announcement lineage, issuer/ticker mapping, and a frozen event contract; awards alone are confirmation, not the lead signal |
 | — | AI power/grid commitment events | `DISCUSS_SOURCE_READINESS` | `UNPROVEN` | Do public data-center load commitments, interconnection/power agreements, and associated grid approvals create delayed, explainable reactions in economically exposed utilities and equipment suppliers? | Project-to-issuer exposure map, official publication timestamps from utility/ISO/PUC/FERC sources, event de-duplication, and a frozen event contract; current-vintage EIA controls are context only |
-| — | Industry earnings-information diffusion | `FROZEN_DATA_GATE_BLOCKED` | `ALPHA_CANDIDATE` | Does a large, volume-confirmed reaction to an early industry reporter predict delayed returns in same-industry peers that have not yet reported? | Recover one missing Item 2.02 original, bind a replacement immutable source snapshot, reconcile the authenticated ledger, and resolve two frozen evaluator ambiguities before outcomes |
+| — | Industry earnings-information diffusion | `FROZEN_AUTHORIZED_RERUN_PENDING` | `ALPHA_CANDIDATE` | Does a large, volume-confirmed reaction to an early industry reporter predict delayed returns in same-industry peers that have not yet reported? | Rerun Addendum 001's 99.9% materiality gate, seal the content-addressed one-trial preregistration, then execute only discovery/2019-2024 validation |
 
 Add an idea here only after identifying a distinct economic mechanism. Parameter
 variants remain inside one hypothesis family and count toward its trial budget.
@@ -36,6 +36,12 @@ originals, and the sole missing accession is present in the 257,996-row Item
 2.02 tape. Reporter mapping, peer eligibility, coverage floors, path inventory,
 returns, validation, and challenge evidence remain unread. See
 `evidence/EXP-2026-0015.md`.
+Owner-approved Addendum 001, SHA-256
+`6a3747d98e89efdb3f73e0f7a3587992b38804789e43534a7ec03842ee5e3c8e`,
+replaces the absolute source-universe gate with prespecified aggregate
+materiality, included-row lineage, deterministic exclusion, missingness
+sensitivity, and fully deterministic evaluator rules. It does not open the
+challenge period or authorize any lifecycle or capital action.
 The eight 2026-07-23 rows are frozen and their authorized first run completed
 on 2026-07-24 UTC. A `RUN EXPERIMENT` authorization does not bypass a missing
 or blocked data contract and does not authorize challenge-period access.

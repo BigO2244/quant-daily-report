@@ -33,6 +33,16 @@ or challenge access. The model remains `UNPROVEN` and not promotion-eligible.
 The exact gap, recovery routes, outcome-stage governance blockers, and artifact
 hashes are recorded in `evidence/EXP-2026-0015.md`.
 
+Brett subsequently approved immutable Addendum 001, SHA-256
+`6a3747d98e89efdb3f73e0f7a3587992b38804789e43534a7ec03842ee5e3c8e`.
+It replaces only the absolute source-universe gate with a `99.9%` aggregate
+source/reporter materiality rule while retaining `100%` causal lineage for
+every included observation and the original `99%` eligible-peer mapping gate.
+It also freezes missingness sensitivity, structural-versus-realized sample
+floors, multi-reporter clustering, normalized `$1M` event capital, costs, cash,
+and one-sided cluster inference. The authorized rerun remains pending; no
+additional outcome or challenge input was accessed by the addendum.
+
 Atlas remains the authority for the cross-repository phase program. Its current
 Phase 1 owner gate is not bypassed by this reset. Alpha Lab may continue
 strategy discussion and produce concise owner-support requests, but it may not
