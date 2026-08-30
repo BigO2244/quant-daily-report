@@ -17,7 +17,7 @@ Append-only. Never delete failed or superseded experiments.
 | EXP-2026-0011 | HYP-2026-011 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0011.md` | `ITERATE` — `BLOCKED_DATA` |
 | EXP-2026-0012 | HYP-2026-012 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0012.md` | `ITERATE` — `BLOCKED_DATA` |
 | EXP-2026-0013 | HYP-2026-013 | 2026-07-30 | `RUNNING` | `UNPROVEN` | Pending first immutable data-gate packet | `PENDING` — source-audited AI power/grid event tape required; returns and challenge period remain unread |
-| EXP-2026-0015 | HYP-2026-015 | 2026-08-30 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0015.md` | `REVIEW_PENDING` — frozen no-return gate completed `BLOCKED_DATA` at 313,449/313,450 originals; no reaction, return, validation, or challenge outcome read |
+| EXP-2026-0015 | HYP-2026-015 | 2026-08-30 | `RUNNING` | `UNPROVEN` | `evidence/EXP-2026-0015.md`; `hypotheses/HYP-2026-015-ADDENDUM-001_source_materiality_and_evaluator_determinism.md` | `AUTHORIZED_RERUN_PENDING` — first absolute gate blocked at 313,449/313,450; owner-approved Addendum 001 freezes a 99.9% materiality rerun and evaluator determinism; no additional outcome or challenge read |
 
 `EXP-2026-0014` is intentionally absent pending the separately governed
 reconciliation of the already-completed HYP-2026-014 source-bridge work. This

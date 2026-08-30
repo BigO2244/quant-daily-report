@@ -58,7 +58,23 @@ Choose one: `ALPHA_CANDIDATE`, `FACTOR_HARVEST_CANDIDATE`,
 - Security identifier:
 - Delisting and corporate-action handling:
 - Missing-data rule:
+- Aggregate source/universe coverage tolerance and exact denominator:
+- Included-row causal lineage requirement (normally `100%` for every included
+  observation):
+- Deterministic pre-outcome exclusion rule for missing or ambiguous rows:
+- Missingness diagnostics and concentration gates by relevant time, industry,
+  issuer, and observation role:
+- Absolute `100%` source-universe gate owner sign-off: `NOT_USED`, or owner,
+  date, rationale, and explicit acknowledgement that any single missing row
+  blocks the whole gate:
 - Known coverage limitations:
+
+An absolute `100%` source-universe or mapping gate requires explicit owner
+sign-off in the frozen hypothesis. Otherwise the hypothesis must predeclare a
+numeric aggregate tolerance, maintain `100%` causal lineage for every included
+row, exclude ambiguous rows deterministically before outcomes, and freeze
+missingness/concentration diagnostics. These rules may not be invented or
+relaxed after outcome access.
 
 ## Baselines and risk model
 
