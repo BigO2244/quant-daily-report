@@ -538,6 +538,8 @@ def test_cli_smoke(tmp_path: Path, monkeypatch) -> None:
     panel = _make_panel()
     panel_path = tmp_path / "price_panel.parquet"
     panel.to_parquet(panel_path, index=False)
+    universe_path = tmp_path / "universe.csv"
+    pd.DataFrame({"ticker": ["AAA", "BBB"]}).to_csv(universe_path, index=False)
     out_dir = tmp_path / "out"
     monkeypatch.chdir(Path.cwd())
     result = subprocess.run(
@@ -548,13 +550,15 @@ def test_cli_smoke(tmp_path: Path, monkeypatch) -> None:
             "--start-date",
             "2024-01-01",
             "--end-date",
-            "2025-03-31",
+            str(panel["date"].max().date()),
             "--num-sims",
             "2",
             "--window-years",
             "2",
             "--price-cache-path",
             str(panel_path),
+            "--universe-path",
+            str(universe_path),
             "--output-dir",
             str(out_dir),
         ],
