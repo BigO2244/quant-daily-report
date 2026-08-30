@@ -259,23 +259,23 @@ def _source_preflight(repo_root: Path) -> dict[str, Any]:
     census_failures = []
     if census["raw_inventory_rows"] != counts["hydrated_count"]:
         census_failures.append("raw_inventory_rows_do_not_equal_hydrated_count")
-    if census["unique_inventory_accessions"] != counts["hydrated_count"]:
-        census_failures.append("unique_inventory_accessions_do_not_equal_hydrated_count")
-    if census["duplicate_inventory_accessions"]:
-        census_failures.append("duplicate_inventory_accessions")
     if census["valid_payload_sha256_count"] != counts["hydrated_count"]:
         census_failures.append("inventory_payload_hash_contract_incomplete")
     if census["exact_acceptance_pass_count"] != counts["acceptance_timestamp_pass_count"]:
         census_failures.append("acceptance_pass_count_mismatch")
-    if census["candidate_accession_count"] != counts["candidate_count"]:
-        census_failures.append("candidate_accession_count_mismatch")
-    candidate_count = counts["candidate_count"]
-    source_ready_count = min(
+    if census["raw_candidate_rows"] != counts["candidate_count"]:
+        census_failures.append("candidate_row_count_mismatch")
+    if census["ambiguous_duplicate_accessions"]:
+        census_failures.append("ambiguous_duplicate_accessions")
+    candidate_count = census["unique_candidate_accessions"]
+    source_ready_count = census["unique_ready_accessions"]
+    coverage = source_ready_count / candidate_count if candidate_count else 0.0
+    raw_candidate_count = counts["candidate_count"]
+    raw_source_ready_count = min(
         counts["hydrated_count"],
         counts["acceptance_timestamp_pass_count"],
         census["valid_payload_sha256_count"],
     )
-    coverage = source_ready_count / candidate_count if candidate_count else 0.0
     return {
         "record": record,
         "bundle_root": source_path.parent,
@@ -284,12 +284,17 @@ def _source_preflight(repo_root: Path) -> dict[str, Any]:
         "source_candidate_count": candidate_count,
         "source_hydrated_count": source_ready_count,
         "coverage": coverage,
+        "raw_source_candidate_count": raw_candidate_count,
+        "raw_source_hydrated_count": raw_source_ready_count,
+        "raw_coverage": (
+            raw_source_ready_count / raw_candidate_count
+            if raw_candidate_count
+            else 0.0
+        ),
         "inventory_census": census,
         "inventory_census_failures": census_failures,
         "errors": errors,
-        "excluded_accessions": sorted(
-            item["accession"] for item in errors if item.get("accession")
-        ),
+        "excluded_accessions": census["unresolved_error_accessions"],
         "gate_pass": coverage >= AGGREGATE_ORIGINAL_COVERAGE_MIN
         and not census_failures,
     }
@@ -391,6 +396,9 @@ def _source_inventory_census(
 ) -> dict[str, Any]:
     raw_rows = 0
     accessions: Counter[str] = Counter()
+    accession_signatures: dict[
+        str, set[tuple[object, object, object, object]]
+    ] = defaultdict(set)
     valid_hashes = 0
     exact_acceptance_passes = 0
     for _, record in _inventory_rows(bundle_root):
@@ -398,6 +406,14 @@ def _source_inventory_census(
         accession = str(record.get("accession_number") or "")
         if accession:
             accessions[accession] += 1
+            accession_signatures[accession].add(
+                (
+                    record.get("source_sha256"),
+                    record.get("acceptance_datetime_utc"),
+                    record.get("acceptance_parse_status"),
+                    str(record.get("form_type") or "").upper(),
+                )
+            )
         source_hash = record.get("source_sha256")
         if isinstance(source_hash, str) and _SHA256.fullmatch(source_hash):
             valid_hashes += 1
@@ -411,17 +427,41 @@ def _source_inventory_census(
         for item in source_errors
         if item.get("accession")
     }
-    duplicate_accessions = sorted(
-        accession for accession, count in accessions.items() if count != 1
+    duplicate_accessions = [
+        accession for accession, count in accessions.items() if count > 1
+    ]
+    ambiguous_duplicate_accessions = sorted(
+        accession
+        for accession in duplicate_accessions
+        if len(accession_signatures[accession]) != 1
     )
+    unique_ready_accessions = {
+        accession
+        for accession, signatures in accession_signatures.items()
+        if len(signatures) == 1
+        and isinstance(next(iter(signatures))[0], str)
+        and _SHA256.fullmatch(str(next(iter(signatures))[0]))
+        and next(iter(signatures))[1]
+        and next(iter(signatures))[2] == "PASS"
+    }
+    unique_candidate_accessions = set(accessions) | error_accessions
+    unresolved_error_accessions = sorted(error_accessions - unique_ready_accessions)
+    ready_error_overlap_accessions = sorted(error_accessions & unique_ready_accessions)
     return {
         "raw_inventory_rows": raw_rows,
         "unique_inventory_accessions": len(accessions),
-        "duplicate_inventory_accessions": duplicate_accessions,
+        "duplicate_accession_count": len(duplicate_accessions),
+        "duplicate_alias_extra_rows": raw_rows - len(accessions),
+        "ambiguous_duplicate_accessions": ambiguous_duplicate_accessions,
         "valid_payload_sha256_count": valid_hashes,
         "exact_acceptance_pass_count": exact_acceptance_passes,
         "error_accession_count": len(error_accessions),
         "candidate_accession_count": len(set(accessions) | error_accessions),
+        "unique_ready_accessions": len(unique_ready_accessions),
+        "unique_candidate_accessions": len(unique_candidate_accessions),
+        "unresolved_error_accessions": unresolved_error_accessions,
+        "ready_error_overlap_accessions": ready_error_overlap_accessions,
+        "raw_candidate_rows": raw_rows + len(source_errors),
     }
 
 
@@ -429,44 +469,92 @@ def _validate_event_inventory(
     events: Sequence[dict[str, Any]], bundle_root: Path
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Path]]:
     wanted = {event["event_id"]: event for event in events}
-    found: dict[str, dict[str, Any]] = {}
+    inventory_by_accession: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
     partition_paths: dict[str, Path] = {}
     failures: Counter[str] = Counter()
     for partition, record in _inventory_rows(bundle_root):
         accession = str(record.get("accession_number") or "")
-        if accession not in wanted:
+        if accession in wanted:
+            inventory_by_accession[accession].append((partition, record))
+    found: dict[str, dict[str, Any]] = {}
+    for accession, event in wanted.items():
+        aliases = inventory_by_accession.get(accession, [])
+        if not aliases:
+            failures["missing_inventory_row"] += 1
             continue
-        event = wanted[accession]
-        accepted = parse_datetime(str(record.get("acceptance_datetime_utc")))
+        signatures = {
+            (
+                record.get("source_sha256"),
+                record.get("acceptance_datetime_utc"),
+                record.get("acceptance_parse_status"),
+                str(record.get("form_type") or "").upper(),
+            )
+            for _, record in aliases
+        }
+        if len(signatures) != 1:
+            failures["ambiguous_inventory_aliases"] += 1
+            continue
+        source_hash, accepted_text, acceptance_status, form_type = next(
+            iter(signatures)
+        )
         valid = True
-        if _norm_cik(record.get("cik")) != event["issuer_cik"]:
-            failures["cik_mismatch"] += 1
+        try:
+            accepted = parse_datetime(str(accepted_text))
+        except (TypeError, ValueError):
+            failures["invalid_acceptance_timestamp"] += 1
             valid = False
+            accepted = None
         if accepted != event["acceptance"]:
             failures["acceptance_mismatch"] += 1
             valid = False
-        source_hash = record.get("source_sha256")
+        if event.get("source_sha256") and source_hash != event["source_sha256"]:
+            failures["source_hash_mismatch"] += 1
+            valid = False
+        if form_type != event["form_type"]:
+            failures["form_type_mismatch"] += 1
+            valid = False
         if not isinstance(source_hash, str) or not _SHA256.fullmatch(source_hash):
             failures["invalid_source_hash"] += 1
             valid = False
-        if record.get("acceptance_parse_status") != "PASS":
+        if acceptance_status != "PASS":
             failures["acceptance_parse_not_pass"] += 1
             valid = False
-        if accession in found:
-            failures["duplicate_inventory_accession"] += 1
-            valid = False
-        if valid:
-            enriched = dict(event)
-            enriched.update(
+        if not valid:
+            continue
+        alias_records = sorted(
+            (
                 {
-                    "inventory_source_sha256": source_hash,
-                    "inventory_partition": partition,
+                    "partition": partition,
                     "source_filename": record.get("source_filename"),
+                    "feed_cik": _norm_cik(record.get("cik")),
+                    "feed_filed_date": (
+                        _parse_date(record.get("filed_date")).isoformat()
+                        if _parse_date(record.get("filed_date"))
+                        else None
+                    ),
                 }
+                for partition, record in aliases
+            ),
+            key=lambda item: (
+                str(item.get("source_filename") or ""), item["partition"]
+            ),
+        )
+        canonical_alias = alias_records[0]
+        enriched = dict(event)
+        enriched.update(
+            {
+                "inventory_source_sha256": source_hash,
+                "inventory_partition": canonical_alias["partition"],
+                "source_filename": canonical_alias["source_filename"],
+                "source_aliases": alias_records,
+            }
+        )
+        found[accession] = enriched
+        for alias in alias_records:
+            partition = alias["partition"]
+            partition_paths[partition] = (
+                bundle_root / "data/partitions" / f"{partition}.tar.gz"
             )
-            found[accession] = enriched
-            partition_paths[partition] = bundle_root / "data/partitions" / f"{partition}.tar.gz"
-    failures["missing_inventory_row"] += len(set(wanted) - set(found))
     included = [found[key] for key in sorted(found)]
     return included, {
         "attempted": len(events),
@@ -510,19 +598,43 @@ def _parse_sec_header(header_bytes: bytes) -> dict[str, Any]:
 def _scan_partition(args: tuple[str, str, str]) -> tuple[list[dict[str, Any]], list[str]]:
     tar_name, inventory_name, cutoff_text = args
     cutoff = date.fromisoformat(cutoff_text)
-    inventory: dict[str, dict[str, Any]] = {}
+    partition = Path(inventory_name).name.split("_inventory", 1)[0]
+    inventory_aliases: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    failures: list[str] = []
     with gzip.open(inventory_name, "rt", encoding="utf-8") as stream:
         for line in stream:
             row = json.loads(line)
-            filed = _parse_date(row.get("filed_date"))
             accession = str(row.get("accession_number") or "")
-            if filed and filed <= cutoff:
-                inventory[accession] = row
+            try:
+                accepted = parse_datetime(str(row.get("acceptance_datetime_utc")))
+            except (TypeError, ValueError):
+                failures.append(f"{accession}:invalid_inventory_acceptance")
+                continue
+            if accession and accepted.date() <= cutoff:
+                inventory_aliases[accession].append(row)
+    inventory: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+    for accession, aliases in inventory_aliases.items():
+        signatures = {
+            (
+                row.get("source_sha256"),
+                row.get("acceptance_datetime_utc"),
+                row.get("acceptance_parse_status"),
+                str(row.get("form_type") or "").upper(),
+            )
+            for row in aliases
+        }
+        if len(signatures) != 1:
+            failures.append(f"{accession}:ambiguous_inventory_aliases")
+            continue
+        canonical = min(
+            aliases, key=lambda row: str(row.get("source_filename") or "")
+        )
+        inventory[accession] = (canonical, aliases)
     rows: list[dict[str, Any]] = []
-    failures: list[str] = []
     if not inventory:
         return rows, failures
-    remaining = set(inventory)
+    actual_by_accession: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    invalid_actual_accessions: set[str] = set()
     with tarfile.open(tar_name, mode="r|gz") as archive:
         for member in archive:
             accession = _accession(member.name)
@@ -543,21 +655,19 @@ def _scan_partition(args: tuple[str, str, str]) -> tuple[list[dict[str, Any]], l
                     header.extend(chunk[: HEADER_LIMIT_BYTES - len(header)])
             parsed = _parse_sec_header(bytes(header))
             source_hash = digest.hexdigest()
-            expected = inventory[accession]
-            remaining.discard(accession)
+            expected, _ = inventory[accession]
             checks = {
                 "member_accession": parsed["accession"] == accession,
                 "source_sha256": source_hash == expected.get("source_sha256"),
-                "cik": parsed["cik"] == _norm_cik(expected.get("cik")),
                 "acceptance": parsed["acceptance"]
                 == parse_datetime(str(expected.get("acceptance_datetime_utc"))),
+                "form_type": parsed["form_type"]
+                == str(expected.get("form_type") or "").upper(),
             }
             if not all(checks.values()):
-                failures.append(
-                    f"{accession}:" + ",".join(key for key, passed in checks.items() if not passed)
-                )
+                invalid_actual_accessions.add(accession)
                 continue
-            rows.append(
+            actual_by_accession[accession].append(
                 {
                     "event_id": accession,
                     "cik": parsed["cik"],
@@ -567,13 +677,64 @@ def _scan_partition(args: tuple[str, str, str]) -> tuple[list[dict[str, Any]], l
                     "form_type": parsed["form_type"],
                     "item_2_02": parsed["item_2_02"],
                     "source_sha256": source_hash,
-                    "source_path": expected.get("source_filename") or member.name,
+                    "source_path": member.name,
                 }
             )
-            if not remaining:
-                break
-    missing = set(inventory) - {row["event_id"] for row in rows}
-    failures.extend(f"{accession}:missing_or_invalid_payload" for accession in sorted(missing))
+    for accession, (expected, aliases) in inventory.items():
+        actual_rows = actual_by_accession.get(accession, [])
+        if accession in invalid_actual_accessions:
+            failures.append(f"{accession}:conflicting_actual_payload_alias")
+            continue
+        if not actual_rows:
+            failures.append(f"{accession}:missing_or_invalid_payload")
+            continue
+        actual_signatures = {
+            (
+                row["source_sha256"],
+                row["cik"],
+                row["sic"],
+                row["sic_count"],
+                row["acceptance"],
+                row["form_type"],
+                row["item_2_02"],
+            )
+            for row in actual_rows
+        }
+        if len(actual_signatures) != 1:
+            failures.append(f"{accession}:conflicting_actual_payload_headers")
+            continue
+        canonical_actual = min(actual_rows, key=lambda row: row["source_path"])
+        alias_lineage = sorted(
+            (
+                {
+                    "partition": partition,
+                    "source_filename": row.get("source_filename"),
+                    "feed_cik": _norm_cik(row.get("cik")),
+                    "feed_filed_date": (
+                        _parse_date(row.get("filed_date")).isoformat()
+                        if _parse_date(row.get("filed_date"))
+                        else None
+                    ),
+                }
+                for row in aliases
+            ),
+            key=lambda item: str(item.get("source_filename") or ""),
+        )
+        canonical_actual["source_aliases"] = alias_lineage
+        canonical_actual["actual_member_paths"] = sorted(
+            row["source_path"] for row in actual_rows
+        )
+        canonical_actual["feed_cik_discrepancy_count"] = sum(
+            item["feed_cik"] != canonical_actual["cik"] for item in alias_lineage
+        )
+        canonical_actual["feed_filed_date_discrepancy_count"] = sum(
+            item["feed_filed_date"] != canonical_actual["acceptance"].date().isoformat()
+            for item in alias_lineage
+        )
+        canonical_actual["inventory_canonical_source_path"] = expected.get(
+            "source_filename"
+        )
+        rows.append(canonical_actual)
     return rows, failures
 
 
@@ -600,8 +761,59 @@ def _scan_headers(
     finally:
         if max_workers != 1:
             executor.shutdown(wait=True)
-    rows.sort(key=lambda row: (row["acceptance"], row["event_id"]))
-    return rows, failures
+    failed_accessions = {item.split(":", 1)[0] for item in failures}
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[row["event_id"]].append(row)
+    canonical_rows: list[dict[str, Any]] = []
+    for accession, values in grouped.items():
+        if accession in failed_accessions:
+            continue
+        signatures = {
+            (
+                row["source_sha256"],
+                row["cik"],
+                row["sic"],
+                row["sic_count"],
+                row["acceptance"],
+                row["form_type"],
+                row["item_2_02"],
+            )
+            for row in values
+        }
+        if len(signatures) != 1:
+            failures.append(f"{accession}:conflicting_cross_partition_payload")
+            continue
+        canonical = min(values, key=lambda row: row["source_path"])
+        canonical["source_aliases"] = sorted(
+            {
+                canonical_json(alias)
+                for row in values
+                for alias in row.get("source_aliases", ())
+            }
+        )
+        canonical["source_aliases"] = [
+            json.loads(alias) for alias in canonical["source_aliases"]
+        ]
+        canonical["actual_member_paths"] = sorted(
+            {
+                path
+                for row in values
+                for path in row.get("actual_member_paths", ())
+            }
+        )
+        canonical["feed_cik_discrepancy_count"] = sum(
+            alias.get("feed_cik") != canonical["cik"]
+            for alias in canonical["source_aliases"]
+        )
+        canonical["feed_filed_date_discrepancy_count"] = sum(
+            alias.get("feed_filed_date")
+            != canonical["acceptance"].date().isoformat()
+            for alias in canonical["source_aliases"]
+        )
+        canonical_rows.append(canonical)
+    canonical_rows.sort(key=lambda row: (row["acceptance"], row["event_id"]))
+    return canonical_rows, sorted(set(failures))
 
 
 def _reaction_session(accepted: datetime, sessions: Sequence[date]) -> date | None:
@@ -722,10 +934,12 @@ def _build_structural_clusters(
     header_by_event = {row["event_id"]: row for row in headers}
     event_dates: dict[str, list[datetime]] = defaultdict(list)
     reporter_failures: Counter[str] = Counter()
+    reporter_metadata_discrepancies: Counter[str] = Counter()
     reporter_rows = []
     for event in events:
-        if event["issuer_cik"]:
-            event_dates[event["issuer_cik"]].append(event["acceptance"])
+        header = header_by_event.get(event["event_id"])
+        if header and header.get("cik") and header.get("acceptance"):
+            event_dates[header["cik"]].append(header["acceptance"])
     for event in excluded_event_metadata:
         cik = event.get("issuer_cik")
         accepted = event.get("acceptance_datetime_utc")
@@ -738,6 +952,20 @@ def _build_structural_clusters(
         if header is None:
             reporter_failures["missing_verified_header"] += 1
             continue
+        if header.get("acceptance") != event["acceptance"]:
+            reporter_failures["header_acceptance_mismatch"] += 1
+            continue
+        if header.get("form_type") != event["form_type"]:
+            reporter_failures["header_form_type_mismatch"] += 1
+            continue
+        if header.get("source_sha256") != event.get("inventory_source_sha256"):
+            reporter_failures["header_source_hash_mismatch"] += 1
+            continue
+        if not header.get("cik"):
+            reporter_failures["missing_header_cik"] += 1
+            continue
+        if event.get("issuer_cik") != header["cik"]:
+            reporter_metadata_discrepancies["tape_cik"] += 1
         if not header.get("item_2_02"):
             reporter_failures["original_header_not_item_2_02"] += 1
             continue
@@ -747,22 +975,29 @@ def _build_structural_clusters(
         if header.get("form_type") == "8-K/A":
             reporter_failures["unresolved_amendment"] += 1
             continue
-        reaction = _reaction_session(event["acceptance"], sessions)
+        reaction = _reaction_session(header["acceptance"], sessions)
         if reaction is None:
             reporter_failures["reaction_session_absent"] += 1
             continue
-        security_id, mapping = _unique_security(identity, event["issuer_cik"], reaction)
+        security_id, mapping = _unique_security(identity, header["cik"], reaction)
         if security_id is None:
             reporter_failures[f"reporter_mapping_{mapping.lower()}"] += 1
             continue
         reporter_rows.append(
             {
                 **event,
+                "issuer_cik": header["cik"],
+                "acceptance": header["acceptance"],
+                "form_type": header["form_type"],
                 "sic": header["sic"],
                 "reaction_session": reaction,
                 "security_id": security_id,
                 "header_source_sha256": header["source_sha256"],
                 "header_source_path": header.get("source_path"),
+                "header_source_aliases": header.get("source_aliases", ()),
+                "header_actual_member_paths": header.get(
+                    "actual_member_paths", ()
+                ),
             }
         )
     grouped: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
@@ -797,6 +1032,8 @@ def _build_structural_clusters(
                 "source_path": update.get("source_path"),
                 "source_sha256": update.get("source_sha256"),
                 "acceptance": update.get("acceptance"),
+                "source_aliases": update.get("source_aliases", ()),
+                "actual_member_paths": update.get("actual_member_paths", ()),
             }
             ciks_by_sic[new_sic].add(cik)
             ciks_by_division[new_sic[:2]].add(cik)
@@ -822,6 +1059,23 @@ def _build_structural_clusters(
                     {
                         "cik": peer_cik,
                         "security_id": security_id,
+                        "source_lineage": [
+                            {
+                                "event_id": row["event_id"],
+                                "source_sha256": row["header_source_sha256"],
+                                "canonical_source_path": row[
+                                    "header_source_path"
+                                ],
+                                "advertised_aliases": row[
+                                    "header_source_aliases"
+                                ],
+                                "actual_member_paths": row[
+                                    "header_actual_member_paths"
+                                ],
+                            }
+                            for row in reporters
+                            if row["security_id"] == security_id
+                        ],
                         "mapping_status": mapping,
                         "relevance": relevance,
                         "causal_sic_source": current_sic_source.get(peer_cik),
@@ -918,6 +1172,9 @@ def _build_structural_clusters(
         "reporter_attempted": len(events),
         "reporter_included": len(reporter_rows),
         "reporter_failures": dict(sorted(reporter_failures.items())),
+        "reporter_metadata_discrepancies": dict(
+            sorted(reporter_metadata_discrepancies.items())
+        ),
         "peer_mapping": dict(sorted(peer_mapping.items())),
         "peer_mapping_rate": mapping_rate,
         "control_mapping": dict(sorted(control_mapping.items())),
@@ -1649,7 +1906,7 @@ def _gate_summary(
     )
     controls = [
         ("aggregate_original_coverage", source["coverage"] >= AGGREGATE_ORIGINAL_COVERAGE_MIN, source["coverage"], AGGREGATE_ORIGINAL_COVERAGE_MIN),
-        ("source_inventory_unique_count_hash_acceptance", not source.get("inventory_census_failures"), source.get("inventory_census_failures", ()), "no census failures"),
+        ("source_inventory_count_hash_acceptance", not source.get("inventory_census_failures"), source.get("inventory_census_failures", ()), "no census failures"),
         ("aggregate_reporter_inventory_coverage", inventory["coverage"] >= AGGREGATE_ORIGINAL_COVERAGE_MIN, inventory["coverage"], AGGREGATE_ORIGINAL_COVERAGE_MIN),
         ("item_2_02_accession_uniqueness", not event_audit["duplicate_event_ids"], len(event_audit["duplicate_event_ids"]), 0),
         ("aggregate_original_header_integrity", header_audit["coverage"] >= AGGREGATE_ORIGINAL_COVERAGE_MIN, header_audit["coverage"], AGGREGATE_ORIGINAL_COVERAGE_MIN),
@@ -1839,6 +2096,23 @@ def run_gate(
         "coverage": len(headers) / header_attempted if header_attempted else 0.0,
         "single_four_digit_sic_rows": header_sic_count,
         "sic_coverage": header_sic_count / len(headers) if headers else 0.0,
+        "duplicate_alias_group_count": sum(
+            len(row.get("source_aliases", ())) > 1 for row in headers
+        ),
+        "advertised_alias_extra_row_count": sum(
+            max(0, len(row.get("source_aliases", ())) - 1) for row in headers
+        ),
+        "actual_member_alias_extra_count": sum(
+            max(0, len(row.get("actual_member_paths", ())) - 1)
+            for row in headers
+        ),
+        "feed_cik_discrepancy_count": sum(
+            row.get("feed_cik_discrepancy_count", 0) for row in headers
+        ),
+        "feed_filed_date_discrepancy_count": sum(
+            row.get("feed_filed_date_discrepancy_count", 0)
+            for row in headers
+        ),
         "failures_by_reason": dict(
             sorted(Counter(item.split(":", 1)[-1] for item in header_failures).items())
         ),
@@ -1906,6 +2180,9 @@ def run_gate(
             "source_candidate_count": source["source_candidate_count"],
             "source_hydrated_count": source["source_hydrated_count"],
             "coverage": source["coverage"],
+            "raw_source_candidate_count": source["raw_source_candidate_count"],
+            "raw_source_hydrated_count": source["raw_source_hydrated_count"],
+            "raw_coverage": source["raw_coverage"],
             "threshold": AGGREGATE_ORIGINAL_COVERAGE_MIN,
             "inventory_census": source["inventory_census"],
             "inventory_census_failures": source["inventory_census_failures"],
