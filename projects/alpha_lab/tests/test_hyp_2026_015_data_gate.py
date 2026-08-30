@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 import sys
+import tarfile
 import types
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -102,6 +104,127 @@ def test_source_preflight_allows_addendum_materiality_override(
     assert result["coverage"] == pytest.approx(0.999)
     assert result["excluded_accessions"] == ["0001549848-14-000068"]
     assert result["inventory_census_failures"] == []
+
+
+def test_source_census_collapses_only_equivalent_accession_aliases(
+    tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "bundle"
+    inventory_path = bundle / "data/inventory/part_00000_inventory.jsonl.gz"
+    inventory_path.parent.mkdir(parents=True)
+    common = {
+        "accession_number": "0000000001-20-000001",
+        "source_sha256": "a" * 64,
+        "acceptance_parse_status": "PASS",
+        "acceptance_datetime_utc": "2020-01-01T00:00:00Z",
+    }
+    with gzip.open(inventory_path, "wt", encoding="utf-8") as stream:
+        stream.write(json.dumps({**common, "source_filename": "legacy.txt"}) + "\n")
+        stream.write(
+            json.dumps(
+                {
+                    **common,
+                    "source_filename": "archive/current.txt",
+                    "cik": "different_non_authoritative_feed_value",
+                }
+            )
+            + "\n"
+        )
+
+    census = gate._source_inventory_census(bundle, [])
+
+    assert census["raw_inventory_rows"] == 2
+    assert census["unique_inventory_accessions"] == 1
+    assert census["duplicate_accession_count"] == 1
+    assert census["duplicate_alias_extra_rows"] == 1
+    assert census["ambiguous_duplicate_accessions"] == []
+
+
+def test_source_census_rejects_conflicting_accession_payload_or_acceptance(
+    tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "bundle"
+    inventory_path = bundle / "data/inventory/part_00000_inventory.jsonl.gz"
+    inventory_path.parent.mkdir(parents=True)
+    with gzip.open(inventory_path, "wt", encoding="utf-8") as stream:
+        for source_hash in ("a" * 64, "b" * 64):
+            stream.write(
+                json.dumps(
+                    {
+                        "accession_number": "0000000001-20-000001",
+                        "source_sha256": source_hash,
+                        "acceptance_parse_status": "PASS",
+                        "acceptance_datetime_utc": "2020-01-01T00:00:00Z",
+                    }
+                )
+                + "\n"
+            )
+
+    census = gate._source_inventory_census(bundle, [])
+
+    assert census["ambiguous_duplicate_accessions"] == [
+        "0000000001-20-000001"
+    ]
+
+
+def test_partition_scan_collapses_verified_aliases_using_payload_header(
+    tmp_path: Path,
+) -> None:
+    payload = b"""<SEC-DOCUMENT>0000123456-20-000001.txt
+<SEC-HEADER>
+<ACCEPTANCE-DATETIME>20200203170102
+ACCESSION NUMBER: 0000123456-20-000001
+CONFORMED SUBMISSION TYPE: 8-K
+ITEM INFORMATION: Results of Operations and Financial Condition
+CENTRAL INDEX KEY: 0001234567
+STANDARD INDUSTRIAL CLASSIFICATION: SEMICONDUCTORS [3674]
+</SEC-HEADER>
+"""
+    source_hash = hashlib.sha256(payload).hexdigest()
+    inventory_path = tmp_path / "part_00000_inventory.jsonl.gz"
+    aliases = (
+        "edgar/data/1234567/0000123456-20-000001.txt",
+        "edgar/data/1234567/000012345620000001/0000123456-20-000001.txt",
+    )
+    with gzip.open(inventory_path, "wt", encoding="utf-8") as stream:
+        for index, source_filename in enumerate(aliases):
+            stream.write(
+                json.dumps(
+                    {
+                        "accession_number": "0000123456-20-000001",
+                        "source_sha256": source_hash,
+                        "acceptance_parse_status": "PASS",
+                        "acceptance_datetime_utc": "2020-02-03T22:01:02+00:00",
+                        "form_type": "8-K",
+                        "cik": str(9000000 + index),
+                        "filed_date": "2026-01-01",
+                        "source_filename": source_filename,
+                    }
+                )
+                + "\n"
+            )
+    tar_path = tmp_path / "part_00000.tar.gz"
+    with tarfile.open(tar_path, "w:gz") as archive:
+        for source_filename in aliases:
+            member = tarfile.TarInfo(source_filename)
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+
+    rows, failures = gate._scan_partition(
+        (str(tar_path), str(inventory_path), "2024-12-31")
+    )
+
+    assert failures == []
+    assert len(rows) == 1
+    assert rows[0]["cik"] == "0001234567"
+    assert rows[0]["sic"] == "3674"
+    assert rows[0]["acceptance"] == datetime(
+        2020, 2, 3, 22, 1, 2, tzinfo=timezone.utc
+    )
+    assert len(rows[0]["source_aliases"]) == 2
+    assert len(rows[0]["actual_member_paths"]) == 2
+    assert rows[0]["feed_cik_discrepancy_count"] == 2
+    assert rows[0]["feed_filed_date_discrepancy_count"] == 2
 
 
 def test_item_tape_excludes_missing_original_and_stops_at_challenge_boundary(
@@ -217,15 +340,17 @@ def test_same_session_sic_cluster_preserves_all_reporter_ids_without_aggregation
     events = [
         {
             "event_id": "0000000001-20-000001",
-            "issuer_cik": "0000000001",
-            "form_type": "8-K",
-            "acceptance": accepted,
+                "issuer_cik": "0000000001",
+                "form_type": "8-K",
+                "acceptance": accepted,
+                "inventory_source_sha256": "a" * 64,
         },
         {
             "event_id": "0000000001-20-000002",
-            "issuer_cik": "0000000001",
-            "form_type": "8-K",
-            "acceptance": accepted,
+                "issuer_cik": "0000000001",
+                "form_type": "8-K",
+                "acceptance": accepted,
+                "inventory_source_sha256": "a" * 64,
         },
     ]
     headers = [
