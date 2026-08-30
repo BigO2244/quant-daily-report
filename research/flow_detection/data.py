@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import tempfile
 import time
 from dataclasses import dataclass
@@ -64,6 +65,7 @@ def _validate_catchup_sessions(
             missing[symbol] = absent
     return {
         "status": "OK" if not missing else "INCOMPLETE",
+        "downloaded_symbols": sorted({str(value).upper() for value in tail_symbols}),
         "tail_symbols": sorted({str(value).upper() for value in tail_symbols}),
         "expected_symbol_sessions": expected_count,
         "missing_sessions_by_symbol": missing,
@@ -77,6 +79,8 @@ def _atomic_write_price_cache(frame: pd.DataFrame, path: Path) -> dict[str, Any]
     descriptor, staged_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".parquet", dir=path.parent)
     os.close(descriptor)
     staged_path = Path(staged_name)
+    backup_path: Path | None = None
+    had_prior = path.is_file()
     try:
         canonical_frame = standardize_panel(frame)
         canonical_frame.to_parquet(staged_path, index=False)
@@ -88,10 +92,34 @@ def _atomic_write_price_cache(frame: pd.DataFrame, path: Path) -> dict[str, Any]
         staged_hash = _file_sha256(staged_path)
         if not staged_hash:
             raise RuntimeError("staged price cache has no verifiable hash")
+        if had_prior:
+            backup_descriptor, backup_name = tempfile.mkstemp(
+                prefix=f".{path.name}.", suffix=".prior", dir=path.parent
+            )
+            os.close(backup_descriptor)
+            backup_path = Path(backup_name)
+            shutil.copyfile(path, backup_path)
+            if _file_sha256(backup_path) != before_hash:
+                raise RuntimeError("recoverable prior price cache hash mismatch")
         os.replace(staged_path, path)
-        canonical_hash = _file_sha256(path)
-        if canonical_hash != staged_hash:
-            raise RuntimeError("published price cache hash does not match validated staged artifact")
+        try:
+            canonical_hash = _file_sha256(path)
+            if canonical_hash != staged_hash:
+                raise RuntimeError(
+                    "published price cache hash does not match validated staged artifact"
+                )
+        except Exception:
+            try:
+                if backup_path is not None:
+                    os.replace(backup_path, path)
+                    backup_path = None
+                elif not had_prior and path.exists():
+                    path.unlink()
+            except Exception as rollback_exc:
+                raise RuntimeError(
+                    "price cache publication verification and rollback both failed"
+                ) from rollback_exc
+            raise
         return {
             "status": "PUBLISHED",
             "before_sha256": before_hash,
@@ -102,6 +130,8 @@ def _atomic_write_price_cache(frame: pd.DataFrame, path: Path) -> dict[str, Any]
     finally:
         if staged_path.exists():
             staged_path.unlink()
+        if backup_path is not None and backup_path.exists():
+            backup_path.unlink()
 
 
 @dataclass(frozen=True)
@@ -390,6 +420,7 @@ def ensure_price_panel(
     download_attempts: list[dict[str, Any]] = []
     catchup_validation: dict[str, Any] = {
         "status": "NOT_REQUIRED",
+        "downloaded_symbols": [],
         "tail_symbols": [],
         "expected_symbol_sessions": 0,
         "missing_sessions_by_symbol": {},
@@ -490,12 +521,23 @@ def ensure_price_panel(
                 if attempt < provider_group_attempts and provider_retry_backoff_seconds:
                     time.sleep(provider_retry_backoff_seconds * attempt)
 
-            if frame.empty and set(group_results) == {"EMPTY"} and len(normalized_symbols) > 1:
+            systemic_empty = (
+                frame.empty
+                and "EMPTY" in group_results
+                and set(group_results) <= {"EMPTY", "ERROR"}
+                and len(normalized_symbols) > 1
+            )
+            if systemic_empty:
+                failure_reason = (
+                    "provider_systemic_empty_after_group_retries"
+                    if set(group_results) == {"EMPTY"}
+                    else "provider_systemic_mixed_empty_error_after_group_retries"
+                )
                 for symbol in normalized_symbols:
                     download_failed_symbols.append(symbol)
-                    download_errors[symbol] = "provider_systemic_empty_after_group_retries"
+                    download_errors[symbol] = failure_reason
                 logger.warning(
-                    "[FLOW] Provider-wide empty response persisted for %d bounded attempts; "
+                    "[FLOW] Provider-wide empty/error response persisted for %d bounded attempts; "
                     "individual fanout suppressed: symbols=%d",
                     provider_group_attempts,
                     len(normalized_symbols),
@@ -553,14 +595,10 @@ def ensure_price_panel(
                 required_anchor_dates=required_anchor_dates,
                 required_history_offsets=required_history_offsets,
             )
-            catchup_starts = {
-                sym: str(max(pd.Timestamp(start_date), coverage[sym]["max_date"] + pd.Timedelta(days=1)).date())
-                for sym in incomplete_symbols
-            }
             catchup_validation = _validate_catchup_sessions(
                 panel,
-                download_start_by_symbol=catchup_starts,
-                tail_symbols=incomplete_symbols,
+                download_start_by_symbol=download_start_by_symbol,
+                tail_symbols=download_symbols,
                 end_date=end_date,
             )
             publication_blocks: list[str] = []

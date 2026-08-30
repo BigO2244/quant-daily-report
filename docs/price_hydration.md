@@ -25,16 +25,17 @@ outputs/price_hydration/YYYY-MM-DD/status.json
 
 ## Fail-Closed Publication
 
-The hydrator distinguishes a partial-symbol response from a provider-wide empty
-response. A provider-wide empty response receives three bounded group retries;
-if all remain empty, per-symbol fanout is suppressed so one outage cannot create
-hundreds of redundant calls.
+The hydrator distinguishes a partial-symbol response from provider-wide empty
+or mixed error/empty exhaustion. Those systemic responses receive three bounded
+group attempts; per-symbol fanout is then suppressed so one outage cannot
+create hundreds of redundant calls. All-error batch exhaustion retains the
+bounded per-symbol fallback because it may reflect a batch-specific failure.
 
 Downloaded rows are merged into a staged parquet artifact. Publication occurs
 only when:
 
 - required current-session and anchor coverage is complete;
-- every expected session in each stale symbol's catch-up interval is present;
+- every expected session in each downloaded symbol's intended interval is present;
 - no download failure remains; and
 - the staged parquet round-trips exactly and has a verified SHA-256 hash.
 

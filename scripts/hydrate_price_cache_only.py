@@ -217,6 +217,25 @@ def main(argv: list[str] | None = None) -> int:
         hydration_source=args.hydration_source,
         coverage_validation=panel_meta.get("coverage_validation"),
     )
+    cache_publish = panel_meta.get("cache_publish") or {}
+    catchup_validation = panel_meta.get("catchup_validation") or {}
+    publication_reasons: list[str] = []
+    if cache_publish.get("status") == "BLOCKED_UNCHANGED":
+        publication_reasons.append("canonical_cache_publication_blocked")
+    if catchup_validation.get("status") == "INCOMPLETE":
+        publication_reasons.append("downloaded_session_continuity_incomplete")
+    if publication_reasons:
+        if payload.get("status") == "OK":
+            payload["status"] = "PARTIAL"
+            payload["reason"] = "; ".join(publication_reasons)
+        else:
+            payload["reason"] = "; ".join(
+                [str(payload.get("reason") or ""), *publication_reasons]
+            ).strip("; ")
+        payload["publication_validation"] = {
+            "status": "INCOMPLETE",
+            "reason_codes": publication_reasons,
+        }
     payload["cache_only"] = True
     payload["symbols_requested"] = len(symbols)
     payload["before_max_cache_date"] = before_max_date
