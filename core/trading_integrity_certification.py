@@ -16,6 +16,10 @@ import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from core.governed_universe_freeze import (
+    GovernedUniverseFreezeError,
+    validate_governed_universe_freeze,
+)
 from core.orion_decision_lineage import canonical_hash
 from paper.trading_calendar import is_trading_day, prev_trading_day
 
@@ -100,6 +104,51 @@ def _verify_ref(root: Path, ref: Mapping[str, Any] | None) -> tuple[bool, Path |
     return path.is_file() and _sha256(path) == expected, path
 
 
+def _verify_prospective_universe_freeze(
+    *,
+    root: Path,
+    trade_date: str,
+    envelope: Mapping[str, Any] | None,
+    universe: Mapping[str, Any],
+) -> tuple[bool, list[str], list[str]]:
+    ref = universe.get("prospective_freeze")
+    if not isinstance(ref, Mapping):
+        return False, ["prospective_universe_freeze_reference_missing"], []
+    ref_ok, freeze_path = _verify_ref(root, ref)
+    if not ref_ok or freeze_path is None:
+        return False, ["prospective_universe_freeze_missing_or_hash_mismatch"], []
+    freeze = _read(freeze_path)
+    if freeze is None:
+        return False, ["prospective_universe_freeze_payload_invalid"], []
+
+    cutoff = str(freeze.get("no_retroactive_use_before") or "")
+    if not cutoff or trade_date < cutoff:
+        return False, ["prospective_universe_freeze_not_yet_effective"], []
+    evaluation = (envelope or {}).get("evaluation")
+    evaluation = evaluation if isinstance(evaluation, Mapping) else {}
+    evaluated_at = str(evaluation.get("evaluated_at") or "").strip()
+    if not evaluated_at:
+        return False, ["prospective_universe_freeze_evaluation_time_missing"], []
+
+    source_text = str(universe.get("source") or "").strip()
+    if not source_text or source_text != str(freeze.get("source_path") or ""):
+        return False, ["prospective_universe_freeze_source_mismatch"], []
+    source_path = root / source_text
+    try:
+        validate_governed_universe_freeze(
+            freeze,
+            universe_path=source_path,
+            session_as_of=evaluated_at,
+        )
+    except (GovernedUniverseFreezeError, OSError, ValueError):
+        return False, ["prospective_universe_freeze_validation_failed"], []
+    if str(universe.get("snapshot_hash") or "") != str(freeze.get("source_sha256") or ""):
+        return False, ["prospective_universe_freeze_snapshot_hash_mismatch"], []
+    if universe.get("member_count") != freeze.get("member_count"):
+        return False, ["prospective_universe_freeze_member_count_mismatch"], []
+    return True, [], [str(freeze_path.relative_to(root))]
+
+
 def _find_submit_run(root: Path, trade_date: str, workflow: Mapping[str, Any] | None) -> Path | None:
     raw = str((workflow or {}).get("run_root") or "").strip()
     if raw:
@@ -173,9 +222,24 @@ def certify_session(*, repo_root: Path, trade_date: str) -> dict[str, Any]:
         data_reasons.append("market_data_not_latest_completed_session")
     if universe.get("source_available") is not True:
         data_reasons.append("universe_source_unavailable")
-    if universe.get("method") in {None, "", "legacy_current_universe"}:
+    prospective_freeze_ok = False
+    if universe.get("method") == "legacy_current_universe":
+        prospective_freeze_ok, freeze_reasons, freeze_evidence = (
+            _verify_prospective_universe_freeze(
+                root=root,
+                trade_date=trade_date,
+                envelope=envelope,
+                universe=universe,
+            )
+        )
+        data_reasons.extend(freeze_reasons)
+        data_evidence.extend(freeze_evidence)
+    if universe.get("method") in {None, ""} or (
+        universe.get("method") == "legacy_current_universe"
+        and not prospective_freeze_ok
+    ):
         data_reasons.append("pit_universe_not_decision_grade")
-    if "NON_DECISION_GRADE_UNIVERSE" in reason_codes:
+    if "NON_DECISION_GRADE_UNIVERSE" in reason_codes and not prospective_freeze_ok:
         data_reasons.append("non_decision_grade_universe_reason_code")
     data_pass = not data_reasons
 
