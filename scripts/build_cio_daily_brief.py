@@ -60,7 +60,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report-date", required=True)
     parser.add_argument("--certification", type=Path)
     parser.add_argument("--operating-truth", type=Path)
-    parser.add_argument("--research-projection", type=Path)
     parser.add_argument("--previous-brief", type=Path)
     parser.add_argument("--output-root", type=Path)
     args = parser.parse_args(argv)
@@ -77,10 +76,6 @@ def main(argv: list[str] | None = None) -> int:
         args.operating_truth
         or root / "outputs/operating_state/current/operating_truth.json"
     ).resolve()
-    research_path = (
-        args.research_projection
-        or root / "outputs/research/alpha_lab/ledger/research_projection.v1.json"
-    ).resolve()
     previous_path = (
         args.previous_brief.resolve()
         if args.previous_brief
@@ -89,7 +84,6 @@ def main(argv: list[str] | None = None) -> int:
 
     certification, certification_raw = _read(certification_path)
     operating, operating_raw = _read(operating_path)
-    research, research_raw = _read(research_path)
     previous, _ = _read(previous_path) if previous_path else (None, None)
     sources = [
         {
@@ -106,14 +100,6 @@ def main(argv: list[str] | None = None) -> int:
                 path=_display(operating_path, root),
                 payload=operating,
                 raw_bytes=operating_raw,
-            ),
-        },
-        {
-            "kind": "research_projection",
-            **source_artifact(
-                path=_display(research_path, root),
-                payload=research,
-                raw_bytes=research_raw,
             ),
         },
     ]
@@ -135,7 +121,6 @@ def main(argv: list[str] | None = None) -> int:
         certification=certification,
         operating_truth=operating,
         previous_brief=previous,
-        research_projection=research,
         sources=sources,
     )
     manifest = persist_brief_bundle(output_root=output_root, payload=payload)

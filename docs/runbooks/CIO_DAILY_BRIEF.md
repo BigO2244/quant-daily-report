@@ -42,8 +42,10 @@ CIO ATTENTION (maximum three)
   retrospective RED window does not by itself halt an active lane.
 - Unchanged state is omitted. Counts of builds, variants, and experiments are
   not operating metrics.
-- Research throughput is terminal verdicts on credible independent hypothesis
-  families per calendar month. Parameter variants do not count.
+- Research throughput will be terminal verdicts on credible independent
+  hypothesis families per calendar month once canonical authenticated ledger
+  and family authority exist. Until then it is `UNAVAILABLE`; no local file is
+  accepted as authority.
 - Atlas must state a challenge when the evidence contradicts CIO intuition; an
   agreeable summary is not a substitute for the challenge.
 
@@ -57,18 +59,19 @@ python3 scripts/build_cio_daily_brief.py --report-date YYYY-MM-DD
 ```
 
 The command reads the dated trading-integrity certification, current compiled
-operating truth, the prior dated brief, and the canonical Alpha Lab research
-projection when available. It writes an immutable, hash-bound bundle under
+operating truth, and the prior dated brief. It writes an immutable, hash-bound
+bundle under
 `outputs/governance/cio_daily_brief/YYYY-MM-DD/` containing `brief.json`,
 `brief.md`, and `manifest.json`. Rebuilding identical inputs is idempotent;
 different bytes at the same date fail closed.
 
 Missing or malformed certification or operating truth degrades explicitly and
-never changes capital authority. If the owner-ratified canonical research
-projection is absent, or lacks family resolution timestamps, research
-throughput is `UNAVAILABLE`, not zero. The builder never creates a parallel
-research ledger and counts one terminal verdict per credible family, not
-strategy wrappers, experiments, or parameter variants.
+never changes capital authority. Alpha fields and research throughput are
+explicitly `UNAVAILABLE` until the canonical authenticated GCP ledger and
+family authority are implemented. The builder accepts no research-file input,
+does not infer improvements, deterioration, promotions, kills, credibility,
+family independence, or owner actions, and never creates a parallel research
+ledger or schema.
 
 Email and cron integration remain separate, unimplemented steps. Any future
 sender must consume the exact persisted bundle rather than recompute it.

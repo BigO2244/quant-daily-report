@@ -93,64 +93,6 @@ def _operating() -> dict:
     return value
 
 
-def _projection() -> dict:
-    return {
-        "schema_version": "caerus_alpha_lab_global_research_projection_v1",
-        "families": [
-            {
-                "family_id": "FAM-MOM",
-                "name": "Momentum",
-                "credible": True,
-                "trend": "DETERIORATING",
-                "as_of": "2026-08-27",
-                "resolved_at": "2026-08-20T12:00:00-04:00",
-                "terminal_verdict": "PARK",
-            },
-            {
-                "family_id": "FAM-MOM",
-                "name": "Momentum variant",
-                "credible": True,
-                "trend": "IMPROVING",
-                "as_of": "2026-08-01",
-                "resolved_at": "2026-08-01T12:00:00-04:00",
-                "terminal_verdict": "PARK",
-            },
-            {
-                "family_id": "FAM-EVENT",
-                "name": "Event drift",
-                "credible": True,
-                "trend": "IMPROVING",
-                "as_of": "2026-08-28",
-                "resolved_at": "2026-08-28T12:00:00-04:00",
-                "terminal_verdict": "PURSUE",
-            },
-            {
-                "family_id": "FAM-REV",
-                "name": "Generic reversal",
-                "credible": True,
-                "trend": "DETERIORATING",
-                "as_of": "2026-08-26",
-                "resolved_at": "2026-08-26T12:00:00-04:00",
-                "terminal_verdict": "REJECT",
-            },
-        ],
-        "lifecycle_events": [
-            {
-                "family_id": "FAM-EVENT",
-                "name": "Event drift",
-                "target_state": "SHADOW",
-                "effective_at": "2026-08-28T15:00:00-04:00",
-            }
-        ],
-        "cio_challenges": [
-            {
-                "message": "Three wrappers around momentum are one family, not diversification.",
-                "evidence": "family-correlation.json",
-            }
-        ],
-    }
-
-
 def _sources() -> list[dict]:
     return [
         {
@@ -165,12 +107,6 @@ def _sources() -> list[dict]:
             "status": "AVAILABLE",
             "sha256": "b" * 64,
         },
-        {
-            "kind": "research_projection",
-            "path": "research.json",
-            "status": "AVAILABLE",
-            "sha256": "c" * 64,
-        },
     ]
 
 
@@ -179,33 +115,30 @@ def _build(**updates) -> dict:
         "report_date": DATE,
         "certification": _certification(),
         "operating_truth": _operating(),
-        "research_projection": _projection(),
         "sources": _sources(),
     }
     values.update(updates)
     return build_cio_daily_brief(**values)
 
 
-def test_green_brief_dedupes_families_and_caps_attention() -> None:
+def test_alpha_is_unavailable_and_attention_is_capped() -> None:
     payload = _build()
-    assert payload["operations"]["status"] == "GREEN"
-    assert payload["alpha"]["family_count"] == 3
-    assert payload["alpha"]["improving"]["family_id"] == "FAM-EVENT"
-    assert payload["alpha"]["deteriorating"]["family_id"] == "FAM-MOM"
-    assert payload["alpha"]["killed"]["family_id"] == "FAM-REV"
-    assert payload["alpha"]["research_throughput"]["count"] == 3
+    assert payload["operations"]["status"] == "YELLOW"
+    assert payload["alpha"]["status"] == "UNAVAILABLE"
+    for field in ("improving", "deteriorating", "new_shadow", "killed"):
+        assert payload["alpha"][field]["status"] == "UNAVAILABLE"
+    assert payload["alpha"]["research_throughput"]["count"] is None
     assert len(payload["cio_attention"]) <= 3
-    assert payload["cio_attention"][0]["kind"] == "CHALLENGE"
 
 
 def test_missing_inputs_fail_closed_and_throughput_is_unavailable() -> None:
-    payload = _build(certification=None, operating_truth=None, research_projection=None)
+    payload = _build(certification=None, operating_truth=None)
     assert payload["operations"]["status"] == "RED"
     assert payload["alpha"]["research_throughput"] == {
         "status": "UNAVAILABLE",
         "month": "2026-08",
         "count": None,
-        "reason": "canonical_research_projection_absent",
+        "reason": "canonical_authenticated_research_authority_not_implemented",
     }
     assert len(payload["operations"]["exceptions"]) == 3
     assert "UNAVAILABLE" in render_cio_daily_brief(payload)
@@ -251,21 +184,6 @@ def test_semantic_lane_change_is_reported_once() -> None:
     assert third["capital"]["meaningful_changes"]["PAPER"] == []
 
 
-def test_projection_without_resolution_fields_does_not_invent_zero() -> None:
-    projection = _projection()
-    projection["families"][0].pop("resolved_at")
-    payload = _build(research_projection=projection)
-    assert payload["alpha"]["research_throughput"]["status"] == "UNAVAILABLE"
-    assert payload["alpha"]["research_throughput"]["count"] is None
-
-
-def test_resolution_month_uses_america_new_york() -> None:
-    projection = _projection()
-    projection["families"][2]["resolved_at"] = "2026-08-01T01:00:00Z"
-    payload = _build(research_projection=projection)
-    assert payload["alpha"]["research_throughput"]["count"] == 2
-
-
 def test_context_conflict_degrades_instead_of_publishing_capital_claim() -> None:
     operating = _operating()
     operating["context_integrity"] = {
@@ -293,11 +211,24 @@ def test_bundle_is_hash_bound_deterministic_and_immutable(tmp_path: Path) -> Non
         persist_brief_bundle(output_root=tmp_path, payload=payload)
 
 
-def test_cli_persists_bundle_with_missing_research_projection(tmp_path: Path) -> None:
+def test_cli_persists_bundle_with_alpha_unavailable(tmp_path: Path) -> None:
     certification = tmp_path / "cert.json"
     operating = tmp_path / "ops.json"
     certification.write_text(json.dumps(_certification()), encoding="utf-8")
     operating.write_text(json.dumps(_operating()), encoding="utf-8")
+    arbitrary = (
+        tmp_path / "outputs/research/alpha_lab/ledger/research_projection.v1.json"
+    )
+    arbitrary.parent.mkdir(parents=True)
+    arbitrary.write_text(
+        json.dumps(
+            {
+                "families": [{"trend": "IMPROVING", "terminal_verdict": "KILL"}],
+                "lifecycle_events": [{"target_state": "SHADOW"}],
+            }
+        ),
+        encoding="utf-8",
+    )
     from scripts.build_cio_daily_brief import main
 
     output = tmp_path / "briefs"
@@ -320,4 +251,23 @@ def test_cli_persists_bundle_with_missing_research_projection(tmp_path: Path) ->
     )
     payload = json.loads((output / DATE / "brief.json").read_text(encoding="utf-8"))
     assert payload["alpha"]["research_throughput"]["status"] == "UNAVAILABLE"
+    assert payload["alpha"]["new_shadow"]["status"] == "UNAVAILABLE"
+    assert payload["alpha"]["killed"]["status"] == "UNAVAILABLE"
+    assert "research_projection" not in {row["kind"] for row in payload["sources"]}
     assert (output / DATE / "manifest.json").is_file()
+
+
+def test_cli_has_no_research_projection_authority(tmp_path: Path) -> None:
+    from scripts.build_cio_daily_brief import main
+
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "--repo-root",
+                str(tmp_path),
+                "--report-date",
+                DATE,
+                "--research-projection",
+                str(tmp_path / "arbitrary.json"),
+            ]
+        )

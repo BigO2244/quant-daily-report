@@ -14,14 +14,12 @@ import json
 import os
 import shutil
 import tempfile
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 SCHEMA_VERSION = "caerus.cio_daily_brief.v1"
 MANIFEST_SCHEMA_VERSION = "caerus.cio_daily_brief_manifest.v1"
-RESEARCH_PROJECTION_SCHEMA = "caerus_alpha_lab_global_research_projection_v1"
 STATUS_ORDER = {"GREEN": 0, "YELLOW": 1, "RED": 2}
 RED_CONTROLS = {
     "compute_recomputed",
@@ -38,15 +36,7 @@ CONTROL_NAMES = {
     "execution_consumed_exact_artifact",
     "broker_reconciliation",
 }
-TERMINAL_VERDICTS = {
-    "EVIDENCE_READY_FOR_OWNER_REVIEW",
-    "FALSIFIED",
-    "KILL",
-    "PARK",
-    "PURSUE",
-    "REJECT",
-}
-KILLED_VERDICTS = {"FALSIFIED", "KILL", "REJECT"}
+ALPHA_UNAVAILABLE_REASON = "canonical_authenticated_research_authority_not_implemented"
 
 
 def canonical_json(value: Any) -> str:
@@ -370,215 +360,39 @@ def _capital_section(
     }, exceptions
 
 
-def _credible_family(item: Mapping[str, Any]) -> bool:
-    return item.get("credible") is True or item.get("evidence_credible") is True
-
-
-def _latest_by_family(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    selected: dict[str, Mapping[str, Any]] = {}
-    for row in rows:
-        family_id = str(row.get("family_id") or "").strip()
-        if not family_id:
-            continue
-        old = selected.get(family_id)
-        key = (
-            str(row.get("as_of") or row.get("resolved_at") or ""),
-            canonical_json(row),
-        )
-        old_key = (
-            (
-                str(old.get("as_of") or old.get("resolved_at") or ""),
-                canonical_json(old),
-            )
-            if old is not None
-            else ("", "")
-        )
-        if old is None or key > old_key:
-            selected[family_id] = row
-    return [selected[key] for key in sorted(selected)]
-
-
-def _family_summary(item: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "family_id": item.get("family_id"),
-        "name": item.get("name") or item.get("family_name") or item.get("family_id"),
-        "as_of": item.get("as_of") or item.get("resolved_at"),
-        "evidence": item.get("evidence") or item.get("evidence_path"),
-        "terminal_verdict": item.get("terminal_verdict"),
-    }
-
-
-def _pick_family(
-    rows: Sequence[Mapping[str, Any]], trend: str
-) -> dict[str, Any] | None:
-    candidates = [
-        row
-        for row in rows
-        if _credible_family(row) and str(row.get("trend") or "").upper() == trend
-    ]
-    if not candidates:
-        return None
-    candidates.sort(
-        key=lambda row: (
-            str(row.get("as_of") or row.get("resolved_at") or ""),
-            str(row.get("family_id") or ""),
-        ),
-        reverse=True,
-    )
-    return _family_summary(candidates[0])
-
-
-def _throughput(
-    projection: Mapping[str, Any] | None,
-    rows: Sequence[Mapping[str, Any]],
-    report_date: str,
-) -> dict[str, Any]:
-    month = report_date[:7]
-    if projection is None:
-        return {
-            "status": "UNAVAILABLE",
-            "month": month,
-            "count": None,
-            "reason": "canonical_research_projection_absent",
-        }
-    if projection.get("schema_version") != RESEARCH_PROJECTION_SCHEMA:
-        return {
-            "status": "UNAVAILABLE",
-            "month": month,
-            "count": None,
-            "reason": "canonical_research_projection_schema_invalid",
-        }
-    if any("resolved_at" not in row or "terminal_verdict" not in row for row in rows):
-        return {
-            "status": "UNAVAILABLE",
-            "month": month,
-            "count": None,
-            "reason": "canonical_family_resolution_fields_missing",
-        }
-    resolved_months: dict[str, str | None] = {}
-    try:
-        for row in rows:
-            resolved_months[str(row["family_id"])] = _new_york_month(
-                row.get("resolved_at")
-            )
-    except ValueError:
-        return {
-            "status": "UNAVAILABLE",
-            "month": month,
-            "count": None,
-            "reason": "canonical_family_resolution_timestamp_invalid",
-        }
-    resolved = {
-        str(row["family_id"])
-        for row in rows
-        if _credible_family(row)
-        and resolved_months[str(row["family_id"])] == month
-        and str(row.get("terminal_verdict") or "").upper() in TERMINAL_VERDICTS
-    }
-    return {
-        "status": "AVAILABLE",
-        "month": month,
-        "count": len(resolved),
-        "reason": None,
-    }
-
-
-def _new_york_month(value: Any) -> str | None:
-    if value in {None, ""}:
-        return None
-    raw = str(value).replace("Z", "+00:00")
-    try:
-        parsed = dt.datetime.fromisoformat(raw)
-    except ValueError as exc:
-        raise ValueError("invalid resolution timestamp") from exc
-    if parsed.tzinfo is None:
-        raise ValueError("resolution timestamp must be timezone-aware")
-    return parsed.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m")
-
-
 def _alpha_section(
-    projection: Mapping[str, Any] | None, report_date: str, source_path: str
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    if projection is None:
-        rows: list[Mapping[str, Any]] = []
-    else:
-        raw_rows = projection.get("families")
-        rows = _latest_by_family(
-            row
-            for row in (raw_rows if isinstance(raw_rows, list) else [])
-            if isinstance(row, Mapping)
-        )
-    throughput = _throughput(projection, rows, report_date)
-    killed_rows = [
-        row
-        for row in rows
-        if _credible_family(row)
-        and str(row.get("terminal_verdict") or "").upper() in KILLED_VERDICTS
-    ]
-    killed_rows.sort(
-        key=lambda row: (
-            str(row.get("resolved_at") or ""),
-            str(row.get("family_id") or ""),
+    report_date: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    unavailable = {
+        "status": "UNAVAILABLE",
+        "reason": ALPHA_UNAVAILABLE_REASON,
+    }
+    exception = _exception(
+        severity="YELLOW",
+        code="ALPHA_AUTHORITY_UNAVAILABLE",
+        message=(
+            "Alpha evidence is unavailable until the canonical authenticated GCP "
+            "ledger and family authority are implemented."
         ),
-        reverse=True,
+        source=None,
     )
-    lifecycle = (
-        projection.get("lifecycle_events") if isinstance(projection, Mapping) else []
-    )
-    shadow_rows = [
-        row
-        for row in (lifecycle if isinstance(lifecycle, list) else [])
-        if isinstance(row, Mapping)
-        and str(row.get("target_state") or row.get("state") or "").upper() == "SHADOW"
-        and str(row.get("effective_at") or row.get("as_of") or "")[:10] <= report_date
-    ]
-    shadow_rows.sort(
-        key=lambda row: (
-            str(row.get("effective_at") or row.get("as_of") or ""),
-            str(row.get("family_id") or ""),
-        ),
-        reverse=True,
-    )
-    exceptions: list[dict[str, Any]] = []
-    attention: list[dict[str, Any]] = []
-    if throughput["status"] != "AVAILABLE":
-        exceptions.append(
-            _exception(
-                severity="YELLOW",
-                code="RESEARCH_THROUGHPUT_UNAVAILABLE",
-                message=f"Research throughput unavailable: {throughput['reason']}.",
-                source=source_path,
-            )
-        )
-    challenges = (
-        projection.get("cio_challenges") if isinstance(projection, Mapping) else []
-    )
-    for row in challenges if isinstance(challenges, list) else []:
-        if isinstance(row, Mapping) and row.get("message"):
-            attention.append(
-                {
-                    "kind": "CHALLENGE",
-                    "message": str(row["message"]),
-                    "evidence": row.get("evidence"),
-                }
-            )
-    return (
-        {
-            "status": "AVAILABLE" if projection is not None else "UNAVAILABLE",
-            "improving": _pick_family(rows, "IMPROVING"),
-            "deteriorating": _pick_family(rows, "DETERIORATING"),
-            "new_shadow": dict(shadow_rows[0]) if shadow_rows else None,
-            "killed": _family_summary(killed_rows[0]) if killed_rows else None,
-            "research_throughput": throughput,
-            "family_count": len(rows),
+    return {
+        "status": "UNAVAILABLE",
+        "reason": ALPHA_UNAVAILABLE_REASON,
+        "improving": dict(unavailable),
+        "deteriorating": dict(unavailable),
+        "new_shadow": dict(unavailable),
+        "killed": dict(unavailable),
+        "research_throughput": {
+            **unavailable,
+            "month": report_date[:7],
+            "count": None,
         },
-        exceptions,
-        attention,
-    )
+    }, [exception]
 
 
 def _attention_items(
-    exceptions: Sequence[Mapping[str, Any]], challenges: Sequence[Mapping[str, Any]]
+    exceptions: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     ordered_exceptions = sorted(exceptions, key=_exception_key)
@@ -592,8 +406,6 @@ def _attention_items(
                 "evidence": item.get("source"),
             }
         )
-    for row in challenges:
-        result.append(dict(row))
     for item in red[2:] + non_red:
         result.append(
             {
@@ -626,7 +438,6 @@ def build_cio_daily_brief(
     certification: Mapping[str, Any] | None,
     operating_truth: Mapping[str, Any] | None,
     previous_brief: Mapping[str, Any] | None = None,
-    research_projection: Mapping[str, Any] | None = None,
     sources: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Build the pure semantic brief payload from already-loaded evidence."""
@@ -648,11 +459,7 @@ def build_cio_daily_brief(
         previous_brief,
         source_by_kind.get("operating_truth", "operating truth"),
     )
-    alpha, alpha_exceptions, challenges = _alpha_section(
-        research_projection,
-        report_date,
-        source_by_kind.get("research_projection", "canonical research projection"),
-    )
+    alpha, alpha_exceptions = _alpha_section(report_date)
     all_exceptions = operation_exceptions + capital_exceptions + alpha_exceptions
     capital_status = (
         "RED"
@@ -670,7 +477,7 @@ def build_cio_daily_brief(
         "operations": operations,
         "capital": capital,
         "alpha": alpha,
-        "cio_attention": _attention_items(all_exceptions, challenges),
+        "cio_attention": _attention_items(all_exceptions),
         "sources": sorted(
             (dict(item) for item in sources),
             key=lambda item: (str(item.get("kind")), str(item.get("path"))),
@@ -684,12 +491,6 @@ def _percent(rate: Any) -> str:
     if rate is None:
         return "UNAVAILABLE"
     return f"{float(rate) * 100:.0f}%"
-
-
-def _alpha_label(value: Mapping[str, Any] | None) -> str:
-    if value is None:
-        return "none"
-    return f"{value.get('name')} ({value.get('family_id')})"
 
 
 def render_cio_daily_brief(payload: Mapping[str, Any]) -> str:
@@ -726,17 +527,15 @@ def render_cio_daily_brief(payload: Mapping[str, Any]) -> str:
         if throughput["status"] == "AVAILABLE"
         else f"UNAVAILABLE ({throughput['reason']})"
     )
-    alpha_unavailable = alpha.get("status") == "UNAVAILABLE"
-    unavailable = "UNAVAILABLE" if alpha_unavailable else None
     lines.extend(
         [
             "",
             "## ALPHA",
             "",
-            f"Improving: {unavailable or _alpha_label(alpha.get('improving'))}",
-            f"Deteriorating: {unavailable or _alpha_label(alpha.get('deteriorating'))}",
-            f"New Shadow: {unavailable or _alpha_label(alpha.get('new_shadow'))}",
-            f"Killed: {unavailable or _alpha_label(alpha.get('killed'))}",
+            "Improving: UNAVAILABLE",
+            "Deteriorating: UNAVAILABLE",
+            "New Shadow: UNAVAILABLE",
+            "Killed: UNAVAILABLE",
             f"Research throughput ({throughput['month']}): {throughput_text}",
             "",
             "## CIO ATTENTION",
