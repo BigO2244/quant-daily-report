@@ -23,6 +23,26 @@ and writes hydration status to:
 outputs/price_hydration/YYYY-MM-DD/status.json
 ```
 
+## Fail-Closed Publication
+
+The hydrator distinguishes a partial-symbol response from a provider-wide empty
+response. A provider-wide empty response receives three bounded group retries;
+if all remain empty, per-symbol fanout is suppressed so one outage cannot create
+hundreds of redundant calls.
+
+Downloaded rows are merged into a staged parquet artifact. Publication occurs
+only when:
+
+- required current-session and anchor coverage is complete;
+- every expected session in each stale symbol's catch-up interval is present;
+- no download failure remains; and
+- the staged parquet round-trips exactly and has a verified SHA-256 hash.
+
+Only then is the staged file atomically moved over the canonical cache. On any
+failure the canonical cache is unchanged and the strict wrapper remains blocked.
+The hydration status records group/symbol attempts, the catch-up interval,
+missing sessions, and before/staged/canonical hashes under `panel_meta`.
+
 ## Full Shadow Runner Boundary
 
 `research.shadow_tracking.run` is for full shadow artifact generation. It builds
