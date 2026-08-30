@@ -433,11 +433,19 @@ def seal_preregistration(
         }
     if staging_dir.exists():
         registration, manifest, events = _verify_preregistration(staging_dir)
-        _verify_trial_reservation(
-            repo_root,
-            run_id=run_id,
-            registration_hash=registration["registration_hash"],
-        )
+        if _trial_reservation_path(repo_root).exists():
+            _verify_trial_reservation(
+                repo_root,
+                run_id=run_id,
+                registration_hash=registration["registration_hash"],
+            )
+        else:
+            _reserve_trial(
+                repo_root,
+                run_id=run_id,
+                registration_hash=registration["registration_hash"],
+                created_at=created_at,
+            )
         run_dir.parent.mkdir(parents=True, exist_ok=True)
         os.replace(staging_dir, run_dir)
         _verify_preregistration(run_dir, repo_root)
