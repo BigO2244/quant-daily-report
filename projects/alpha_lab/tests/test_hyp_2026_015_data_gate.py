@@ -400,7 +400,7 @@ def test_addendum_verification_binds_pre_record_body_and_full_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     relative = "hypotheses/addendum.md"
-    body = "HYP-2026-015 Addendum 001 99.9% deterministic no-return\n"
+    body = "HYP-2026-015 Addendum 001 0.999 deterministic no-return\n"
     content = body + "## Addendum record\nowner-approved\n"
     path = tmp_path / relative
     path.parent.mkdir(parents=True)
@@ -417,6 +417,15 @@ def test_addendum_verification_binds_pre_record_body_and_full_file(
 
     assert record["frozen_body_sha256"] == hashlib.sha256(body.encode()).hexdigest()
     assert record["full_file_sha256"] == hashlib.sha256(content.encode()).hexdigest()
+
+
+def test_repository_addendum_passes_runtime_verification() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+
+    record = gate._verify_addendum(repo_root)
+
+    assert record["frozen_body_sha256"] == gate.ADDENDUM_BODY_SHA256
+    assert record["full_file_sha256"] == gate.ADDENDUM_FULL_FILE_SHA256
 
 
 def test_lineage_requires_exact_path_metadata_and_rejects_terminal_event() -> None:

@@ -164,7 +164,7 @@ def _verify_addendum(repo_root: Path) -> dict[str, Any]:
     required_terms = (
         "HYP-2026-015",
         "Addendum 001",
-        "99.9%",
+        "0.999",
         "deterministic",
         "no-return",
     )
