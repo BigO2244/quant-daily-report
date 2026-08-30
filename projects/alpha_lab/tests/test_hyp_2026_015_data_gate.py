@@ -3,6 +3,8 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import sys
+import types
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -594,3 +596,223 @@ def test_validation_missing_source_exclusion_has_causal_reaction_mapping() -> No
     assert "adverse_sensitivity_mapping_unproven" not in audit[
         "selection_gate_reasons"
     ]
+
+
+def test_market_scanner_pushes_exact_pairs_below_challenge_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Expression:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def __and__(self, other: "Expression") -> "Expression":
+            return Expression(f"({self.text}&{other.text})")
+
+        def __or__(self, other: "Expression") -> "Expression":
+            return Expression(f"({self.text}|{other.text})")
+
+        def __repr__(self) -> str:
+            return self.text
+
+    class Field:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __eq__(self, value: object) -> Expression:
+            return Expression(f"{self.name}=={value}")
+
+        def __lt__(self, value: object) -> Expression:
+            return Expression(f"{self.name}<{value}")
+
+        def isin(self, values: object) -> Expression:
+            return Expression(f"{self.name} in {values}")
+
+    class Scalar:
+        def __init__(self, value: object) -> None:
+            self.value = value
+
+        def as_py(self) -> object:
+            return self.value
+
+    class Array:
+        def __init__(self, values: list[object]) -> None:
+            self.values = values
+
+        def to_pylist(self) -> list[object]:
+            return self.values
+
+        def is_valid(self) -> "Array":
+            return Array([value is not None for value in self.values])
+
+        def __getitem__(self, index: int) -> Scalar:
+            return Scalar(self.values[index])
+
+    class Batch:
+        def __init__(self, values: list[object]) -> None:
+            self.values = values
+
+        def column(self, index: int) -> Array:
+            return Array([self.values[index]])
+
+    requested_row = [
+        "SEC:A",
+        date(2020, 1, 2),
+        10.0,
+        11.0,
+        11.0,
+        20_000_000.0,
+        "",
+        None,
+        None,
+        datetime(2020, 1, 3, tzinfo=timezone.utc),
+        datetime(2020, 1, 3, tzinfo=timezone.utc),
+    ]
+    returned_rows = [requested_row]
+    filters: list[str] = []
+
+    class Dataset:
+        def to_batches(self, *, filter: object, **_kwargs: object) -> list[Batch]:
+            filters.append(repr(filter))
+            return [Batch(row) for row in returned_rows]
+
+    pa = types.ModuleType("pyarrow")
+    pa.__path__ = []  # type: ignore[attr-defined]
+    pa.scalar = lambda value, type=None: value  # type: ignore[attr-defined]
+    pa.date32 = lambda: "date32"  # type: ignore[attr-defined]
+    ds = types.ModuleType("pyarrow.dataset")
+    ds.field = Field  # type: ignore[attr-defined]
+    ds.dataset = lambda *_args, **_kwargs: Dataset()  # type: ignore[attr-defined]
+    pa.dataset = ds  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pyarrow", pa)
+    monkeypatch.setitem(sys.modules, "pyarrow.dataset", ds)
+
+    found = gate._scan_requested_market_rows(
+        tmp_path / "panel.parquet",
+        {"SEC:A": {date(2020, 1, 2)}},
+        {("SEC:A", date(2020, 1, 2))},
+    )
+
+    assert set(found) == {("SEC:A", date(2020, 1, 2))}
+    assert found[("SEC:A", date(2020, 1, 2))]["price_floor_pass"] is True
+    assert "date<2025-01-01" in filters[0]
+    assert "security_id==SEC:A" in filters[0]
+    returned_rows[:] = [
+        [
+            value if index != 1 else date(2025, 1, 2)
+            for index, value in enumerate(requested_row)
+        ]
+    ]
+    with pytest.raises(ValueError, match="unrequested or challenge row"):
+        gate._scan_requested_market_rows(
+            tmp_path / "panel.parquet",
+            {"SEC:A": {date(2020, 1, 2)}},
+            set(),
+        )
+    with pytest.raises(ValueError, match="sealed challenge boundary"):
+        gate._scan_requested_market_rows(
+            tmp_path / "panel.parquet",
+            {"SEC:A": {date(2025, 1, 2)}},
+            set(),
+        )
+
+
+def test_reporter_missing_exit_path_blocks_structural_cluster(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions = [date(2020, 1, 1 + offset) for offset in range(29)]
+    reaction = sessions[20]
+    entry = sessions[21]
+    exit_session = sessions[25]
+    cluster = {
+        "cluster_id": "HYP015-reporter-exit",
+        "reaction_session": reaction,
+        "entry_session": entry,
+        "exit_session": exit_session,
+        "sic": "3674",
+        "reporter_security_ids": ["SEC:R"],
+        "peers": [],
+        "controls": [],
+    }
+    found = {}
+    for row_date in sessions[:25]:
+        found[("SEC:R", row_date)] = {
+            "row_present": True,
+            "open_valid": True,
+            "closeadj_valid": True,
+            "available_at": datetime(2020, 1, 1, tzinfo=timezone.utc),
+            "corporate_action_present": False,
+            "corporate_action_lineage_present": True,
+            "terminal_value_present": False,
+        }
+    found[("SEC:R", reaction)].update(
+        {"price_floor_pass": True, "adv_floor_pass": True}
+    )
+    monkeypatch.setattr(
+        gate, "_scan_requested_market_rows", lambda *_args, **_kwargs: found
+    )
+
+    audit = gate._apply_path_liquidity_overlap(
+        clusters=[cluster],
+        sessions=sessions,
+        identity={"security_by_id": {"SEC:R": {}}},
+        panel_path=tmp_path / "unused.parquet",
+    )
+
+    assert cluster["reporter_lineage_pass"] is False
+    assert cluster["emitted_evaluator_eligible"] is False
+    assert audit["path_failures"][
+        "reporter_holding_path_or_terminal_lineage_incomplete"
+    ] == 1
+
+
+def test_tolerated_validation_reporter_exclusion_is_adverse_mapped_once() -> None:
+    accepted = datetime(2020, 1, 2, 12, 0, tzinfo=timezone.utc)
+    events = [
+        {
+            "event_id": f"event-{index:04d}",
+            "issuer_cik": f"{index:010d}",
+            "acceptance": accepted,
+            "source_filename": f"source/{index}.txt",
+        }
+        for index in range(1000)
+    ]
+    headers = [
+        {
+            "event_id": event["event_id"],
+            "sic": "3674",
+            "source_path": event["source_filename"],
+        }
+        for event in events
+    ]
+    cluster = {
+        "cluster_id": "HYP015-materiality",
+        "potential_cluster_key": "2020-01-02::3674::materiality",
+        "reaction_session": date(2020, 1, 2),
+        "sic": "3674",
+        "reporter_event_ids": [event["event_id"] for event in events[:999]],
+        "reporter_ciks": [event["issuer_cik"] for event in events[:999]],
+        "reporter_lineage_pass": True,
+        "emitted_evaluator_eligible": True,
+        "peers": [],
+        "controls": [],
+    }
+
+    exclusions, audit = gate._build_exclusions_and_missingness(
+        source_errors=[],
+        event_audit={"deterministically_excluded_missing_original_rows": []},
+        included_events=events,
+        headers=headers,
+        clusters=[cluster],
+        checked_at=datetime(2026, 8, 30, tzinfo=timezone.utc),
+        sessions=[date(2020, 1, 2), date(2020, 1, 3)],
+    )
+
+    adverse = [
+        item for item in exclusions if item["adverse_sensitivity_eligible"]
+    ]
+    assert len(adverse) == 1
+    assert adverse[0]["reaction_session"] == date(2020, 1, 2)
+    assert adverse[0]["reaction_quarter"] == date(2020, 1, 1)
+    assert adverse[0]["potential_cluster_key"].endswith("::event-0999")
+    assert audit["reporter_relevance_coverage"] == pytest.approx(0.999)
+    assert audit["selection_gate_pass"] is True

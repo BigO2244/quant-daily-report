@@ -95,6 +95,7 @@ MIN_VALIDATION_SICS = 20
 PRICE_FLOOR = 5.0
 ADV_FLOOR = 10_000_000.0
 HEADER_LIMIT_BYTES = 512 * 1024
+MARKET_SCAN_SECURITY_CHUNK = 128
 
 _SPEC_MARKER = "## Freeze record\n"
 _ADDENDUM_MARKER = "## Addendum record\n"
@@ -938,10 +939,20 @@ def _scan_requested_market_rows(
     requests: Mapping[str, set[date]],
     reaction_pairs: set[tuple[str, date]],
 ) -> dict[tuple[str, date], dict[str, Any]]:
-    import pyarrow.parquet as pq
+    import pyarrow as pa
+    import pyarrow.dataset as ds
 
+    challenge_start = date(2025, 1, 1)
+    requested_pairs = {
+        (security_id, row_date)
+        for security_id, dates in requests.items()
+        for row_date in dates
+    }
+    if any(row_date >= challenge_start for _, row_date in requested_pairs):
+        raise ValueError("market-row request crosses the sealed challenge boundary")
+    if not requested_pairs:
+        return {}
     found: dict[tuple[str, date], dict[str, Any]] = {}
-    parquet = pq.ParquetFile(panel_path)
     columns = [
         "security_id",
         "date",
@@ -955,7 +966,37 @@ def _scan_requested_market_rows(
         "adjustment_available_at",
         "available_at",
     ]
-    for batch in parquet.iter_batches(columns=columns, batch_size=262_144):
+    dataset = ds.dataset(panel_path, format="parquet")
+    security_ids = sorted(requests)
+    challenge_filter = ds.field("date") < pa.scalar(
+        challenge_start, type=pa.date32()
+    )
+
+    def requested_batches() -> Iterator[Any]:
+        for start in range(0, len(security_ids), MARKET_SCAN_SECURITY_CHUNK):
+            pair_filter = None
+            for security_id in security_ids[
+                start : start + MARKET_SCAN_SECURITY_CHUNK
+            ]:
+                dates = sorted(requests[security_id])
+                if not dates:
+                    continue
+                security_filter = (
+                    ds.field("security_id") == security_id
+                ) & ds.field("date").isin(dates)
+                pair_filter = (
+                    security_filter
+                    if pair_filter is None
+                    else pair_filter | security_filter
+                )
+            if pair_filter is not None:
+                yield from dataset.to_batches(
+                    columns=columns,
+                    filter=challenge_filter & pair_filter,
+                    batch_size=262_144,
+                )
+
+    for batch in requested_batches():
         security_values = batch.column(0).to_pylist()
         date_values = batch.column(1).to_pylist()
         validity = {
@@ -969,9 +1010,11 @@ def _scan_requested_market_rows(
         for index, (security_id, row_date) in enumerate(
             zip(security_values, date_values)
         ):
-            if row_date not in requests.get(security_id, ()):
-                continue
             key = (security_id, row_date)
+            if row_date >= challenge_start or key not in requested_pairs:
+                raise ValueError(
+                    "market scanner returned an unrequested or challenge row"
+                )
             available_at = available_times[index]
             adjustment_at = adjustment_times[index]
             if available_at is not None and available_at.tzinfo is None:
@@ -1071,6 +1114,7 @@ def _apply_path_liquidity_overlap(
         cluster["peer_required_sessions"] = peer_dates
         for security_id in cluster["reporter_security_ids"]:
             requests[security_id].update(reporter_dates)
+            requests[security_id].update(peer_dates)
             reaction_pairs.add((security_id, cluster["reaction_session"]))
         for candidate in (*cluster["peers"], *cluster["controls"]):
             security_id = candidate.get("security_id")
@@ -1101,7 +1145,19 @@ def _apply_path_liquidity_overlap(
             ):
                 path_failures["reporter_reaction_or_history_path_missing"] += 1
                 reporter_lineage_ok = False
-            reaction_record = found.get((security_id, cluster["reaction_session"]), {})
+            if not _lineage_complete(
+                found,
+                security_id,
+                cluster["peer_required_sessions"],
+                require_entry_open=True,
+            ):
+                path_failures[
+                    "reporter_holding_path_or_terminal_lineage_incomplete"
+                ] += 1
+                reporter_lineage_ok = False
+            reaction_record = found.get(
+                (security_id, cluster["reaction_session"]), {}
+            )
             if not reaction_record.get("price_floor_pass") or not reaction_record.get("adv_floor_pass"):
                 path_failures["reporter_contemporaneous_liquidity_fail"] += 1
                 reporter_universe_ok = False
@@ -1353,6 +1409,7 @@ def _build_exclusions_and_missingness(
         coverage_rows.append(row)
         if not lineage_complete:
             accepted_date = event["acceptance"].date()
+            reaction_session = _reaction_session(event["acceptance"], sessions)
             exclusion = base_exclusion(
                 stage="REPORTER",
                 reason="REPORTER_CAUSAL_LINEAGE_EXCLUDED",
@@ -1362,12 +1419,18 @@ def _build_exclusions_and_missingness(
                 sic=header.get("sic") or "UNKNOWN",
                 issuer_cik=event.get("issuer_cik") or "UNKNOWN",
                 relevance="ITEM_2_02_REPORTER",
-                source_path=event.get("source_filename") or header.get("source_path"),
+                source_path=(
+                    event.get("source_filename") or header.get("source_path")
+                ),
                 source_status="ORIGINAL_PRESENT_LINEAGE_INCOMPLETE",
-                potential_cluster_key=f"REPORTER::{event['event_id']}",
+                potential_cluster_key=(
+                    f"{reaction_session.isoformat() if reaction_session else 'UNKNOWN'}::"
+                    f"{header.get('sic') or 'UNKNOWN'}::{event['event_id']}"
+                ),
                 adverse_sensitivity_eligible=(
                     VALIDATION_START <= accepted_date <= VALIDATION_END
                 ),
+                reaction_session=reaction_session,
             )
             exclusions.append(exclusion)
 
