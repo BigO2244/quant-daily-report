@@ -257,6 +257,64 @@ def test_cache_only_hydrator_strict_fails_when_cache_not_covered(tmp_path: Path,
     assert payload["max_cache_date"] == "2026-05-01"
 
 
+@pytest.mark.parametrize(
+    ("cache_publish_status", "catchup_status", "expected_reason"),
+    [
+        ("BLOCKED_UNCHANGED", "OK", "canonical_cache_publication_blocked"),
+        ("NOT_NEEDED", "INCOMPLETE", "downloaded_session_continuity_incomplete"),
+    ],
+)
+def test_strict_fails_when_publication_control_is_non_ok_despite_current_max(
+    tmp_path: Path,
+    monkeypatch,
+    cache_publish_status: str,
+    catchup_status: str,
+    expected_reason: str,
+) -> None:
+    universe = tmp_path / "universe.csv"
+    cache = tmp_path / "price_panel.parquet"
+    status_dir = tmp_path / "status"
+    _write_universe(universe)
+    _write_panel(cache, end_date="2026-05-04")
+
+    def fake_ensure_price_panel(**_kwargs):
+        return pd.DataFrame(), {
+            "download_performed": True,
+            "coverage_validation": {"status": "OK"},
+            "catchup_validation": {
+                "status": catchup_status,
+                "missing_sessions_by_symbol": {"BBB": ["2026-05-01"]},
+            },
+            "cache_publish": {
+                "status": cache_publish_status,
+                "reason_codes": ["catchup_session_coverage_incomplete"],
+            },
+        }
+
+    monkeypatch.setattr(script, "ensure_price_panel", fake_ensure_price_panel)
+    monkeypatch.setattr(
+        script,
+        "resolve_completed_trading_day",
+        lambda explicit_trade_date=None: explicit_trade_date or "2026-05-04",
+    )
+
+    rc = script.main(
+        [
+            "--trade-date", "2026-05-04", "--universe-path", str(universe),
+            "--cache-path", str(cache), "--status-dir", str(status_dir), "--strict",
+        ]
+    )
+
+    payload = json.loads((status_dir / "2026-05-04" / "status.json").read_text())
+    assert rc == 1
+    assert payload["max_cache_date"] == "2026-05-04"
+    assert payload["status"] == "PARTIAL"
+    assert payload["publication_validation"] == {
+        "status": "INCOMPLETE",
+        "reason_codes": [expected_reason],
+    }
+
+
 def test_strict_postclose_refresh_writes_orion_readiness_marker(tmp_path: Path, monkeypatch) -> None:
     universe = tmp_path / "universe.csv"
     cache = tmp_path / "price_panel.parquet"

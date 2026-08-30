@@ -8,6 +8,10 @@ from pathlib import Path
 import pytest
 from Tests.test_live_pilot_build_plan_from_precompute import _orion_shadow
 
+from core.portfolio_operating_model import (
+    build_session_manifest,
+    build_sleeve_decision_batch,
+)
 from core.sleeve_control_plane import (
     BATCH_SCHEMA_VERSION,
     SleeveControlRegistry,
@@ -37,7 +41,7 @@ def _write_json(path: Path, payload: dict) -> None:
 def _runtime_fixture(root: Path, trade_date: str = "2026-08-12") -> dict:
     universe = root / "data" / "universe.csv"
     universe.parent.mkdir(parents=True, exist_ok=True)
-    universe.write_text("ticker\nAAA\nBBB\n", encoding="utf-8")
+    universe.write_text("ticker\nAAA\n\nBBB\n", encoding="utf-8")
     shadow_root = root / "outputs" / "shadow_candidates" / trade_date
     for sleeve_id in (
         "caerus_polaris",
@@ -171,6 +175,84 @@ def test_dispatcher_emits_terminal_envelope_for_every_non_frozen_sleeve(
     assert envelopes["caerus_cassiopeia"]["evaluation"]["status"] == "BLOCKED"
     assert envelopes["caerus_phoenix"]["provenance"]["source_artifacts"][0]["sha256"]
     assert envelopes["caerus_polaris"]["universe"]["snapshot_hash"]
+    assert envelopes["caerus_orion"]["universe"]["member_count"] == 2
+
+
+def test_prospective_freeze_metadata_does_not_change_orion_economics_or_decision_hash(
+    tmp_path: Path,
+) -> None:
+    payload, registry_path = _copy_registry(tmp_path)
+    orion = payload["sleeve_control_plane"]["strategy_overrides"]["caerus_orion"]
+    freeze_path = orion.pop("prospective_universe_freeze_path")
+    freeze_sha256 = orion.pop("prospective_universe_freeze_sha256")
+    _write_json(registry_path, payload)
+    baseline_registry = SleeveControlRegistry.from_path(
+        registry_path, enforce_manifest_parity=False
+    )
+
+    orion["prospective_universe_freeze_path"] = freeze_path
+    orion["prospective_universe_freeze_sha256"] = freeze_sha256
+    _write_json(registry_path, payload)
+    prospective_registry = SleeveControlRegistry.from_path(
+        registry_path, enforce_manifest_parity=False
+    )
+    canonical_freeze = json.loads(
+        (REPO_ROOT / freeze_path).read_text(encoding="utf-8")
+    )
+    _write_json(tmp_path / freeze_path, canonical_freeze)
+    snapshot = _runtime_fixture(tmp_path)
+    now = dt.datetime(2026, 8, 12, 12, tzinfo=dt.timezone.utc)
+    baseline = dispatch_all_sleeves(
+        trade_date="2026-08-12",
+        run_id="freeze-parity",
+        daily_snapshot=snapshot,
+        runtime_root=tmp_path,
+        registry=baseline_registry,
+        now=now,
+    )
+    prospective = dispatch_all_sleeves(
+        trade_date="2026-08-12",
+        run_id="freeze-parity",
+        daily_snapshot=snapshot,
+        runtime_root=tmp_path,
+        registry=prospective_registry,
+        now=now,
+    )
+    baseline_orion = _by_id(baseline)["caerus_orion"]
+    prospective_orion = _by_id(prospective)["caerus_orion"]
+    assert baseline_orion["universe"]["snapshot_hash"] == prospective_orion["universe"]["snapshot_hash"]
+    assert baseline_orion["universe"]["member_count"] == prospective_orion["universe"]["member_count"] == 2
+
+    session = build_session_manifest(
+        trade_date="2026-08-12",
+        run_id="freeze-parity",
+        as_of="2026-08-12T12:00:00+00:00",
+        repo_root=tmp_path,
+        inputs=(),
+        created_at="2026-08-12T12:00:00+00:00",
+    )
+    baseline_decisions = build_sleeve_decision_batch(
+        evaluation_batch=baseline,
+        session_manifest=session,
+        repo_root=tmp_path,
+        generated_at="2026-08-12T12:00:00+00:00",
+    )
+    prospective_decisions = build_sleeve_decision_batch(
+        evaluation_batch=prospective,
+        session_manifest=session,
+        repo_root=tmp_path,
+        generated_at="2026-08-12T12:00:00+00:00",
+    )
+    baseline_decision = next(
+        row for row in baseline_decisions["decisions"] if row["sleeve_id"] == "caerus_orion"
+    )
+    prospective_decision = next(
+        row for row in prospective_decisions["decisions"] if row["sleeve_id"] == "caerus_orion"
+    )
+    assert baseline_decision["target_rows"]
+    assert baseline_decision["target_rows"] == prospective_decision["target_rows"]
+    assert baseline_decision["decision_id"] == prospective_decision["decision_id"]
+    assert baseline_decision["content_hash"] == prospective_decision["content_hash"]
 
 
 def test_shadow_benchmark_stale_cache_is_explicitly_unavailable(tmp_path: Path) -> None:

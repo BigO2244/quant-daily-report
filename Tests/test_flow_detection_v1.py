@@ -6,9 +6,11 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from research.flow_detection.analysis import attach_forward_returns
 from research.flow_detection.backtest import FlowBacktestConfig, run_strategy_backtest
+from research.flow_detection import data as price_data
 from research.flow_detection.data import ensure_price_panel
 from research.flow_detection.random_windows import sample_randomized_windows
 from research.flow_detection.run import _write_artifacts, build_summary
@@ -258,10 +260,286 @@ def test_ensure_price_panel_records_failed_symbol_without_crashing(tmp_path: Pat
     assert ["MMC"] in [call["symbols"] for call in calls]
 
 
+def _tail_cache_rows(date: str, symbols: tuple[str, ...] = ("AAA", "BBB")) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "date": pd.Timestamp(date),
+                "ticker": ticker,
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "volume": 1000,
+            }
+            for ticker in symbols
+        ]
+    )
+
+
+def test_systemic_empty_provider_uses_bounded_group_retries_without_symbol_fanout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_path = tmp_path / "price_panel.parquet"
+    _tail_cache_rows("2026-08-21").to_parquet(cache_path, index=False)
+    before = cache_path.read_bytes()
+    calls: list[list[str]] = []
+
+    def empty_download(*, symbols, **_kwargs):
+        calls.append(list(symbols))
+        return pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume"])
+
+    monkeypatch.setattr("research.flow_detection.data.download_price_panel", empty_download)
+    panel, meta = ensure_price_panel(
+        symbols=["AAA", "BBB"],
+        start_date="2026-08-21",
+        end_date="2026-08-24",
+        cache_path=cache_path,
+        prefer_local=False,
+        allow_download=True,
+        provider_group_attempts=3,
+        provider_retry_backoff_seconds=0,
+    )
+
+    assert calls == [["AAA", "BBB"], ["AAA", "BBB"], ["AAA", "BBB"]]
+    assert cache_path.read_bytes() == before
+    assert panel["date"].max() == pd.Timestamp("2026-08-21")
+    assert meta["cache_publish"]["status"] == "BLOCKED_UNCHANGED"
+    assert set(meta["download_failed_symbols"]) == {"AAA", "BBB"}
+    assert {attempt["result"] for attempt in meta["download_attempts"]} == {"EMPTY"}
+    assert all(attempt["scope"] == "GROUP" for attempt in meta["download_attempts"])
+
+
+def test_mixed_error_empty_group_exhaustion_suppresses_symbol_fanout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_path = tmp_path / "price_panel.parquet"
+    _tail_cache_rows("2026-08-21").to_parquet(cache_path, index=False)
+    calls: list[list[str]] = []
+
+    def mixed_download(*, symbols, **_kwargs):
+        calls.append(list(symbols))
+        if len(calls) == 1:
+            raise RuntimeError("provider connection reset")
+        return pd.DataFrame(
+            columns=["date", "ticker", "open", "high", "low", "close", "volume"]
+        )
+
+    monkeypatch.setattr("research.flow_detection.data.download_price_panel", mixed_download)
+    _panel, meta = ensure_price_panel(
+        symbols=["AAA", "BBB"],
+        start_date="2026-08-21",
+        end_date="2026-08-24",
+        cache_path=cache_path,
+        prefer_local=False,
+        allow_download=True,
+        provider_group_attempts=3,
+        provider_retry_backoff_seconds=0,
+    )
+
+    assert calls == [["AAA", "BBB"], ["AAA", "BBB"], ["AAA", "BBB"]]
+    assert [attempt["result"] for attempt in meta["download_attempts"]] == [
+        "ERROR", "EMPTY", "EMPTY",
+    ]
+    assert set(meta["download_failed_symbols"]) == {"AAA", "BBB"}
+    assert set(meta["download_errors"].values()) == {
+        "provider_systemic_mixed_empty_error_after_group_retries"
+    }
+
+
+def test_missing_session_in_catchup_range_blocks_canonical_publication(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_path = tmp_path / "price_panel.parquet"
+    _tail_cache_rows("2026-08-24").to_parquet(cache_path, index=False)
+    before = cache_path.read_bytes()
+
+    def gap_download(*, symbols, **_kwargs):
+        return _tail_cache_rows("2026-08-26", tuple(symbols))
+
+    monkeypatch.setattr("research.flow_detection.data.download_price_panel", gap_download)
+    panel, meta = ensure_price_panel(
+        symbols=["AAA", "BBB"],
+        start_date="2026-08-24",
+        end_date="2026-08-26",
+        cache_path=cache_path,
+        prefer_local=False,
+        allow_download=True,
+        provider_retry_backoff_seconds=0,
+    )
+
+    assert panel["date"].max() == pd.Timestamp("2026-08-26")
+    assert meta["coverage_validation"]["status"] == "OK"
+    assert meta["catchup_validation"]["status"] == "INCOMPLETE"
+    assert meta["catchup_validation"]["missing_sessions_by_symbol"] == {
+        "AAA": ["2026-08-25"],
+        "BBB": ["2026-08-25"],
+    }
+    assert meta["cache_publish"]["status"] == "BLOCKED_UNCHANGED"
+    assert "catchup_session_coverage_incomplete" in meta["cache_publish"]["reason_codes"]
+    assert cache_path.read_bytes() == before
+
+
+def test_sparse_download_for_missing_symbol_blocks_canonical_publication(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_path = tmp_path / "price_panel.parquet"
+    cached = pd.concat(
+        [
+            _tail_cache_rows("2026-08-24", ("AAA",)),
+            _tail_cache_rows("2026-08-26", ("AAA",)),
+        ],
+        ignore_index=True,
+    )
+    cached.to_parquet(cache_path, index=False)
+    before = cache_path.read_bytes()
+
+    def sparse_download(*, symbols, **_kwargs):
+        return pd.concat(
+            [
+                _tail_cache_rows("2026-08-24", tuple(symbols)),
+                _tail_cache_rows("2026-08-26", tuple(symbols)),
+            ],
+            ignore_index=True,
+        )
+
+    monkeypatch.setattr("research.flow_detection.data.download_price_panel", sparse_download)
+    _panel, meta = ensure_price_panel(
+        symbols=["AAA", "BBB"],
+        start_date="2026-08-24",
+        end_date="2026-08-26",
+        cache_path=cache_path,
+        prefer_local=False,
+        allow_download=True,
+        provider_retry_backoff_seconds=0,
+    )
+
+    assert meta["coverage_validation"]["status"] == "OK"
+    assert meta["catchup_validation"]["missing_sessions_by_symbol"] == {
+        "BBB": ["2026-08-25"]
+    }
+    assert meta["cache_publish"]["status"] == "BLOCKED_UNCHANGED"
+    assert cache_path.read_bytes() == before
+
+
+def test_sparse_anchor_repair_blocks_canonical_publication(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_path = tmp_path / "price_panel.parquet"
+    cached = pd.concat(
+        [
+            _tail_cache_rows("2026-08-24"),
+            _tail_cache_rows("2026-08-28"),
+        ],
+        ignore_index=True,
+    )
+    cached.to_parquet(cache_path, index=False)
+    before = cache_path.read_bytes()
+
+    def sparse_download(*, symbols, **_kwargs):
+        return pd.concat(
+            [
+                _tail_cache_rows("2026-08-25", tuple(symbols)),
+                _tail_cache_rows("2026-08-28", tuple(symbols)),
+            ],
+            ignore_index=True,
+        )
+
+    monkeypatch.setattr("research.flow_detection.data.download_price_panel", sparse_download)
+    _panel, meta = ensure_price_panel(
+        symbols=["AAA", "BBB"],
+        start_date="2026-08-24",
+        end_date="2026-08-28",
+        cache_path=cache_path,
+        prefer_local=False,
+        allow_download=True,
+        required_anchor_dates=["2026-08-25"],
+        provider_retry_backoff_seconds=0,
+    )
+
+    assert meta["coverage_validation"]["status"] == "OK"
+    assert meta["catchup_validation"]["missing_sessions_by_symbol"] == {
+        "AAA": ["2026-08-26", "2026-08-27"],
+        "BBB": ["2026-08-26", "2026-08-27"],
+    }
+    assert meta["cache_publish"]["status"] == "BLOCKED_UNCHANGED"
+    assert cache_path.read_bytes() == before
+
+
+def test_complete_catchup_is_atomically_published_with_hash_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_path = tmp_path / "price_panel.parquet"
+    _tail_cache_rows("2026-08-24").to_parquet(cache_path, index=False)
+    before = cache_path.read_bytes()
+
+    def complete_download(*, symbols, **_kwargs):
+        return pd.concat(
+            [
+                _tail_cache_rows("2026-08-25", tuple(symbols)),
+                _tail_cache_rows("2026-08-26", tuple(symbols)),
+            ],
+            ignore_index=True,
+        )
+
+    monkeypatch.setattr("research.flow_detection.data.download_price_panel", complete_download)
+    panel, meta = ensure_price_panel(
+        symbols=["AAA", "BBB"],
+        start_date="2026-08-24",
+        end_date="2026-08-26",
+        cache_path=cache_path,
+        prefer_local=False,
+        allow_download=True,
+        provider_retry_backoff_seconds=0,
+    )
+
+    published = pd.read_parquet(cache_path)
+    assert cache_path.read_bytes() != before
+    assert panel["date"].max() == pd.Timestamp("2026-08-26")
+    assert published["date"].max() == pd.Timestamp("2026-08-26")
+    assert meta["catchup_validation"]["status"] == "OK"
+    assert meta["cache_publish"]["status"] == "PUBLISHED"
+    assert meta["cache_publish"]["before_sha256"]
+    assert meta["cache_publish"]["staged_sha256"] == meta["cache_publish"]["canonical_sha256"]
+    assert meta["download_attempts"][0]["result"] == "COMPLETE"
+
+
+def test_post_replace_verification_failure_restores_prior_cache(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_path = tmp_path / "price_panel.parquet"
+    _tail_cache_rows("2026-08-24").to_parquet(cache_path, index=False)
+    before = cache_path.read_bytes()
+    target_hash_calls = 0
+    real_file_sha256 = price_data._file_sha256
+
+    def fail_post_replace_hash(path: Path) -> str | None:
+        nonlocal target_hash_calls
+        if Path(path) == cache_path:
+            target_hash_calls += 1
+            if target_hash_calls == 2:
+                return "0" * 64
+        return real_file_sha256(Path(path))
+
+    monkeypatch.setattr(price_data, "_file_sha256", fail_post_replace_hash)
+    with pytest.raises(
+        RuntimeError,
+        match="published price cache hash does not match validated staged artifact",
+    ):
+        price_data._atomic_write_price_cache(
+            _tail_cache_rows("2026-08-25"), cache_path
+        )
+
+    assert cache_path.read_bytes() == before
+    assert not list(tmp_path.glob(".price_panel.parquet.*"))
+
+
 def test_cli_smoke(tmp_path: Path, monkeypatch) -> None:
     panel = _make_panel()
     panel_path = tmp_path / "price_panel.parquet"
     panel.to_parquet(panel_path, index=False)
+    universe_path = tmp_path / "universe.csv"
+    pd.DataFrame({"ticker": ["AAA", "BBB"]}).to_csv(universe_path, index=False)
     out_dir = tmp_path / "out"
     monkeypatch.chdir(Path.cwd())
     result = subprocess.run(
@@ -272,13 +550,15 @@ def test_cli_smoke(tmp_path: Path, monkeypatch) -> None:
             "--start-date",
             "2024-01-01",
             "--end-date",
-            "2025-03-31",
+            str(panel["date"].max().date()),
             "--num-sims",
             "2",
             "--window-years",
             "2",
             "--price-cache-path",
             str(panel_path),
+            "--universe-path",
+            str(universe_path),
             "--output-dir",
             str(out_dir),
         ],

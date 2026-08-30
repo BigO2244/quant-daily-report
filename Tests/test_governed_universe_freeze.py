@@ -7,6 +7,7 @@ import pytest
 from core.governed_universe_freeze import (
     GovernedUniverseFreezeError,
     build_governed_universe_freeze,
+    read_universe_symbols,
     validate_governed_universe_freeze,
 )
 
@@ -64,3 +65,25 @@ def test_pre_freeze_session_is_rejected() -> None:
             payload, universe_path=ROOT / "data/universe.csv",
             session_as_of="2026-08-18T07:00:00-04:00",
         )
+
+
+def test_prospective_freeze_binds_current_bytes_without_changing_membership() -> None:
+    path = ROOT / "docs/evidence/caerus_large_cap_governed_universe_freeze_2026-08-31.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    checked = validate_governed_universe_freeze(
+        payload,
+        universe_path=ROOT / "data/universe.csv",
+        session_as_of="2026-08-31T07:00:00-04:00",
+    )
+
+    assert checked["source_sha256"] == "b9b21f2311ef249facf4f7f699fe916b06f4c778262772a3ac2f63e1bfb8cc21"
+    assert checked["member_count"] == len(read_universe_symbols(ROOT / "data/universe.csv")) == 200
+    assert checked["ordered_members_sha256"] == "54b94c9f5189efccce2c9722d0d7c668a0a3a96d1a628613c7e93a65881a2243"
+    assert checked["membership_economics_changed"] is False
+
+
+def test_canonical_parser_ignores_blank_lines_without_changing_order(tmp_path) -> None:
+    universe = tmp_path / "universe.csv"
+    universe.write_text("ticker,sector\nAAA,One\n\nBBB,Two\n\n", encoding="utf-8")
+
+    assert read_universe_symbols(universe) == ["AAA", "BBB"]

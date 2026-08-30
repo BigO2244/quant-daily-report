@@ -1,0 +1,16 @@
+{
+  "content_hash": "0d53722d4215c886d57df0f7d25df6e753473a1d4158cd99e083ccaa5f14e7fb",
+  "effective_from": "2026-08-31T00:00:00-04:00",
+  "execution_authority": false,
+  "freeze_id": "governed-universe:caerus-large-cap-prospective-v1:2026-08-31:582ec2d9607fdadabdbe72fc",
+  "generated_at": "2026-08-30T11:30:00+00:00",
+  "member_count": 200,
+  "membership_economics_changed": false,
+  "no_retroactive_use_before": "2026-08-31",
+  "ordered_members_sha256": "54b94c9f5189efccce2c9722d0d7c668a0a3a96d1a628613c7e93a65881a2243",
+  "prospective_only": true,
+  "schema_version": "caerus.governed_universe_freeze.v1",
+  "source_path": "data/universe.csv",
+  "source_revision": "00aa6c46f5ca1e1d367defbea57edc9576d7ccd5",
+  "source_sha256": "b9b21f2311ef249facf4f7f699fe916b06f4c778262772a3ac2f63e1bfb8cc21"
+}

@@ -108,7 +108,10 @@ def test_alias_mapping_replaces_ticker_for_download_and_maps_back(tmp_path: Path
 
     def fake_download_price_panel(*, symbols, start_date, end_date, chunk_size=25, pause_seconds=0.0):
         calls.append(list(symbols))
-        return _panel("NEW", end_date)
+        return pd.concat(
+            [_panel("NEW", start_date), _panel("NEW", end_date)],
+            ignore_index=True,
+        )
 
     monkeypatch.setattr("research.flow_detection.data.download_price_panel", fake_download_price_panel)
 

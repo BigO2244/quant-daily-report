@@ -50,8 +50,12 @@ a fully GREEN window.
   market/features/ranks differ from the prior computation and the target is a
   deterministic output of the governed selection rule.
 - `legacy_current_universe` and `NON_DECISION_GRADE_UNIVERSE` fail the Data/PIT
-  control. Fresh prices cannot compensate for non-decision-grade membership,
-  and no scaling or promotion claim may use that session as fully certified.
+  control unless the original session envelope binds an exact governed
+  prospective static-universe freeze. The freeze must predate the evaluation,
+  match the configured artifact hash and exact universe bytes/order, and be
+  effective no later than the session. This narrow exception certifies only
+  prospective operating membership; it does not make a current-universe
+  historical replay PIT-safe or eligible for a promotion claim.
 - Do not translate a retrospective RED certification window into “PAPER is
   halted” or “Live is blocked.” Capital-lane authority comes from the operating
   lane registry and its scoped owner decisions. A halt requires an applicable
@@ -60,6 +64,26 @@ a fully GREEN window.
   certified session when the upstream decision or artifact did not exist.
 - Historical sessions are never retroactively upgraded without their original
   immutable evidence.
+
+## Prospective static-universe freeze
+
+Orion's prospective proof is configured in
+`config/research/strategy_registry.json` and points to the immutable freeze in
+`docs/evidence/`. The source remains `data/universe.csv`; the freeze does not
+add, remove, reorder, or rename a member and does not alter weights, sleeve
+decisions, allocation, execution, or capital authority. The existing
+`legacy_current_universe` label is retained so this operational proof cannot be
+misread as historical survivorship remediation.
+
+Missing artifacts, a configured-file hash mismatch, changed universe bytes or
+order, a member-count mismatch, missing evaluation time, or a session before
+the freeze cutoff all fail the Data/PIT control closed.
+
+Rollback is one scoped git revert: remove the two Orion freeze-reference fields,
+the prospective evidence JSON, and the supporting validation code/tests. That
+restores the prior unproved Data/PIT rating without changing universe bytes,
+target weights, decision hashes, lane authority, or runtime artifacts. Never
+delete already generated certification evidence during rollback.
 
 ## CIO brief contract
 

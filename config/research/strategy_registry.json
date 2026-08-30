@@ -76,6 +76,8 @@
         "universe_family": "caerus_large_cap",
         "universe_method": "legacy_current_universe",
         "universe_source": "data/universe.csv",
+        "prospective_universe_freeze_path": "docs/evidence/caerus_large_cap_governed_universe_freeze_2026-08-31.json",
+        "prospective_universe_freeze_sha256": "8252e4392c32ed71a28bc90001b7e15085b3eb3bdb160896e77e4f6cdd5b342d",
         "availability_policy": "same_or_previous_trading_session",
         "capital_eligible": true,
         "execution_eligible": true,

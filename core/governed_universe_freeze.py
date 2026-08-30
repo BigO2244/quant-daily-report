@@ -1,4 +1,4 @@
-"""Immutable prospective universe freeze for generic Lyra v2 decisions."""
+"""Immutable prospective static-universe freezes."""
 
 from __future__ import annotations
 
@@ -42,9 +42,15 @@ def _symbols(source: bytes) -> list[str]:
     return symbols
 
 
+def read_universe_symbols(universe_path: Path | str) -> list[str]:
+    """Read exact ordered membership with the canonical freeze parser."""
+    return _symbols(Path(universe_path).read_bytes())
+
+
 def build_governed_universe_freeze(
     *, universe_path: Path | str, generated_at: str, effective_from: str,
     source_revision: str, no_retroactive_use_before: str,
+    freeze_namespace: str = "lyra-live-v1",
 ) -> dict[str, Any]:
     path = Path(universe_path)
     source = path.read_bytes()
@@ -56,6 +62,11 @@ def build_governed_universe_freeze(
         raise GovernedUniverseFreezeError("freeze timestamps require timezones")
     if effective.date() != cutoff:
         raise GovernedUniverseFreezeError("effective date must equal no-retroactive cutoff")
+    namespace = str(freeze_namespace).strip()
+    if not namespace or any(
+        char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in namespace
+    ):
+        raise GovernedUniverseFreezeError("freeze namespace is invalid")
     body = {
         "schema_version": GOVERNED_UNIVERSE_FREEZE_SCHEMA,
         "freeze_id": "pending",
@@ -72,7 +83,7 @@ def build_governed_universe_freeze(
         "execution_authority": False,
     }
     seed = _hash(body)
-    body["freeze_id"] = f"governed-universe:lyra-live-v1:{no_retroactive_use_before}:{seed[:24]}"
+    body["freeze_id"] = f"governed-universe:{namespace}:{no_retroactive_use_before}:{seed[:24]}"
     body["content_hash"] = _hash(body)
     return validate_governed_universe_freeze(body, universe_path=path)
 
@@ -99,8 +110,11 @@ def validate_governed_universe_freeze(
     if payload.get("content_hash") != _hash(payload):
         raise GovernedUniverseFreezeError("universe freeze content_hash mismatch")
     effective = dt.datetime.fromisoformat(str(payload["effective_from"]).replace("Z", "+00:00"))
-    if effective.tzinfo is None:
-        raise GovernedUniverseFreezeError("universe freeze effective_from requires timezone")
+    generated = dt.datetime.fromisoformat(str(payload["generated_at"]).replace("Z", "+00:00"))
+    if effective.tzinfo is None or generated.tzinfo is None:
+        raise GovernedUniverseFreezeError("universe freeze timestamps require timezones")
+    if generated > effective:
+        raise GovernedUniverseFreezeError("universe freeze was generated after its effective time")
     cutoff = dt.date.fromisoformat(str(payload["no_retroactive_use_before"]))
     if effective.date() != cutoff:
         raise GovernedUniverseFreezeError("universe freeze cutoff mismatch")
@@ -115,7 +129,7 @@ def validate_governed_universe_freeze(
             raise GovernedUniverseFreezeError("universe ordered membership differs")
     if session_as_of is not None:
         as_of = dt.datetime.fromisoformat(session_as_of.replace("Z", "+00:00"))
-        if as_of.tzinfo is None or as_of < effective or as_of.date() < cutoff:
+        if as_of.tzinfo is None or generated > as_of or as_of < effective or as_of.date() < cutoff:
             raise GovernedUniverseFreezeError("session predates governed universe freeze")
     return copy.deepcopy(dict(payload))
 
@@ -132,5 +146,5 @@ def read_governed_universe_symbols(
 __all__ = [
     "GOVERNED_UNIVERSE_FREEZE_SCHEMA", "GovernedUniverseFreezeError",
     "build_governed_universe_freeze", "validate_governed_universe_freeze",
-    "read_governed_universe_symbols",
+    "read_governed_universe_symbols", "read_universe_symbols",
 ]

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
+import shutil
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 import pandas as pd
-from paper.trading_calendar import prev_trading_day
+from paper.trading_calendar import is_trading_day, prev_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +20,118 @@ DEFAULT_LOCAL_PANEL_PATHS = (
     Path("outputs/research/ma_vol_hypothesis/price_panel.parquet"),
 )
 DEFAULT_TICKER_EXCEPTIONS_PATH = Path("data/ticker_exceptions.json")
+
+
+def _file_sha256(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _trading_sessions(start_date: str, end_date: str) -> list[str]:
+    start = pd.Timestamp(start_date).normalize()
+    end = pd.Timestamp(end_date).normalize()
+    if end < start:
+        return []
+    return [
+        str(value.date())
+        for value in pd.date_range(start, end, freq="D")
+        if is_trading_day(str(value.date()))
+    ]
+
+
+def _validate_catchup_sessions(
+    panel: pd.DataFrame,
+    *,
+    download_start_by_symbol: dict[str, str],
+    tail_symbols: Sequence[str],
+    end_date: str,
+) -> dict:
+    dates_by_symbol = {
+        str(ticker).upper(): {str(pd.Timestamp(value).date()) for value in group["date"]}
+        for ticker, group in panel.groupby("ticker")
+    } if not panel.empty else {}
+    missing: dict[str, list[str]] = {}
+    expected_count = 0
+    for symbol in sorted({str(value).upper() for value in tail_symbols}):
+        expected = _trading_sessions(download_start_by_symbol[symbol], end_date)
+        expected_count += len(expected)
+        absent = [date for date in expected if date not in dates_by_symbol.get(symbol, set())]
+        if absent:
+            missing[symbol] = absent
+    return {
+        "status": "OK" if not missing else "INCOMPLETE",
+        "downloaded_symbols": sorted({str(value).upper() for value in tail_symbols}),
+        "tail_symbols": sorted({str(value).upper() for value in tail_symbols}),
+        "expected_symbol_sessions": expected_count,
+        "missing_sessions_by_symbol": missing,
+        "missing_symbol_sessions": sum(len(values) for values in missing.values()),
+    }
+
+
+def _atomic_write_price_cache(frame: pd.DataFrame, path: Path) -> dict[str, Any]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    before_hash = _file_sha256(path)
+    descriptor, staged_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".parquet", dir=path.parent)
+    os.close(descriptor)
+    staged_path = Path(staged_name)
+    backup_path: Path | None = None
+    had_prior = path.is_file()
+    try:
+        canonical_frame = standardize_panel(frame)
+        canonical_frame.to_parquet(staged_path, index=False)
+        staged_frame = standardize_panel(pd.read_parquet(staged_path))
+        try:
+            pd.testing.assert_frame_equal(staged_frame, canonical_frame, check_dtype=False)
+        except AssertionError as exc:
+            raise RuntimeError("staged price cache changed during parquet round trip") from exc
+        staged_hash = _file_sha256(staged_path)
+        if not staged_hash:
+            raise RuntimeError("staged price cache has no verifiable hash")
+        if had_prior:
+            backup_descriptor, backup_name = tempfile.mkstemp(
+                prefix=f".{path.name}.", suffix=".prior", dir=path.parent
+            )
+            os.close(backup_descriptor)
+            backup_path = Path(backup_name)
+            shutil.copyfile(path, backup_path)
+            if _file_sha256(backup_path) != before_hash:
+                raise RuntimeError("recoverable prior price cache hash mismatch")
+        os.replace(staged_path, path)
+        try:
+            canonical_hash = _file_sha256(path)
+            if canonical_hash != staged_hash:
+                raise RuntimeError(
+                    "published price cache hash does not match validated staged artifact"
+                )
+        except Exception:
+            try:
+                if backup_path is not None:
+                    os.replace(backup_path, path)
+                    backup_path = None
+                elif not had_prior and path.exists():
+                    path.unlink()
+            except Exception as rollback_exc:
+                raise RuntimeError(
+                    "price cache publication verification and rollback both failed"
+                ) from rollback_exc
+            raise
+        return {
+            "status": "PUBLISHED",
+            "before_sha256": before_hash,
+            "staged_sha256": staged_hash,
+            "canonical_sha256": canonical_hash,
+            "rows": len(canonical_frame),
+        }
+    finally:
+        if staged_path.exists():
+            staged_path.unlink()
+        if backup_path is not None and backup_path.exists():
+            backup_path.unlink()
 
 
 @dataclass(frozen=True)
@@ -215,7 +331,13 @@ def ensure_price_panel(
     ticker_exceptions_path: str | Path = DEFAULT_TICKER_EXCEPTIONS_PATH,
     required_anchor_dates: Sequence[str] = (),
     required_history_offsets: Sequence[int] = (),
+    provider_group_attempts: int = 3,
+    provider_retry_backoff_seconds: float = 1.0,
 ) -> tuple[pd.DataFrame, dict]:
+    if provider_group_attempts < 1:
+        raise ValueError("provider_group_attempts must be at least 1")
+    if provider_retry_backoff_seconds < 0:
+        raise ValueError("provider_retry_backoff_seconds cannot be negative")
     symbol_set = {str(sym).upper() for sym in symbols}
     exceptions = load_ticker_exceptions(ticker_exceptions_path)
     ignored_tickers = sorted(symbol_set & set(exceptions.get("ignore") or []))
@@ -241,6 +363,12 @@ def ensure_price_panel(
     cache_panel = pd.DataFrame()
     cache_source = None
     cache_path_obj = Path(cache_path) if cache_path else None
+    cache_before_sha256 = _file_sha256(cache_path_obj) if cache_path_obj else None
+    cache_publish: dict[str, Any] = {
+        "status": "NOT_NEEDED",
+        "before_sha256": cache_before_sha256,
+        "canonical_sha256": cache_before_sha256,
+    }
     if cache_path_obj and cache_path_obj.exists():
         raw_cache_panel = standardize_panel(pd.read_parquet(cache_path_obj))
         raw_cache_panel = apply_provider_aliases(raw_cache_panel, aliased_tickers)
@@ -289,6 +417,15 @@ def ensure_price_panel(
     download_start_date: str | None = None
     download_failed_symbols: list[str] = []
     download_errors: dict[str, str] = {}
+    download_attempts: list[dict[str, Any]] = []
+    catchup_validation: dict[str, Any] = {
+        "status": "NOT_REQUIRED",
+        "downloaded_symbols": [],
+        "tail_symbols": [],
+        "expected_symbol_sessions": 0,
+        "missing_sessions_by_symbol": {},
+        "missing_symbol_sessions": 0,
+    }
     download_symbols = sorted(set(missing_symbols + incomplete_symbols + anchor_incomplete_symbols))
     needs_download = allow_download and bool(download_symbols)
     if needs_download:
@@ -303,79 +440,120 @@ def ensure_price_panel(
         }
         download_start_date = min(download_start_by_symbol.values()) if download_start_by_symbol else None
 
-        def fetch_group(group_symbols: Sequence[str], group_start_date: str) -> pd.DataFrame:
-            group_aliases = {sym: aliased_tickers[sym] for sym in group_symbols if sym in aliased_tickers}
-            provider_symbols = [group_aliases.get(sym, sym) for sym in group_symbols]
+        empty_panel = pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume"])
+
+        def fetch_single(symbol: str, group_start_date: str, alias: str | None) -> pd.DataFrame:
+            symbol = str(symbol).upper()
+            provider_symbol = alias or symbol
+            attempt_record: dict[str, Any] = {
+                "scope": "SYMBOL",
+                "attempt": 1,
+                "symbols": [symbol],
+                "provider_symbols": [provider_symbol],
+                "start_date": group_start_date,
+                "end_date": end_date,
+            }
             try:
-                frame = download_price_panel(
-                    symbols=provider_symbols,
+                single = download_price_panel(
+                    symbols=[provider_symbol],
                     start_date=group_start_date,
                     end_date=end_date,
-                    chunk_size=chunk_size,
+                    chunk_size=1,
                 )
-                frame = apply_provider_aliases(frame, group_aliases)
+                single = apply_provider_aliases(
+                    single,
+                    {symbol: provider_symbol} if provider_symbol != symbol else {},
+                )
             except Exception as exc:
-                logger.warning(
-                    "[FLOW] Download group failed; retrying symbols individually: symbols=%s error=%s",
-                    ",".join(group_symbols),
-                    exc,
-                )
-                frames: list[pd.DataFrame] = []
-                for sym in group_symbols:
-                    provider_sym = group_aliases.get(sym, sym)
-                    try:
-                        single = download_price_panel(
-                            symbols=[provider_sym],
-                            start_date=group_start_date,
-                            end_date=end_date,
-                            chunk_size=1,
-                        )
-                        single = apply_provider_aliases(single, {sym: provider_sym} if provider_sym != sym else {})
-                    except Exception as single_exc:
-                        download_failed_symbols.append(str(sym).upper())
-                        download_errors[str(sym).upper()] = str(single_exc)
-                        logger.warning("[FLOW] Download failed for symbol=%s: %s", sym, single_exc)
-                        continue
-                    if single.empty:
-                        download_failed_symbols.append(str(sym).upper())
-                        download_errors[str(sym).upper()] = "empty_download"
-                    else:
-                        frames.append(single)
-                return (
-                    pd.concat(frames, ignore_index=True)
-                    if frames
-                    else pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume"])
-                )
-            present = {str(sym).upper() for sym in frame["ticker"].unique()} if not frame.empty and "ticker" in frame.columns else set()
-            missing_from_success = [str(sym).upper() for sym in group_symbols if str(sym).upper() not in present]
-            retry_frames: list[pd.DataFrame] = []
-            # yfinance can return a successful but empty/partial batch. Treat
-            # omitted symbols exactly like a failed batch and retry each one.
-            for sym in missing_from_success:
-                sym_upper = str(sym).upper()
-                provider_sym = group_aliases.get(sym_upper, sym_upper)
+                attempt_record.update({"result": "ERROR", "error": str(exc)})
+                download_attempts.append(attempt_record)
+                download_failed_symbols.append(symbol)
+                download_errors[symbol] = str(exc)
+                return empty_panel.copy()
+            present = set(single.get("ticker", pd.Series(dtype=str)).astype(str).str.upper())
+            if single.empty or symbol not in present:
+                attempt_record.update({"result": "EMPTY", "returned_symbol_count": 0})
+                download_attempts.append(attempt_record)
+                download_failed_symbols.append(symbol)
+                download_errors[symbol] = "empty_download_after_individual_retry"
+                return empty_panel.copy()
+            attempt_record.update({"result": "COMPLETE", "returned_symbol_count": 1})
+            download_attempts.append(attempt_record)
+            return single
+
+        def fetch_group(group_symbols: Sequence[str], group_start_date: str) -> pd.DataFrame:
+            normalized_symbols = [str(value).upper() for value in group_symbols]
+            group_aliases = {sym: aliased_tickers[sym] for sym in normalized_symbols if sym in aliased_tickers}
+            provider_symbols = [group_aliases.get(sym, sym) for sym in normalized_symbols]
+            frame = empty_panel.copy()
+            group_results: list[str] = []
+            for attempt in range(1, provider_group_attempts + 1):
+                attempt_record: dict[str, Any] = {
+                    "scope": "GROUP",
+                    "attempt": attempt,
+                    "symbols": normalized_symbols,
+                    "provider_symbols": provider_symbols,
+                    "start_date": group_start_date,
+                    "end_date": end_date,
+                }
                 try:
-                    single = download_price_panel(
-                        symbols=[provider_sym],
+                    candidate = download_price_panel(
+                        symbols=provider_symbols,
                         start_date=group_start_date,
                         end_date=end_date,
-                        chunk_size=1,
+                        chunk_size=chunk_size,
                     )
-                    single = apply_provider_aliases(
-                        single,
-                        {sym_upper: provider_sym} if provider_sym != sym_upper else {},
+                    candidate = apply_provider_aliases(candidate, group_aliases)
+                    present_count = int(candidate["ticker"].nunique()) if not candidate.empty else 0
+                    result = "EMPTY" if candidate.empty else (
+                        "COMPLETE" if present_count == len(normalized_symbols) else "PARTIAL"
                     )
-                except Exception as single_exc:
-                    download_failed_symbols.append(sym_upper)
-                    download_errors[sym_upper] = str(single_exc)
-                    continue
-                if single.empty or sym_upper not in set(single.get("ticker", pd.Series(dtype=str)).astype(str).str.upper()):
-                    download_failed_symbols.append(sym_upper)
-                    download_errors[sym_upper] = "empty_download_after_individual_retry"
-                else:
-                    retry_frames.append(single)
-            if retry_frames:
-                frame = pd.concat([frame, *retry_frames], ignore_index=True)
+                    attempt_record.update({"result": result, "returned_symbol_count": present_count})
+                    group_results.append(result)
+                    download_attempts.append(attempt_record)
+                    if not candidate.empty:
+                        frame = candidate
+                        break
+                except Exception as exc:
+                    attempt_record.update({"result": "ERROR", "error": str(exc)})
+                    group_results.append("ERROR")
+                    download_attempts.append(attempt_record)
+                if attempt < provider_group_attempts and provider_retry_backoff_seconds:
+                    time.sleep(provider_retry_backoff_seconds * attempt)
+
+            systemic_empty = (
+                frame.empty
+                and "EMPTY" in group_results
+                and set(group_results) <= {"EMPTY", "ERROR"}
+                and len(normalized_symbols) > 1
+            )
+            if systemic_empty:
+                failure_reason = (
+                    "provider_systemic_empty_after_group_retries"
+                    if set(group_results) == {"EMPTY"}
+                    else "provider_systemic_mixed_empty_error_after_group_retries"
+                )
+                for symbol in normalized_symbols:
+                    download_failed_symbols.append(symbol)
+                    download_errors[symbol] = failure_reason
+                logger.warning(
+                    "[FLOW] Provider-wide empty/error response persisted for %d bounded attempts; "
+                    "individual fanout suppressed: symbols=%d",
+                    provider_group_attempts,
+                    len(normalized_symbols),
+                )
+                return frame
+
+            present = set(frame.get("ticker", pd.Series(dtype=str)).astype(str).str.upper())
+            missing_after_group = [symbol for symbol in normalized_symbols if symbol not in present]
+            retry_frames = [
+                fetch_single(symbol, group_start_date, group_aliases.get(symbol))
+                for symbol in missing_after_group
+            ]
+            successful_retries = [single for single in retry_frames if not single.empty]
+            if successful_retries:
+                frames_to_merge = successful_retries if frame.empty else [frame, *successful_retries]
+                frame = pd.concat(frames_to_merge, ignore_index=True)
             return frame
 
         if missing_symbols:
@@ -396,14 +574,49 @@ def ensure_price_panel(
             if any(not frame.empty for frame in fetched_frames)
             else pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume"])
         )
-        panel = pd.concat([panel, fetched], ignore_index=True) if not panel.empty else fetched
+        if panel.empty:
+            panel = fetched
+        elif not fetched.empty:
+            panel = pd.concat([panel, fetched], ignore_index=True)
         panel = panel.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last").reset_index(drop=True)
-        if cache_path_obj is not None:
-            cache_path_obj.parent.mkdir(parents=True, exist_ok=True)
-            cache_write = pd.concat([raw_cache_panel, fetched], ignore_index=True) if not raw_cache_panel.empty else fetched
-            cache_write = cache_write.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last").reset_index(drop=True)
-            cache_write.to_parquet(cache_path_obj, index=False)
         panel = filter_panel_window(panel, start_date=start_date, end_date=end_date)
+        if cache_path_obj is not None:
+            if raw_cache_panel.empty:
+                cache_write = fetched
+            elif fetched.empty:
+                cache_write = raw_cache_panel.copy()
+            else:
+                cache_write = pd.concat([raw_cache_panel, fetched], ignore_index=True)
+            cache_write = cache_write.sort_values(["ticker", "date"]).drop_duplicates(["ticker", "date"], keep="last").reset_index(drop=True)
+            candidate_coverage = validate_symbol_coverage(
+                panel,
+                symbols=sorted(active_symbol_set),
+                current_session=end_date,
+                required_anchor_dates=required_anchor_dates,
+                required_history_offsets=required_history_offsets,
+            )
+            catchup_validation = _validate_catchup_sessions(
+                panel,
+                download_start_by_symbol=download_start_by_symbol,
+                tail_symbols=download_symbols,
+                end_date=end_date,
+            )
+            publication_blocks: list[str] = []
+            if candidate_coverage.get("status") != "OK":
+                publication_blocks.append("required_current_or_anchor_coverage_incomplete")
+            if catchup_validation.get("status") != "OK":
+                publication_blocks.append("catchup_session_coverage_incomplete")
+            if download_failed_symbols:
+                publication_blocks.append("download_failures_present")
+            if publication_blocks:
+                cache_publish = {
+                    "status": "BLOCKED_UNCHANGED",
+                    "before_sha256": cache_before_sha256,
+                    "canonical_sha256": _file_sha256(cache_path_obj),
+                    "reason_codes": publication_blocks,
+                }
+            else:
+                cache_publish = _atomic_write_price_cache(cache_write, cache_path_obj)
 
     final_coverage = validate_symbol_coverage(
         panel,
@@ -422,6 +635,7 @@ def ensure_price_panel(
         "download_start_by_symbol": download_start_by_symbol if needs_download else {},
         "download_failed_symbols": download_failed_symbols,
         "download_errors": download_errors,
+        "download_attempts": download_attempts,
         "ignored_tickers": ignored_tickers,
         "aliased_tickers": aliased_tickers,
         "ticker_exception_notes": {
@@ -433,6 +647,8 @@ def ensure_price_panel(
         "local_sources": [str(path) for path in DEFAULT_LOCAL_PANEL_PATHS if path.exists()],
         "cache_source": cache_source,
         "coverage_validation": final_coverage,
+        "catchup_validation": catchup_validation,
+        "cache_publish": cache_publish,
     }
     return panel, meta
 

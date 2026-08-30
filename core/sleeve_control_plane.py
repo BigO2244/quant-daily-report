@@ -308,6 +308,8 @@ class SleeveDefinition:
     universe_family: str
     universe_method: str
     universe_source: str | None
+    prospective_universe_freeze_path: str | None
+    prospective_universe_freeze_sha256: str | None
     availability_policy: str
     capital_eligible: bool
     execution_eligible: bool
@@ -931,6 +933,19 @@ def _definition_from_payload(
     for field in ("capital_eligible", "execution_eligible", "evaluation_only"):
         if not isinstance(payload.get(field), bool):
             raise SleeveRegistryIntegrityError(f"{sleeve_id}: {field} must be boolean")
+    freeze_path = str(payload.get("prospective_universe_freeze_path") or "").strip()
+    freeze_sha256 = str(payload.get("prospective_universe_freeze_sha256") or "").strip().lower()
+    if bool(freeze_path) != bool(freeze_sha256):
+        raise SleeveRegistryIntegrityError(
+            f"{sleeve_id}: prospective universe freeze path and sha256 must be configured together"
+        )
+    if freeze_sha256 and (
+        len(freeze_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in freeze_sha256)
+    ):
+        raise SleeveRegistryIntegrityError(
+            f"{sleeve_id}: prospective universe freeze sha256 is invalid"
+        )
     if required_text["execution_impact"] not in {"NON_EXECUTIONAL", "PAPER", "LIVE"}:
         raise SleeveRegistryIntegrityError(
             f"{sleeve_id}: invalid execution_impact {required_text['execution_impact']!r}"
@@ -964,6 +979,12 @@ def _definition_from_payload(
             str(payload.get("universe_source")).strip()
             if payload.get("universe_source") is not None
             else None
+        ),
+        prospective_universe_freeze_path=(
+            freeze_path or None
+        ),
+        prospective_universe_freeze_sha256=(
+            freeze_sha256 or None
         ),
         availability_policy=required_text["availability_policy"],
         capital_eligible=bool(payload.get("capital_eligible")),
@@ -1325,6 +1346,11 @@ def _resolve_dated_source(
 
 
 def _universe_provenance(definition: SleeveDefinition, root: Path) -> dict[str, Any]:
+    from core.governed_universe_freeze import (
+        GovernedUniverseFreezeError,
+        read_universe_symbols,
+    )
+
     source = root / definition.universe_source if definition.universe_source else None
     payload: dict[str, Any] = {
         "family": definition.universe_family,
@@ -1335,12 +1361,16 @@ def _universe_provenance(definition: SleeveDefinition, root: Path) -> dict[str, 
     }
     if source and source.is_file():
         try:
-            payload["member_count"] = max(
-                0,
-                len(source.read_text(encoding="utf-8").splitlines()) - 1,
-            )
-        except UnicodeDecodeError:
+            payload["member_count"] = len(read_universe_symbols(source))
+        except (OSError, UnicodeDecodeError, GovernedUniverseFreezeError):
             payload["member_count"] = None
+    if definition.prospective_universe_freeze_path:
+        freeze_path = root / definition.prospective_universe_freeze_path
+        payload["prospective_freeze"] = {
+            "path": definition.prospective_universe_freeze_path,
+            "sha256": definition.prospective_universe_freeze_sha256,
+            "exists": freeze_path.is_file(),
+        }
     return payload
 
 
