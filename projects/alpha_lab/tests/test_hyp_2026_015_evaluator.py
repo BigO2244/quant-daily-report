@@ -17,6 +17,7 @@ from projects.alpha_lab.experiments.run_hyp_2026_015_evaluator import (
     GENESIS_HASH,
     _append_event,
     _event_rows,
+    _load_factors,
     _read_events,
     _reserve_trial,
     _trial_outcome,
@@ -140,6 +141,19 @@ def _synthetic_trial(
 
 
 class Hyp015EvaluatorTests(unittest.TestCase):
+    def test_factor_reader_stops_before_decoding_challenge_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "factors.csv"
+            path.write_bytes(
+                b"date,MKT_RF,SMB,HML,RMW,CMA,UMD\n"
+                b"2024-12-31,0.1,0.2,0.3,0.4,0.5,0.6\n"
+                b"2025-01-02,DO_NOT_DECODE,DO_NOT_DECODE,DO_NOT_DECODE,"
+                b"DO_NOT_DECODE,DO_NOT_DECODE,DO_NOT_DECODE\n"
+            )
+            rows = _load_factors(path)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["date"], "2024-12-31")
+
     def test_student_t_helpers_match_known_quantile(self) -> None:
         self.assertAlmostEqual(student_t_cdf(0.0, 10), 0.5, places=12)
         self.assertAlmostEqual(student_t_ppf(0.90, 10), 1.372183641, places=7)

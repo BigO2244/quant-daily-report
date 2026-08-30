@@ -59,10 +59,10 @@ ADDENDUM_FULL_FILE_SHA256 = (
     "8a327c8317a7cb4f78b877863eec805ec86a047900488806a751569269704820"
 )
 EVALUATOR_SPEC_RELATIVE_PATH = (
-    "projects/alpha_lab/experiments/evaluator_specs/HYP-2026-015.json"
+    "projects/alpha_lab/experiments/evaluator_specs/HYP-2026-015.json.frozen"
 )
 CODE_MANIFEST_RELATIVE_PATH = (
-    "projects/alpha_lab/experiments/evaluator_specs/HYP-2026-015-code-manifest.json"
+    "projects/alpha_lab/experiments/evaluator_specs/HYP-2026-015-code-manifest.json.manifest"
 )
 PRICE_READINESS_RELATIVE_PATH = (
     "outputs/research/alpha_lab/provider_readiness/pit_observed_prices_v1.json"
@@ -468,8 +468,11 @@ def seal_preregistration(
     structural_rows = list(
         _iter_jsonl_gz(gate_dir.resolve() / "eligibility_manifest.jsonl.gz")
     )
-    list(_iter_jsonl_gz(gate_dir.resolve() / "exclusion_manifest.jsonl.gz"))
+    exclusion_rows = list(
+        _iter_jsonl_gz(gate_dir.resolve() / "exclusion_manifest.jsonl.gz")
+    )
     _event_rows(structural_rows)
+    _validate_exclusion_rows(exclusion_rows)
     price_path = _verify_advertised_data(repo_root, price["data"])
     factor_path = _verify_advertised_data(repo_root, factor["data"])
     _preflight_outcome_dependencies(price_path, factor_path)
@@ -659,6 +662,23 @@ def _event_rows(structural_rows: Iterable[Mapping[str, Any]]) -> List[Dict[str, 
     return events
 
 
+def _validate_exclusion_rows(rows: Iterable[Mapping[str, Any]]) -> None:
+    for raw in rows:
+        reaction_session = raw.get("reaction_session")
+        if reaction_session is not None and _iso(reaction_session) >= CHALLENGE_START:
+            raise ContractValidationError("challenge exclusion row is forbidden")
+        if raw.get("adverse_sensitivity_eligible") not in (True, False):
+            raise ContractValidationError(
+                "exclusion row requires typed adverse_sensitivity_eligible"
+            )
+        if raw.get("adverse_sensitivity_eligible") is True and not raw.get(
+            "potential_cluster_key"
+        ):
+            raise ContractValidationError(
+                "adverse-eligible exclusion requires potential_cluster_key"
+            )
+
+
 def _iso(value: Any) -> str:
     text = str(value).split(" ", 1)[0]
     date.fromisoformat(text)
@@ -730,30 +750,38 @@ def _load_prices(
 
 
 def _load_factors(path: Path) -> List[Dict[str, Any]]:
-    try:
-        import pyarrow.csv as pacsv
-    except ImportError as exc:
-        raise RuntimeError("pyarrow is required for HYP-2026-015 evaluation") from exc
     columns = ["date", "MKT_RF", "SMB", "HML", "RMW", "CMA", "UMD"]
-    rows = []
+    rows: List[Dict[str, Any]] = []
     with path.open("rb") as stream:
-        reader = pacsv.open_csv(stream)
-        for batch in reader:
-            values = batch.to_pydict()
-            for index in range(batch.num_rows):
-                observed_date = str(values["date"][index]).split(" ", 1)[0]
-                if "2011-01-01" <= observed_date < CHALLENGE_START:
-                    rows.append(
-                        {
-                            column: (
-                                observed_date
-                                if column == "date"
-                                else values[column][index]
-                            )
-                            for column in columns
-                        }
+        header = stream.readline().decode("utf-8").strip().split(",")
+        positions = {name: header.index(name) for name in columns}
+        prior_date = ""
+        for raw_line in stream:
+            date_bytes, separator, _ = raw_line.partition(b",")
+            if not separator:
+                raise ContractValidationError("factor row is malformed")
+            observed_date = date_bytes.decode("ascii")
+            if prior_date and observed_date < prior_date:
+                raise ContractValidationError("factor input is not date ordered")
+            if observed_date >= CHALLENGE_START:
+                break
+            prior_date = observed_date
+            if observed_date < "2011-01-01":
+                continue
+            values = raw_line.decode("utf-8").rstrip("\r\n").split(",")
+            if len(values) != len(header):
+                raise ContractValidationError("factor row width mismatch")
+            rows.append(
+                {
+                    column: (
+                        observed_date
+                        if column == "date"
+                        else values[positions[column]]
                     )
-    return sorted(rows, key=lambda row: row["date"])
+                    for column in columns
+                }
+            )
+    return rows
 
 
 def _preflight_outcome_dependencies(price_path: Path, factor_path: Path) -> None:
@@ -943,6 +971,7 @@ def execute_preregistered(
     structural_rows = list(_iter_jsonl_gz(gate_dir / "eligibility_manifest.jsonl.gz"))
     exclusions = list(_iter_jsonl_gz(gate_dir / "exclusion_manifest.jsonl.gz"))
     event_rows = _event_rows(structural_rows)
+    _validate_exclusion_rows(exclusions)
     price_path = _verify_advertised_data(repo_root, inputs["price"]["data"])
     factor_path = _verify_advertised_data(repo_root, inputs["factor"]["data"])
     _preflight_outcome_dependencies(price_path, factor_path)
