@@ -1,35 +1,56 @@
-"""Run HYP-2026-015's frozen source gate without reading market outcomes."""
+"""Build HYP-2026-015's causal no-return event/peer eligibility manifest.
+
+The runner is deliberately outcome blind.  It may inspect filing metadata,
+effective-dated identity, membership, contemporaneous price/liquidity gates,
+and whether required market rows exist.  It never computes or persists a
+reporter reaction, a forward return, or a challenge-period observation.
+"""
 
 from __future__ import annotations
 
 import argparse
+import bisect
+import csv
 import gzip
 import hashlib
+import io
 import json
+import math
+import os
 import re
-from datetime import datetime, timezone
+import shutil
+import tarfile
+import tempfile
+from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor
+from datetime import date, datetime, time, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
-from projects.alpha_lab.factory import (
-    AppendOnlyJSONLEventStore,
-    canonical_hash,
-    canonical_json,
-)
+from projects.alpha_lab.factory import canonical_hash, canonical_json
 from projects.alpha_lab.factory.canonical import parse_datetime
 
 
-SCHEMA_VERSION = "caerus_alpha_lab_hyp_2026_015_data_gate_v1"
+SCHEMA_VERSION = "caerus_alpha_lab_hyp_2026_015_no_return_gate_v2"
 HYPOTHESIS_ID = "HYP-2026-015"
 EXPERIMENT_ID = "EXP-2026-0015"
-RUNNER_RELATIVE_PATH = (
-    "projects/alpha_lab/experiments/run_hyp_2026_015_data_gate.py"
-)
+RUNNER_RELATIVE_PATH = "projects/alpha_lab/experiments/run_hyp_2026_015_data_gate.py"
 SPEC_RELATIVE_PATH = (
     "projects/alpha_lab/hypotheses/"
     "HYP-2026-015_industry_earnings_information_diffusion.md"
 )
 SPEC_SHA256 = "3ca51f2f477c548d0b9ad266f004b4f61ba532f1d23961847c05db1e5fd033d6"
+ADDENDUM_RELATIVE_PATH = (
+    "projects/alpha_lab/hypotheses/"
+    "HYP-2026-015-ADDENDUM-001_source_materiality_and_evaluator_determinism.md"
+)
+ADDENDUM_BODY_SHA256 = (
+    "6a3747d98e89efdb3f73e0f7a3587992b38804789e43534a7ec03842ee5e3c8e"
+)
+ADDENDUM_FULL_FILE_SHA256 = (
+    "8a327c8317a7cb4f78b877863eec805ec86a047900488806a751569269704820"
+)
 SOURCE_MANIFEST_RELATIVE_PATH = (
     "outputs/research/alpha_lab/data_spine/sec_original_filings_stream/"
     "20260722T212948Z-8bec6cab476f/manifest.json"
@@ -55,10 +76,39 @@ PRICES_READINESS_SHA256 = (
 PRICES_PANEL_SHA256 = (
     "7b6518bc30d84820b5113465fb23d54de36012195ed1672ed19aca9e216c99c0"
 )
+SECURITY_MASTER_RELATIVE_PATH = "data/pit_universe/security_master.csv"
+MEMBERSHIP_RELATIVE_PATH = "data/pit_universe/membership_universe.csv"
+CIK_MAPPING_RELATIVE_PATH = "cik_mapping_results.csv"
+SECURITY_MASTER_SHA256 = "55f09af11065725dfa797169414a32e2e18ea6e3dea6c903f325d1b8bf8febc9"
+MEMBERSHIP_SHA256 = "563109a4d8a5a516d49967e60b58f152dfe52cc7ce1c6b45333fa6160381187d"
+CIK_MAPPING_SHA256 = "e3e093da41c619eab292003f7259ffe874a3e942db52bbf97578a714e2bd2ad5"
+CANONICAL_GCP_REPO_ROOT = Path("/mnt/disks/alpha-lab/alpha-lab-project")
+
+DISCOVERY_START = date(2012, 1, 1)
+VALIDATION_END = date(2024, 12, 31)
+VALIDATION_START = date(2019, 1, 1)
+AGGREGATE_ORIGINAL_COVERAGE_MIN = 0.999
+PEER_MAPPING_COVERAGE_MIN = 0.99
+MIN_VALIDATION_CLUSTERS = 150
+MIN_VALIDATION_PEERS = 100
+MIN_VALIDATION_SICS = 20
+PRICE_FLOOR = 5.0
+ADV_FLOOR = 10_000_000.0
+HEADER_LIMIT_BYTES = 512 * 1024
 
 _SPEC_MARKER = "## Freeze record\n"
+_ADDENDUM_MARKER = "## Addendum record\n"
 _ACCESSION = re.compile(r"(?P<accession>\d{10}-\d{2}-\d{6})")
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_HEADER_CIK = re.compile(r"CENTRAL INDEX KEY:\s*(\d+)", re.I)
+_HEADER_SIC = re.compile(
+    r"STANDARD INDUSTRIAL CLASSIFICATION:[^\r\n]*\[(\d{4})\]", re.I
+)
+_HEADER_ACCEPTANCE = re.compile(r"<ACCEPTANCE-DATETIME>(\d{14})", re.I)
+_HEADER_FORM = re.compile(r"CONFORMED SUBMISSION TYPE:\s*([^\r\n]+)", re.I)
+_HEADER_ITEM = re.compile(r"ITEM INFORMATION:\s*([^\r\n]+)", re.I)
+_ET = ZoneInfo("America/New_York")
 
 
 def _sha256_file(path: Path) -> str:
@@ -69,18 +119,21 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _load_json(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"expected JSON object: {path}")
+    return value
+
+
 def _verified_file(repo_root: Path, relative_path: str, expected: str) -> dict[str, Any]:
-    path = repo_root / relative_path
+    path = (repo_root / relative_path).resolve()
     if not path.is_file():
         raise ValueError(f"frozen input is absent: {relative_path}")
     actual = _sha256_file(path)
     if actual != expected:
         raise ValueError(f"frozen input hash mismatch: {relative_path}")
-    return {
-        "path": relative_path,
-        "bytes": path.stat().st_size,
-        "sha256": actual,
-    }
+    return {"path": relative_path, "bytes": path.stat().st_size, "sha256": actual}
 
 
 def _verify_spec(repo_root: Path) -> dict[str, Any]:
@@ -94,38 +147,53 @@ def _verify_spec(repo_root: Path) -> dict[str, Any]:
     return {"path": SPEC_RELATIVE_PATH, "sha256": actual}
 
 
-def _load_json(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError(f"expected JSON object: {path}")
-    return value
+def _verify_addendum(repo_root: Path) -> dict[str, Any]:
+    path = repo_root / ADDENDUM_RELATIVE_PATH
+    text = path.read_text(encoding="utf-8")
+    if _ADDENDUM_MARKER not in text:
+        raise ValueError("owner addendum is missing its Addendum record")
+    body_hash = hashlib.sha256(
+        text.split(_ADDENDUM_MARKER, 1)[0].encode("utf-8")
+    ).hexdigest()
+    full_hash = _sha256_file(path)
+    if body_hash != ADDENDUM_BODY_SHA256:
+        raise ValueError("owner addendum frozen body hash mismatch")
+    if full_hash != ADDENDUM_FULL_FILE_SHA256:
+        raise ValueError("owner addendum full-file hash mismatch")
+    required_terms = (
+        "HYP-2026-015",
+        "Addendum 001",
+        "99.9%",
+        "deterministic",
+        "no-return",
+    )
+    missing = [term for term in required_terms if term.lower() not in text.lower()]
+    if missing:
+        raise ValueError(f"owner addendum is missing required terms: {missing}")
+    return {
+        "path": ADDENDUM_RELATIVE_PATH,
+        "bytes": path.stat().st_size,
+        "frozen_body_sha256": body_hash,
+        "full_file_sha256": full_hash,
+    }
 
 
-def _status_errors(bundle_root: Path) -> list[dict[str, Any]]:
-    status_root = bundle_root / "data/status"
-    status_paths = sorted(status_root.glob("part_*_status.json"))
-    if not status_paths:
-        raise ValueError("source-bundle partition status files are absent")
-    errors: list[dict[str, Any]] = []
-    for status_path in status_paths:
-        payload = _load_json(status_path)
-        declared_count = payload.get("error_count")
-        records = payload.get("errors", [])
-        if not isinstance(declared_count, int) or not isinstance(records, list):
-            raise ValueError(f"invalid partition status schema: {status_path}")
-        if declared_count != len(records):
-            raise ValueError(f"partition error-count mismatch: {status_path}")
-        for record in records:
-            if not isinstance(record, dict):
-                raise ValueError(f"invalid partition error record: {status_path}")
-            errors.append(
-                {
-                    "partition_status_path": str(status_path.relative_to(bundle_root)),
-                    "error_type": record.get("error_type"),
-                    "source_filename": record.get("source_filename"),
-                }
-            )
-    return errors
+def _norm_cik(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or not text.isdigit():
+        return None
+    return text.zfill(10)
+
+
+def _parse_date(value: object) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
 
 
 def _accession(value: object) -> str | None:
@@ -133,241 +201,1698 @@ def _accession(value: object) -> str | None:
     return match.group("accession") if match else None
 
 
-def _scan_item_202_tape(
-    path: Path, missing_accessions: Iterable[str]
-) -> tuple[int, list[dict[str, Any]]]:
-    wanted = set(missing_accessions)
-    matches: list[dict[str, Any]] = []
-    row_count = 0
-    with gzip.open(path, "rt", encoding="utf-8") as stream:
+def _status_errors(bundle_root: Path) -> list[dict[str, Any]]:
+    status_paths = sorted((bundle_root / "data/status").glob("part_*_status.json"))
+    if not status_paths:
+        raise ValueError("source-bundle partition status files are absent")
+    errors: list[dict[str, Any]] = []
+    for status_path in status_paths:
+        payload = _load_json(status_path)
+        records = payload.get("errors", [])
+        if payload.get("error_count") != len(records) or not isinstance(records, list):
+            raise ValueError(f"partition error-count mismatch: {status_path}")
+        for record in records:
+            errors.append(
+                {
+                    "partition": status_path.stem,
+                    "error_type": record.get("error_type"),
+                    "source_filename": record.get("source_filename"),
+                    "accession": _accession(record.get("source_filename")),
+                }
+            )
+    return errors
+
+
+def _bundle_unsigned_hash(manifest: Mapping[str, Any]) -> str:
+    unsigned = dict(manifest)
+    unsigned.pop("bundle_hash", None)
+    return canonical_hash(unsigned)
+
+
+def _source_preflight(repo_root: Path) -> dict[str, Any]:
+    record = _verified_file(
+        repo_root, SOURCE_MANIFEST_RELATIVE_PATH, SOURCE_MANIFEST_SHA256
+    )
+    source_path = repo_root / SOURCE_MANIFEST_RELATIVE_PATH
+    manifest = _load_json(source_path)
+    if manifest.get("bundle_hash") != SOURCE_BUNDLE_SHA256:
+        raise ValueError("frozen original-filings bundle hash mismatch")
+    if _bundle_unsigned_hash(manifest) != SOURCE_BUNDLE_SHA256:
+        raise ValueError("original-filings bundle canonical hash mismatch")
+    metadata = manifest.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError("source manifest metadata is absent")
+    keys = (
+        "candidate_count",
+        "hydrated_count",
+        "acceptance_timestamp_pass_count",
+        "error_count",
+    )
+    counts = {key: metadata.get(key) for key in keys}
+    if not all(isinstance(value, int) for value in counts.values()):
+        raise ValueError("source manifest count fields are invalid")
+    errors = _status_errors(source_path.parent)
+    if len(errors) != counts["error_count"]:
+        raise ValueError("bundle error count does not match partition statuses")
+    census = _source_inventory_census(source_path.parent, errors)
+    census_failures = []
+    if census["raw_inventory_rows"] != counts["hydrated_count"]:
+        census_failures.append("raw_inventory_rows_do_not_equal_hydrated_count")
+    if census["unique_inventory_accessions"] != counts["hydrated_count"]:
+        census_failures.append("unique_inventory_accessions_do_not_equal_hydrated_count")
+    if census["duplicate_inventory_accessions"]:
+        census_failures.append("duplicate_inventory_accessions")
+    if census["valid_payload_sha256_count"] != counts["hydrated_count"]:
+        census_failures.append("inventory_payload_hash_contract_incomplete")
+    if census["exact_acceptance_pass_count"] != counts["acceptance_timestamp_pass_count"]:
+        census_failures.append("acceptance_pass_count_mismatch")
+    if census["candidate_accession_count"] != counts["candidate_count"]:
+        census_failures.append("candidate_accession_count_mismatch")
+    candidate_count = counts["candidate_count"]
+    source_ready_count = min(
+        counts["hydrated_count"],
+        counts["acceptance_timestamp_pass_count"],
+        census["valid_payload_sha256_count"],
+    )
+    coverage = source_ready_count / candidate_count if candidate_count else 0.0
+    return {
+        "record": record,
+        "bundle_root": source_path.parent,
+        "manifest": manifest,
+        "counts": counts,
+        "source_candidate_count": candidate_count,
+        "source_hydrated_count": source_ready_count,
+        "coverage": coverage,
+        "inventory_census": census,
+        "inventory_census_failures": census_failures,
+        "errors": errors,
+        "excluded_accessions": sorted(
+            item["accession"] for item in errors if item.get("accession")
+        ),
+        "gate_pass": coverage >= AGGREGATE_ORIGINAL_COVERAGE_MIN
+        and not census_failures,
+    }
+
+
+def _read_readiness_bound_file(
+    repo_root: Path, readiness_relative_path: str, readiness_sha256: str
+) -> tuple[dict[str, Any], Path, dict[str, Any]]:
+    readiness_record = _verified_file(
+        repo_root, readiness_relative_path, readiness_sha256
+    )
+    readiness = _load_json(repo_root / readiness_relative_path)
+    files = readiness.get("data_files")
+    if not isinstance(files, list) or len(files) != 1 or not isinstance(files[0], dict):
+        raise ValueError(f"readiness must bind exactly one file: {readiness_relative_path}")
+    relative_path = files[0].get("path")
+    expected_hash = files[0].get("sha256")
+    if not isinstance(relative_path, str) or not isinstance(expected_hash, str):
+        raise ValueError("readiness file record is invalid")
+    data_path = repo_root / relative_path
+    if not data_path.is_file():
+        raise ValueError(f"readiness-bound file is absent: {relative_path}")
+    if _sha256_file(data_path) != expected_hash:
+        raise ValueError(f"readiness-bound file hash mismatch: {relative_path}")
+    return readiness_record, data_path, files[0]
+
+
+def _load_earnings_events(
+    tape_path: Path, excluded_accessions: set[str]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    all_rows = 0
+    excluded_rows: list[dict[str, Any]] = []
+    duplicate_ids: list[str] = []
+    seen: set[str] = set()
+    challenge_boundary_encountered = False
+    prior_acceptance: datetime | None = None
+    with gzip.open(tape_path, "rt", encoding="utf-8") as stream:
         for line_number, line in enumerate(stream, start=1):
             payload = json.loads(line)
             if not isinstance(payload, dict):
                 raise ValueError(f"invalid Item 2.02 row at line {line_number}")
-            row_count += 1
-            event_id = payload.get("event_id")
-            if event_id in wanted:
-                matches.append(
+            all_rows += 1
+            accession = str(payload.get("event_id") or "")
+            accepted = parse_datetime(str(payload.get("acceptance_datetime_utc")))
+            if prior_acceptance is not None and accepted < prior_acceptance:
+                raise ValueError("Item 2.02 tape is not ordered by acceptance time")
+            prior_acceptance = accepted
+            accepted_date = accepted.date()
+            if accepted_date > VALIDATION_END:
+                challenge_boundary_encountered = True
+                break
+            if accepted_date < DISCOVERY_START:
+                continue
+            if accession in excluded_accessions:
+                excluded_rows.append(
                     {
-                        "event_id": event_id,
-                        "issuer_cik": payload.get("issuer_cik"),
-                        "form_type": payload.get("form_type"),
-                        "acceptance_datetime_utc": payload.get("acceptance_datetime_utc"),
-                        "source_document": payload.get("source_document"),
-                        "source_sha256": payload.get("source_sha256"),
-                        "event_class": payload.get("event_class"),
+                        "event_id": accession,
+                        "issuer_cik": _norm_cik(payload.get("issuer_cik")),
+                        "accepted_date": accepted_date.isoformat(),
+                        "acceptance_datetime_utc": accepted,
                     }
                 )
-    return row_count, matches
+                continue
+            if accession in seen:
+                duplicate_ids.append(accession)
+                continue
+            seen.add(accession)
+            events.append(
+                {
+                    "event_id": accession,
+                    "issuer_cik": _norm_cik(payload.get("issuer_cik")),
+                    "form_type": str(payload.get("form_type") or "").upper(),
+                    "acceptance": accepted,
+                    "items": str(payload.get("items") or ""),
+                    "source_sha256": payload.get("source_sha256"),
+                }
+            )
+    return events, {
+        "all_discovery_rows": all_rows,
+        "included_pre_outcome_rows": len(events),
+        "deterministically_excluded_missing_original_rows": excluded_rows,
+        "duplicate_event_ids": sorted(set(duplicate_ids)),
+        "challenge_boundary_encountered_then_scan_stopped": challenge_boundary_encountered,
+    }
 
 
-def _deferred_controls() -> list[dict[str, str]]:
-    return [
-        {"control": name, "status": "NOT_INSPECTED_SOURCE_GATE_FAILED"}
-        for name in (
-            "exact_acceptance_time_for_every_item_2_02_original",
-            "unique_reporter_mapping",
-            "unique_eligible_peer_mapping",
-            "validation_event_cluster_floor",
-            "validation_unique_peer_floor",
-            "validation_four_digit_sic_floor",
-            "deterministic_overlap_handling",
-            "reaction_and_holding_path_inventory",
-            "terminal_event_disposition",
+def _inventory_rows(bundle_root: Path) -> Iterator[tuple[str, dict[str, Any]]]:
+    for inventory_path in sorted((bundle_root / "data/inventory").glob("*.jsonl.gz")):
+        partition = inventory_path.name.split("_inventory", 1)[0]
+        with gzip.open(inventory_path, "rt", encoding="utf-8") as stream:
+            for line in stream:
+                payload = json.loads(line)
+                yield partition, payload
+
+
+def _source_inventory_census(
+    bundle_root: Path, source_errors: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    raw_rows = 0
+    accessions: Counter[str] = Counter()
+    valid_hashes = 0
+    exact_acceptance_passes = 0
+    for _, record in _inventory_rows(bundle_root):
+        raw_rows += 1
+        accession = str(record.get("accession_number") or "")
+        if accession:
+            accessions[accession] += 1
+        source_hash = record.get("source_sha256")
+        if isinstance(source_hash, str) and _SHA256.fullmatch(source_hash):
+            valid_hashes += 1
+        if (
+            record.get("acceptance_parse_status") == "PASS"
+            and record.get("acceptance_datetime_utc")
+        ):
+            exact_acceptance_passes += 1
+    error_accessions = {
+        str(item["accession"])
+        for item in source_errors
+        if item.get("accession")
+    }
+    duplicate_accessions = sorted(
+        accession for accession, count in accessions.items() if count != 1
+    )
+    return {
+        "raw_inventory_rows": raw_rows,
+        "unique_inventory_accessions": len(accessions),
+        "duplicate_inventory_accessions": duplicate_accessions,
+        "valid_payload_sha256_count": valid_hashes,
+        "exact_acceptance_pass_count": exact_acceptance_passes,
+        "error_accession_count": len(error_accessions),
+        "candidate_accession_count": len(set(accessions) | error_accessions),
+    }
+
+
+def _validate_event_inventory(
+    events: Sequence[dict[str, Any]], bundle_root: Path
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Path]]:
+    wanted = {event["event_id"]: event for event in events}
+    found: dict[str, dict[str, Any]] = {}
+    partition_paths: dict[str, Path] = {}
+    failures: Counter[str] = Counter()
+    for partition, record in _inventory_rows(bundle_root):
+        accession = str(record.get("accession_number") or "")
+        if accession not in wanted:
+            continue
+        event = wanted[accession]
+        accepted = parse_datetime(str(record.get("acceptance_datetime_utc")))
+        valid = True
+        if _norm_cik(record.get("cik")) != event["issuer_cik"]:
+            failures["cik_mismatch"] += 1
+            valid = False
+        if accepted != event["acceptance"]:
+            failures["acceptance_mismatch"] += 1
+            valid = False
+        source_hash = record.get("source_sha256")
+        if not isinstance(source_hash, str) or not _SHA256.fullmatch(source_hash):
+            failures["invalid_source_hash"] += 1
+            valid = False
+        if record.get("acceptance_parse_status") != "PASS":
+            failures["acceptance_parse_not_pass"] += 1
+            valid = False
+        if accession in found:
+            failures["duplicate_inventory_accession"] += 1
+            valid = False
+        if valid:
+            enriched = dict(event)
+            enriched.update(
+                {
+                    "inventory_source_sha256": source_hash,
+                    "inventory_partition": partition,
+                    "source_filename": record.get("source_filename"),
+                }
+            )
+            found[accession] = enriched
+            partition_paths[partition] = bundle_root / "data/partitions" / f"{partition}.tar.gz"
+    failures["missing_inventory_row"] += len(set(wanted) - set(found))
+    included = [found[key] for key in sorted(found)]
+    return included, {
+        "attempted": len(events),
+        "included": len(included),
+        "failures": dict(sorted(failures.items())),
+        "coverage": len(included) / len(events) if events else 0.0,
+    }, partition_paths
+
+
+def _parse_sec_header(header_bytes: bytes) -> dict[str, Any]:
+    text = header_bytes.decode("latin-1", errors="replace")
+    if "</SEC-HEADER>" in text:
+        text = text.split("</SEC-HEADER>", 1)[0]
+    accession = _accession(text)
+    cik_match = _HEADER_CIK.search(text)
+    sic_matches = sorted(set(_HEADER_SIC.findall(text)))
+    accepted_match = _HEADER_ACCEPTANCE.search(text)
+    form_match = _HEADER_FORM.search(text)
+    items = [value.strip() for value in _HEADER_ITEM.findall(text)]
+    return {
+        "accession": accession,
+        "cik": _norm_cik(cik_match.group(1)) if cik_match else None,
+        "sic": sic_matches[0] if len(sic_matches) == 1 else None,
+        "sic_count": len(sic_matches),
+        "acceptance": (
+            datetime.strptime(accepted_match.group(1), "%Y%m%d%H%M%S")
+            .replace(tzinfo=_ET)
+            .astimezone(timezone.utc)
+            if accepted_match
+            else None
+        ),
+        "form_type": form_match.group(1).strip().upper() if form_match else None,
+        "items": items,
+        "item_2_02": any(
+            "2.02" in item or "results of operations and financial condition" in item.lower()
+            for item in items
+        ),
+    }
+
+
+def _scan_partition(args: tuple[str, str, str]) -> tuple[list[dict[str, Any]], list[str]]:
+    tar_name, inventory_name, cutoff_text = args
+    cutoff = date.fromisoformat(cutoff_text)
+    inventory: dict[str, dict[str, Any]] = {}
+    with gzip.open(inventory_name, "rt", encoding="utf-8") as stream:
+        for line in stream:
+            row = json.loads(line)
+            filed = _parse_date(row.get("filed_date"))
+            accession = str(row.get("accession_number") or "")
+            if filed and filed <= cutoff:
+                inventory[accession] = row
+    rows: list[dict[str, Any]] = []
+    failures: list[str] = []
+    if not inventory:
+        return rows, failures
+    remaining = set(inventory)
+    with tarfile.open(tar_name, mode="r|gz") as archive:
+        for member in archive:
+            accession = _accession(member.name)
+            if not accession or accession not in inventory or not member.isfile():
+                continue
+            source = archive.extractfile(member)
+            if source is None:
+                failures.append(f"{accession}:member_unreadable")
+                continue
+            digest = hashlib.sha256()
+            header = bytearray()
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                if len(header) < HEADER_LIMIT_BYTES:
+                    header.extend(chunk[: HEADER_LIMIT_BYTES - len(header)])
+            parsed = _parse_sec_header(bytes(header))
+            source_hash = digest.hexdigest()
+            expected = inventory[accession]
+            remaining.discard(accession)
+            checks = {
+                "member_accession": parsed["accession"] == accession,
+                "source_sha256": source_hash == expected.get("source_sha256"),
+                "cik": parsed["cik"] == _norm_cik(expected.get("cik")),
+                "acceptance": parsed["acceptance"]
+                == parse_datetime(str(expected.get("acceptance_datetime_utc"))),
+            }
+            if not all(checks.values()):
+                failures.append(
+                    f"{accession}:" + ",".join(key for key, passed in checks.items() if not passed)
+                )
+                continue
+            rows.append(
+                {
+                    "event_id": accession,
+                    "cik": parsed["cik"],
+                    "sic": parsed["sic"],
+                    "sic_count": parsed["sic_count"],
+                    "acceptance": parsed["acceptance"],
+                    "form_type": parsed["form_type"],
+                    "item_2_02": parsed["item_2_02"],
+                    "source_sha256": source_hash,
+                    "source_path": expected.get("source_filename") or member.name,
+                }
+            )
+            if not remaining:
+                break
+    missing = set(inventory) - {row["event_id"] for row in rows}
+    failures.extend(f"{accession}:missing_or_invalid_payload" for accession in sorted(missing))
+    return rows, failures
+
+
+def _scan_headers(
+    bundle_root: Path, max_workers: int
+) -> tuple[list[dict[str, Any]], list[str]]:
+    tasks = []
+    for inventory_path in sorted((bundle_root / "data/inventory").glob("*.jsonl.gz")):
+        partition = inventory_path.name.split("_inventory", 1)[0]
+        tar_path = bundle_root / "data/partitions" / f"{partition}.tar.gz"
+        if tar_path.is_file():
+            tasks.append((str(tar_path), str(inventory_path), VALIDATION_END.isoformat()))
+    rows: list[dict[str, Any]] = []
+    failures: list[str] = []
+    if max_workers == 1:
+        results = map(_scan_partition, tasks)
+    else:
+        executor = ProcessPoolExecutor(max_workers=max_workers)
+        results = executor.map(_scan_partition, tasks)
+    try:
+        for partition_rows, partition_failures in results:
+            rows.extend(partition_rows)
+            failures.extend(partition_failures)
+    finally:
+        if max_workers != 1:
+            executor.shutdown(wait=True)
+    rows.sort(key=lambda row: (row["acceptance"], row["event_id"]))
+    return rows, failures
+
+
+def _reaction_session(accepted: datetime, sessions: Sequence[date]) -> date | None:
+    local = accepted.astimezone(_ET)
+    index = bisect.bisect_left(sessions, local.date())
+    if index >= len(sessions):
+        return None
+    if sessions[index] == local.date() and local.timetz().replace(tzinfo=None) < time(9, 30):
+        return sessions[index]
+    if sessions[index] == local.date():
+        index += 1
+    return sessions[index] if index < len(sessions) else None
+
+
+def _quarter_start(value: date) -> date:
+    return date(value.year, ((value.month - 1) // 3) * 3 + 1, 1)
+
+
+def _load_csv(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8", newline="") as stream:
+        return list(csv.DictReader(stream))
+
+
+def _active(interval: Mapping[str, Any], when: date, start_key: str, end_key: str) -> bool:
+    start = _parse_date(interval.get(start_key))
+    end = _parse_date(interval.get(end_key))
+    return bool(start and start <= when and (end is None or when <= end))
+
+
+def _build_identity(repo_root: Path) -> dict[str, Any]:
+    identity_inputs = [
+        _verified_file(repo_root, SECURITY_MASTER_RELATIVE_PATH, SECURITY_MASTER_SHA256),
+        _verified_file(repo_root, MEMBERSHIP_RELATIVE_PATH, MEMBERSHIP_SHA256),
+        _verified_file(repo_root, CIK_MAPPING_RELATIVE_PATH, CIK_MAPPING_SHA256),
+    ]
+    security_rows = _load_csv(repo_root / SECURITY_MASTER_RELATIVE_PATH)
+    membership_rows = _load_csv(repo_root / MEMBERSHIP_RELATIVE_PATH)
+    mapping_rows = _load_csv(repo_root / CIK_MAPPING_RELATIVE_PATH)
+    memberships: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in membership_rows:
+        memberships[row["security_id"]].append(row)
+    security_by_id = {row["security_id"]: row for row in security_rows}
+    by_cik: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in mapping_rows:
+        cik = _norm_cik(row.get("cik"))
+        security = security_by_id.get(row.get("security_id", ""))
+        if not cik or security is None or security.get("category") != "Domestic Common Stock":
+            continue
+        joined = dict(row)
+        joined.update(
+            {
+                "firstpricedate": security.get("firstpricedate"),
+                "lastpricedate": security.get("lastpricedate"),
+            }
         )
+        by_cik[cik].append(joined)
+    for rows in by_cik.values():
+        rows.sort(key=lambda row: (row.get("effective_start", ""), row["security_id"]))
+    return {
+        "by_cik": by_cik,
+        "memberships": memberships,
+        "security_by_id": security_by_id,
+        "input_records": identity_inputs,
+    }
+
+
+def _unique_security(identity: Mapping[str, Any], cik: str, when: date) -> tuple[str | None, str]:
+    matches = []
+    for row in identity["by_cik"].get(cik, ()):
+        if not _active(row, when, "effective_start", "effective_end"):
+            continue
+        security_id = row["security_id"]
+        if any(
+            _active(item, when, "membership_start_date", "membership_end_date")
+            for item in identity["memberships"].get(security_id, ())
+        ):
+            matches.append(security_id)
+    matches = sorted(set(matches))
+    if len(matches) == 1:
+        return matches[0], "UNIQUE"
+    return None, "ABSENT" if not matches else "AMBIGUOUS"
+
+
+def _calendar_from_panel(panel_path: Path) -> list[date]:
+    import pyarrow.parquet as pq
+
+    sessions: set[date] = set()
+    parquet = pq.ParquetFile(panel_path)
+    for batch in parquet.iter_batches(columns=["date"], batch_size=262_144):
+        sessions.update(value for value in batch.column(0).to_pylist() if value <= VALIDATION_END)
+    return sorted(sessions)
+
+
+def _latest_sic_histories(headers: Sequence[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    histories: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in headers:
+        if row.get("cik") and row.get("sic"):
+            histories[row["cik"]].append(row)
+    return histories
+
+
+def _reported_in_quarter(
+    event_dates: Mapping[str, Sequence[datetime]], cik: str, quarter: date, cutoff: datetime
+) -> bool:
+    values = event_dates.get(cik, ())
+    left = bisect.bisect_left(values, datetime.combine(quarter, time.min, tzinfo=timezone.utc))
+    return left < len(values) and values[left] <= cutoff
+
+
+def _build_structural_clusters(
+    *,
+    events: Sequence[dict[str, Any]],
+    headers: Sequence[dict[str, Any]],
+    identity: Mapping[str, Any],
+    sessions: Sequence[date],
+    excluded_event_metadata: Sequence[Mapping[str, Any]] = (),
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    header_by_event = {row["event_id"]: row for row in headers}
+    event_dates: dict[str, list[datetime]] = defaultdict(list)
+    reporter_failures: Counter[str] = Counter()
+    reporter_rows = []
+    for event in events:
+        if event["issuer_cik"]:
+            event_dates[event["issuer_cik"]].append(event["acceptance"])
+    for event in excluded_event_metadata:
+        cik = event.get("issuer_cik")
+        accepted = event.get("acceptance_datetime_utc")
+        if isinstance(cik, str) and isinstance(accepted, datetime):
+            event_dates[cik].append(accepted)
+    for values in event_dates.values():
+        values.sort()
+    for event in events:
+        header = header_by_event.get(event["event_id"])
+        if header is None:
+            reporter_failures["missing_verified_header"] += 1
+            continue
+        if not header.get("item_2_02"):
+            reporter_failures["original_header_not_item_2_02"] += 1
+            continue
+        if header.get("sic_count") != 1 or not header.get("sic"):
+            reporter_failures["nonunique_or_missing_sic"] += 1
+            continue
+        if header.get("form_type") == "8-K/A":
+            reporter_failures["unresolved_amendment"] += 1
+            continue
+        reaction = _reaction_session(event["acceptance"], sessions)
+        if reaction is None:
+            reporter_failures["reaction_session_absent"] += 1
+            continue
+        security_id, mapping = _unique_security(identity, event["issuer_cik"], reaction)
+        if security_id is None:
+            reporter_failures[f"reporter_mapping_{mapping.lower()}"] += 1
+            continue
+        reporter_rows.append(
+            {
+                **event,
+                "sic": header["sic"],
+                "reaction_session": reaction,
+                "security_id": security_id,
+                "header_source_sha256": header["source_sha256"],
+                "header_source_path": header.get("source_path"),
+            }
+        )
+    grouped: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in reporter_rows:
+        grouped[(row["reaction_session"], row["sic"])].append(row)
+
+    headers_sorted = sorted(headers, key=lambda row: (row["acceptance"], row["event_id"]))
+    header_cursor = 0
+    current_sic: dict[str, str] = {}
+    current_sic_source: dict[str, dict[str, Any]] = {}
+    ciks_by_sic: dict[str, set[str]] = defaultdict(set)
+    ciks_by_division: dict[str, set[str]] = defaultdict(set)
+    peer_mapping: Counter[str] = Counter()
+    control_mapping: Counter[str] = Counter()
+    clusters: list[dict[str, Any]] = []
+    for (reaction, sic), reporters in sorted(grouped.items()):
+        cutoff = datetime.combine(reaction, time(16, 0), tzinfo=_ET).astimezone(timezone.utc)
+        while header_cursor < len(headers_sorted) and headers_sorted[header_cursor]["acceptance"] <= cutoff:
+            update = headers_sorted[header_cursor]
+            header_cursor += 1
+            cik = update.get("cik")
+            new_sic = update.get("sic")
+            if not cik or not new_sic:
+                continue
+            old_sic = current_sic.get(cik)
+            if old_sic:
+                ciks_by_sic[old_sic].discard(cik)
+                ciks_by_division[old_sic[:2]].discard(cik)
+            current_sic[cik] = new_sic
+            current_sic_source[cik] = {
+                "event_id": update["event_id"],
+                "source_path": update.get("source_path"),
+                "source_sha256": update.get("source_sha256"),
+                "acceptance": update.get("acceptance"),
+            }
+            ciks_by_sic[new_sic].add(cik)
+            ciks_by_division[new_sic[:2]].add(cik)
+        reporter_ciks = sorted({row["issuer_cik"] for row in reporters})
+        reporter_set = set(reporter_ciks)
+
+        def map_potentials(
+            ciks: Iterable[str], counter: Counter[str], relevance: str
+        ) -> list[dict[str, Any]]:
+            potentials = []
+            for peer_cik in sorted(set(ciks) - reporter_set):
+                if _reported_in_quarter(
+                    event_dates, peer_cik, _quarter_start(reaction), cutoff
+                ):
+                    continue
+                counter["attempted"] += 1
+                security_id, mapping = _unique_security(identity, peer_cik, reaction)
+                if security_id is None:
+                    counter[mapping.lower()] += 1
+                else:
+                    counter["mapped"] += 1
+                potentials.append(
+                    {
+                        "cik": peer_cik,
+                        "security_id": security_id,
+                        "mapping_status": mapping,
+                        "relevance": relevance,
+                        "causal_sic_source": current_sic_source.get(peer_cik),
+                    }
+                )
+            return potentials
+
+        peers = map_potentials(
+            ciks_by_sic.get(sic, ()), peer_mapping, "FOUR_DIGIT_PEER"
+        )
+        control_ciks = ciks_by_division.get(sic[:2], ()) - ciks_by_sic.get(sic, set())
+        controls = map_potentials(
+            control_ciks, control_mapping, "TWO_DIGIT_INDUSTRY_CONTROL"
+        )
+        index = bisect.bisect_right(sessions, reaction)
+        if index + 4 >= len(sessions):
+            reporter_failures["holding_calendar_incomplete"] += len(reporters)
+            continue
+        entry = sessions[index]
+        exit_date = sessions[index + 4]
+        exit_cutoff = datetime.combine(
+            exit_date, time(16, 0), tzinfo=_ET
+        ).astimezone(timezone.utc)
+        peer_report_during_hold_security_ids = sorted(
+            {
+                item["security_id"]
+                for item in peers
+                if item.get("security_id")
+                and any(
+                    cutoff < accepted <= exit_cutoff
+                    for accepted in event_dates.get(item["cik"], ())
+                )
+            }
+        )
+        cluster_id = hashlib.sha256(
+            canonical_json(
+                {
+                    "reaction_session": reaction.isoformat(),
+                    "sic": sic,
+                    "reporter_event_ids": sorted(row["event_id"] for row in reporters),
+                }
+            ).encode()
+        ).hexdigest()[:20]
+        clusters.append(
+            {
+                "cluster_id": f"HYP015-{cluster_id}",
+                "reaction_session": reaction,
+                "entry_session": entry,
+                "exit_session": exit_date,
+                "sic": sic,
+                "reporter_event_ids": sorted(row["event_id"] for row in reporters),
+                "reporter_ciks": reporter_ciks,
+                "reporter_security_ids": sorted({row["security_id"] for row in reporters}),
+                "reporters": [
+                    {
+                        "accessions": sorted(
+                            row["event_id"]
+                            for row in reporters
+                            if row["security_id"] == security_id
+                        ),
+                        "cik": next(
+                            row["issuer_cik"]
+                            for row in reporters
+                            if row["security_id"] == security_id
+                        ),
+                        "security_id": security_id,
+                    }
+                    for security_id in sorted(
+                        {row["security_id"] for row in reporters}
+                    )
+                ],
+                "peers": peers,
+                "controls": controls,
+                "peer_report_during_hold_security_ids": (
+                    peer_report_during_hold_security_ids
+                ),
+                "potential_cluster_key": (
+                    f"{reaction.isoformat()}::{sic}::"
+                    + ",".join(sorted(row["event_id"] for row in reporters))
+                ),
+            }
+        )
+    mapping_rate = (
+        peer_mapping["mapped"] / peer_mapping["attempted"]
+        if peer_mapping["attempted"]
+        else 0.0
+    )
+    control_mapping_rate = (
+        control_mapping["mapped"] / control_mapping["attempted"]
+        if control_mapping["attempted"]
+        else 0.0
+    )
+    return clusters, {
+        "reporter_attempted": len(events),
+        "reporter_included": len(reporter_rows),
+        "reporter_failures": dict(sorted(reporter_failures.items())),
+        "peer_mapping": dict(sorted(peer_mapping.items())),
+        "peer_mapping_rate": mapping_rate,
+        "control_mapping": dict(sorted(control_mapping.items())),
+        "control_mapping_rate": control_mapping_rate,
+    }
+
+
+def _required_dates(cluster: Mapping[str, Any], sessions: Sequence[date]) -> tuple[list[date], list[date]]:
+    reaction = cluster["reaction_session"]
+    index = bisect.bisect_left(sessions, reaction)
+    reporter_dates = list(sessions[index - 20 : index + 1]) if index >= 20 else []
+    entry_index = bisect.bisect_left(sessions, cluster["entry_session"])
+    peer_dates = list(sessions[entry_index : entry_index + 5])
+    return reporter_dates, peer_dates
+
+
+def _scan_requested_market_rows(
+    panel_path: Path,
+    requests: Mapping[str, set[date]],
+    reaction_pairs: set[tuple[str, date]],
+) -> dict[tuple[str, date], dict[str, Any]]:
+    import pyarrow.parquet as pq
+
+    found: dict[tuple[str, date], dict[str, Any]] = {}
+    parquet = pq.ParquetFile(panel_path)
+    columns = [
+        "security_id",
+        "date",
+        "open",
+        "close",
+        "closeadj",
+        "dollar_ADV_20",
+        "corporate_action_id",
+        "delisting_return",
+        "terminal_return",
+        "adjustment_available_at",
+        "available_at",
+    ]
+    for batch in parquet.iter_batches(columns=columns, batch_size=262_144):
+        security_values = batch.column(0).to_pylist()
+        date_values = batch.column(1).to_pylist()
+        validity = {
+            name: batch.column(index).is_valid().to_pylist()
+            for index, name in enumerate(columns)
+            if index >= 2
+        }
+        corporate_action_values = batch.column(6).to_pylist()
+        adjustment_times = batch.column(9).to_pylist()
+        available_times = batch.column(10).to_pylist()
+        for index, (security_id, row_date) in enumerate(
+            zip(security_values, date_values)
+        ):
+            if row_date not in requests.get(security_id, ()):
+                continue
+            key = (security_id, row_date)
+            available_at = available_times[index]
+            adjustment_at = adjustment_times[index]
+            if available_at is not None and available_at.tzinfo is None:
+                available_at = available_at.replace(tzinfo=timezone.utc)
+            if adjustment_at is not None and adjustment_at.tzinfo is None:
+                adjustment_at = adjustment_at.replace(tzinfo=timezone.utc)
+            corporate_action_id = corporate_action_values[index]
+            corporate_action_present = bool(
+                isinstance(corporate_action_id, str) and corporate_action_id.strip()
+            )
+            record = {
+                "row_present": True,
+                "open_valid": validity["open"][index],
+                "close_valid": validity["close"][index],
+                "closeadj_valid": validity["closeadj"][index],
+                "available_at": available_at,
+                "adjustment_available_at": adjustment_at,
+                "corporate_action_present": corporate_action_present,
+                "corporate_action_lineage_present": bool(
+                    not corporate_action_present
+                    or (
+                        validity["closeadj"][index]
+                        and adjustment_at is not None
+                    )
+                ),
+                "terminal_value_present": bool(
+                    validity["delisting_return"][index]
+                    or validity["terminal_return"][index]
+                ),
+            }
+            if key in found:
+                record["duplicate_row"] = True
+            if key in reaction_pairs:
+                close_value = batch.column(3)[index].as_py()
+                adv_value = batch.column(5)[index].as_py()
+                record.update(
+                    {
+                        "reaction_close_valid": close_value is not None
+                        and math.isfinite(close_value),
+                        "price_floor_pass": close_value is not None
+                        and math.isfinite(close_value)
+                        and close_value >= PRICE_FLOOR,
+                        "adv_valid": adv_value is not None
+                        and math.isfinite(adv_value),
+                        "adv_floor_pass": adv_value is not None
+                        and math.isfinite(adv_value)
+                        and adv_value >= ADV_FLOOR,
+                    }
+                )
+            found[key] = record
+    return found
+
+
+def _lineage_complete(
+    found: Mapping[tuple[str, date], Mapping[str, Any]],
+    security_id: str,
+    required_dates: Sequence[date],
+    *,
+    require_entry_open: bool,
+    selection_deadline: datetime | None = None,
+) -> bool:
+    if not required_dates:
+        return False
+    for offset, row_date in enumerate(required_dates):
+        row = found.get((security_id, row_date), {})
+        if (
+            not row.get("row_present")
+            or row.get("duplicate_row")
+            or not row.get("closeadj_valid")
+            or not row.get("corporate_action_lineage_present")
+            or row.get("terminal_value_present")
+            or (require_entry_open and offset == 0 and not row.get("open_valid"))
+        ):
+            return False
+        if selection_deadline is not None:
+            available_at = row.get("available_at")
+            if not isinstance(available_at, datetime) or available_at > selection_deadline:
+                return False
+            if row.get("corporate_action_present"):
+                adjustment_at = row.get("adjustment_available_at")
+                if (
+                    not isinstance(adjustment_at, datetime)
+                    or adjustment_at > selection_deadline
+                ):
+                    return False
+    return True
+
+
+def _apply_path_liquidity_overlap(
+    *, clusters: list[dict[str, Any]], sessions: Sequence[date], identity: Mapping[str, Any], panel_path: Path
+) -> dict[str, Any]:
+    requests: dict[str, set[date]] = defaultdict(set)
+    reaction_pairs: set[tuple[str, date]] = set()
+    for cluster in clusters:
+        reporter_dates, peer_dates = _required_dates(cluster, sessions)
+        cluster["reporter_required_sessions"] = reporter_dates
+        cluster["peer_required_sessions"] = peer_dates
+        for security_id in cluster["reporter_security_ids"]:
+            requests[security_id].update(reporter_dates)
+            reaction_pairs.add((security_id, cluster["reaction_session"]))
+        for candidate in (*cluster["peers"], *cluster["controls"]):
+            security_id = candidate.get("security_id")
+            if not security_id:
+                continue
+            requests[security_id].update(peer_dates)
+            requests[security_id].add(cluster["reaction_session"])
+            reaction_pairs.add((security_id, cluster["reaction_session"]))
+    found = _scan_requested_market_rows(panel_path, requests, reaction_pairs)
+    path_failures: Counter[str] = Counter()
+    included_peer_ids: set[str] = set()
+    included_sics: set[str] = set()
+    validation_clusters = 0
+    mapping_path_counts: Counter[str] = Counter()
+    for cluster in clusters:
+        entry_decision = datetime.combine(
+            cluster["entry_session"], time(9, 30), tzinfo=_ET
+        ).astimezone(timezone.utc)
+        reporter_lineage_ok = True
+        reporter_universe_ok = True
+        for security_id in cluster["reporter_security_ids"]:
+            if not _lineage_complete(
+                found,
+                security_id,
+                cluster["reporter_required_sessions"],
+                require_entry_open=False,
+                selection_deadline=entry_decision,
+            ):
+                path_failures["reporter_reaction_or_history_path_missing"] += 1
+                reporter_lineage_ok = False
+            reaction_record = found.get((security_id, cluster["reaction_session"]), {})
+            if not reaction_record.get("price_floor_pass") or not reaction_record.get("adv_floor_pass"):
+                path_failures["reporter_contemporaneous_liquidity_fail"] += 1
+                reporter_universe_ok = False
+
+        def qualify_pool(
+            rows: Sequence[dict[str, Any]], pool_name: str
+        ) -> list[dict[str, Any]]:
+            included = []
+            for candidate in rows:
+                mapping_path_counts[f"{pool_name}_potential"] += 1
+                security_id = candidate.get("security_id")
+                if not security_id:
+                    candidate["exclusion_reason"] = (
+                        f"{pool_name}_mapping_{candidate['mapping_status'].lower()}"
+                    )
+                    candidate["exclusion_class"] = "LINEAGE_MISSING"
+                    path_failures[candidate["exclusion_reason"]] += 1
+                    continue
+                mapping_path_counts[f"{pool_name}_mapped"] += 1
+                path_ok = _lineage_complete(
+                    found,
+                    security_id,
+                    cluster["peer_required_sessions"],
+                    require_entry_open=True,
+                )
+                if not path_ok:
+                    terminal_required = any(
+                        found.get((security_id, value), {}).get(
+                            "terminal_value_present"
+                        )
+                        for value in cluster["peer_required_sessions"]
+                    )
+                    candidate["exclusion_reason"] = (
+                        f"{pool_name}_terminal_outcome_required"
+                        if terminal_required
+                        else f"{pool_name}_holding_path_or_lineage_incomplete"
+                    )
+                    candidate["exclusion_class"] = "LINEAGE_MISSING"
+                    path_failures[candidate["exclusion_reason"]] += 1
+                    security = identity["security_by_id"].get(security_id, {})
+                    last_price = _parse_date(security.get("lastpricedate"))
+                    if last_price and last_price < cluster["exit_session"]:
+                        candidate["terminal_disposition"] = "UNRESOLVED_INSIDE_WINDOW"
+                        path_failures[
+                            f"{pool_name}_unresolved_terminal_inside_holding_window"
+                        ] += 1
+                    continue
+                mapping_path_counts[f"{pool_name}_path_complete"] += 1
+                reaction_record = found.get(
+                    (security_id, cluster["reaction_session"]), {}
+                )
+                if (
+                    not isinstance(reaction_record.get("available_at"), datetime)
+                    or reaction_record["available_at"] > entry_decision
+                    or (
+                        reaction_record.get("corporate_action_present")
+                        and (
+                            not isinstance(
+                                reaction_record.get("adjustment_available_at"),
+                                datetime,
+                            )
+                            or reaction_record["adjustment_available_at"]
+                            > entry_decision
+                        )
+                    )
+                ):
+                    candidate["exclusion_reason"] = (
+                        f"{pool_name}_selection_input_not_available_by_entry"
+                    )
+                    candidate["exclusion_class"] = "LINEAGE_MISSING"
+                    path_failures[candidate["exclusion_reason"]] += 1
+                    continue
+                if not reaction_record.get("price_floor_pass"):
+                    candidate["exclusion_reason"] = f"{pool_name}_price_floor_fail"
+                    candidate["exclusion_class"] = "UNIVERSE_INELIGIBLE"
+                    path_failures[candidate["exclusion_reason"]] += 1
+                    continue
+                if not reaction_record.get("adv_floor_pass"):
+                    candidate["exclusion_reason"] = f"{pool_name}_adv_floor_fail"
+                    candidate["exclusion_class"] = "UNIVERSE_INELIGIBLE"
+                    path_failures[candidate["exclusion_reason"]] += 1
+                    continue
+                candidate["included"] = True
+                candidate["terminal_disposition"] = "COMPLETE_THROUGH_EXIT"
+                candidate["terminal_outcome_required"] = False
+                candidate["overlap_key"] = security_id
+                candidate["overlap_entry_session"] = cluster["entry_session"]
+                candidate["overlap_exit_session"] = cluster["exit_session"]
+                included.append(candidate)
+            return included
+
+        eligible_peers = qualify_pool(cluster["peers"], "peer")
+        eligible_controls = qualify_pool(cluster["controls"], "control")
+        cluster["reporter_lineage_pass"] = reporter_lineage_ok
+        cluster["reporter_universe_eligible"] = reporter_universe_ok
+        cluster["included_peers"] = eligible_peers if reporter_lineage_ok else []
+        cluster["included_controls"] = eligible_controls if reporter_lineage_ok else []
+        cluster["structural_breadth_pass"] = bool(
+            reporter_lineage_ok
+            and reporter_universe_ok
+            and len(eligible_peers) >= 3
+            and len(eligible_controls) >= 1
+        )
+        cluster["emitted_evaluator_eligible"] = cluster["structural_breadth_pass"]
+        cluster["potential_overlap_inputs_complete"] = cluster[
+            "emitted_evaluator_eligible"
+        ] and all(
+            candidate.get("overlap_key")
+            and candidate.get("overlap_entry_session")
+            and candidate.get("overlap_exit_session")
+            for candidate in (*eligible_peers, *eligible_controls)
+        )
+        if cluster["emitted_evaluator_eligible"] and VALIDATION_START <= cluster["reaction_session"] <= VALIDATION_END:
+            validation_clusters += 1
+            included_peer_ids.update(peer["security_id"] for peer in eligible_peers)
+            included_sics.add(cluster["sic"])
+    peer_path_rate = (
+        mapping_path_counts["peer_path_complete"] / mapping_path_counts["peer_mapped"]
+        if mapping_path_counts["peer_mapped"]
+        else 0.0
+    )
+    control_path_rate = (
+        mapping_path_counts["control_path_complete"]
+        / mapping_path_counts["control_mapped"]
+        if mapping_path_counts["control_mapped"]
+        else 0.0
+    )
+    return {
+        "path_failures": dict(sorted(path_failures.items())),
+        "mapping_path_counts": dict(sorted(mapping_path_counts.items())),
+        "peer_path_coverage": peer_path_rate,
+        "control_path_coverage": control_path_rate,
+        "validation_structural_cluster_count": validation_clusters,
+        "validation_structural_unique_peer_count": len(included_peer_ids),
+        "validation_structural_four_digit_sic_count": len(included_sics),
+        "structural_counts_are_pre_signal": True,
+        "actual_qualifying_counts_rechecked_by_outcome_evaluator": True,
+        "overlap_applied_pre_signal": False,
+        "actual_overlap_deferred_until_qualifying_clusters_are_known": True,
+    }
+
+
+def _build_exclusions_and_missingness(
+    *,
+    source_errors: Sequence[Mapping[str, Any]],
+    event_audit: Mapping[str, Any],
+    included_events: Sequence[Mapping[str, Any]],
+    headers: Sequence[Mapping[str, Any]],
+    clusters: Sequence[Mapping[str, Any]],
+    checked_at: datetime,
+    sessions: Sequence[date],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    exclusions: list[dict[str, Any]] = []
+    coverage_rows: list[dict[str, Any]] = []
+    header_by_event = {row["event_id"]: row for row in headers}
+    included_reporter_ids = {
+        event_id
+        for cluster in clusters
+        if cluster.get("reporter_lineage_pass") is True
+        for event_id in cluster["reporter_event_ids"]
+    }
+    source_error_by_accession = {
+        item.get("accession"): item for item in source_errors if item.get("accession")
+    }
+
+    def base_exclusion(
+        *,
+        stage: str,
+        reason: str,
+        event_id: str | None,
+        cluster_id: str | None,
+        year: str,
+        sic: str,
+        issuer_cik: str,
+        relevance: str,
+        source_path: str | None,
+        source_status: str,
+        potential_cluster_key: str,
+        adverse_sensitivity_eligible: bool,
+        reaction_session: date | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "stage": stage,
+            "reason": reason,
+            "event_id": event_id,
+            "cluster_id": cluster_id,
+            "year": year,
+            "sic": sic,
+            "sic4": sic,
+            "issuer_cik": issuer_cik,
+            "relevance": relevance,
+            "source_path": source_path or "UNAVAILABLE",
+            "source_status": source_status,
+            "sealed_at": checked_at,
+            "potential_cluster_key": potential_cluster_key,
+            "adverse_sensitivity_eligible": adverse_sensitivity_eligible,
+            "reaction_session": reaction_session,
+            "reaction_quarter": (
+                _quarter_start(reaction_session) if reaction_session else None
+            ),
+            "outcome_informed": False,
+        }
+
+    for item in event_audit["deterministically_excluded_missing_original_rows"]:
+        source_error = source_error_by_accession.get(item["event_id"], {})
+        accepted_at = item.get("acceptance_datetime_utc")
+        reaction_session = (
+            _reaction_session(accepted_at, sessions)
+            if isinstance(accepted_at, datetime)
+            else None
+        )
+        adverse_eligible = bool(
+            reaction_session
+            and VALIDATION_START <= reaction_session <= VALIDATION_END
+        )
+        row = base_exclusion(
+            stage="SOURCE",
+            reason="MISSING_ORIGINAL_DETERMINISTIC_EXCLUSION",
+            event_id=item["event_id"],
+            cluster_id=None,
+            year=str(item["accepted_date"])[:4],
+            sic="UNKNOWN",
+            issuer_cik=item.get("issuer_cik") or "UNKNOWN",
+            relevance="ITEM_2_02_REPORTER",
+            source_path=source_error.get("source_filename"),
+            source_status=str(source_error.get("error_type") or "SOURCE_ABSENT"),
+            potential_cluster_key=(
+                f"{reaction_session.isoformat() if reaction_session else 'UNKNOWN'}::"
+                f"UNKNOWN::{item['event_id']}"
+            ),
+            adverse_sensitivity_eligible=adverse_eligible,
+            reaction_session=reaction_session,
+        )
+        exclusions.append(row)
+        coverage_rows.append({**row, "lineage_complete": False})
+
+    for event in included_events:
+        header = header_by_event.get(event["event_id"], {})
+        lineage_complete = event["event_id"] in included_reporter_ids
+        row = {
+            "stage": "REPORTER",
+            "event_id": event["event_id"],
+            "year": str(event["acceptance"].year),
+            "sic": header.get("sic") or "UNKNOWN",
+            "issuer_cik": event.get("issuer_cik") or "UNKNOWN",
+            "relevance": "ITEM_2_02_REPORTER",
+            "lineage_complete": lineage_complete,
+        }
+        coverage_rows.append(row)
+        if not lineage_complete:
+            accepted_date = event["acceptance"].date()
+            exclusion = base_exclusion(
+                stage="REPORTER",
+                reason="REPORTER_CAUSAL_LINEAGE_EXCLUDED",
+                event_id=event["event_id"],
+                cluster_id=None,
+                year=str(event["acceptance"].year),
+                sic=header.get("sic") or "UNKNOWN",
+                issuer_cik=event.get("issuer_cik") or "UNKNOWN",
+                relevance="ITEM_2_02_REPORTER",
+                source_path=event.get("source_filename") or header.get("source_path"),
+                source_status="ORIGINAL_PRESENT_LINEAGE_INCOMPLETE",
+                potential_cluster_key=f"REPORTER::{event['event_id']}",
+                adverse_sensitivity_eligible=(
+                    VALIDATION_START <= accepted_date <= VALIDATION_END
+                ),
+            )
+            exclusions.append(exclusion)
+
+    for cluster in clusters:
+        year = str(cluster["reaction_session"].year)
+        for pool_name, relevance in (
+            ("peers", "POTENTIAL_PEER"),
+            ("controls", "PRIMARY_CONTROL"),
+        ):
+            for candidate in cluster[pool_name]:
+                lineage_complete = bool(
+                    candidate.get("mapping_status") == "UNIQUE"
+                    and candidate.get("exclusion_class") != "LINEAGE_MISSING"
+                )
+                row = {
+                    "stage": pool_name[:-1].upper(),
+                    "cluster_id": cluster["cluster_id"],
+                    "year": year,
+                    "sic": cluster["sic"],
+                    "issuer_cik": candidate.get("cik") or "UNKNOWN",
+                    "security_id": candidate.get("security_id"),
+                    "relevance": relevance,
+                    "lineage_complete": lineage_complete,
+                }
+                coverage_rows.append(row)
+                if candidate.get("included") is not True:
+                    is_lineage_missing = (
+                        candidate.get("exclusion_class") == "LINEAGE_MISSING"
+                    )
+                    source = candidate.get("causal_sic_source") or {}
+                    exclusion = base_exclusion(
+                        stage=pool_name[:-1].upper(),
+                        reason=candidate.get("exclusion_reason")
+                        or "REPORTER_CLUSTER_LINEAGE_EXCLUDED",
+                        event_id=source.get("event_id"),
+                        cluster_id=cluster["cluster_id"],
+                        year=year,
+                        sic=cluster["sic"],
+                        issuer_cik=candidate.get("cik") or "UNKNOWN",
+                        relevance=relevance,
+                        source_path=source.get("source_path"),
+                        source_status=(
+                            "LINEAGE_MISSING"
+                            if is_lineage_missing
+                            else "UNIVERSE_INELIGIBLE"
+                        ),
+                        potential_cluster_key=cluster["potential_cluster_key"],
+                        adverse_sensitivity_eligible=bool(
+                            is_lineage_missing
+                            and VALIDATION_START
+                            <= cluster["reaction_session"]
+                            <= VALIDATION_END
+                        ),
+                        reaction_session=cluster["reaction_session"],
+                    )
+                    exclusion["security_id"] = candidate.get("security_id")
+                    exclusions.append(exclusion)
+
+        if not cluster.get("emitted_evaluator_eligible"):
+            exclusions.append(
+                base_exclusion(
+                    stage="CLUSTER",
+                    reason="STRUCTURAL_CLUSTER_NOT_EVALUATOR_ELIGIBLE",
+                    event_id=None,
+                    cluster_id=cluster["cluster_id"],
+                    year=year,
+                    sic=cluster["sic"],
+                    issuer_cik=",".join(cluster["reporter_ciks"]),
+                    relevance="POTENTIAL_CLUSTER",
+                    source_path="NOT_APPLICABLE",
+                    source_status="STRUCTURAL_INELIGIBILITY",
+                    potential_cluster_key=cluster["potential_cluster_key"],
+                    adverse_sensitivity_eligible=False,
+                    reaction_session=cluster["reaction_session"],
+                )
+            )
+
+    dimensions: dict[str, dict[str, Counter[str]]] = {
+        name: {"denominator": Counter(), "missing": Counter()}
+        for name in ("year", "sic", "issuer_cik", "relevance")
+    }
+    for row in coverage_rows:
+        for dimension in dimensions:
+            key = str(row.get(dimension) or "UNKNOWN")
+            dimensions[dimension]["denominator"][key] += 1
+            if not row["lineage_complete"]:
+                dimensions[dimension]["missing"][key] += 1
+    total_denominator = len(coverage_rows)
+    total_missing = sum(not row["lineage_complete"] for row in coverage_rows)
+    coverage_by_dimension: dict[str, list[dict[str, Any]]] = {}
+    for dimension, counters in dimensions.items():
+        records = []
+        for key, denominator in sorted(counters["denominator"].items()):
+            missing = counters["missing"][key]
+            records.append(
+                {
+                    dimension: key,
+                    "denominator": denominator,
+                    "missing": missing,
+                    "coverage": (denominator - missing) / denominator,
+                    "missing_share": (
+                        missing / total_missing if total_missing else 0.0
+                    ),
+                    "denominator_share": (
+                        denominator / total_denominator if total_denominator else 0.0
+                    ),
+                }
+            )
+        coverage_by_dimension[dimension] = records
+    reporter_rows = [
+        row for row in coverage_rows if row["relevance"] == "ITEM_2_02_REPORTER"
+    ]
+    reporter_coverage = (
+        sum(row["lineage_complete"] for row in reporter_rows) / len(reporter_rows)
+        if reporter_rows
+        else 0.0
+    )
+    gate_reasons = []
+    if not coverage_rows:
+        gate_reasons.append("coverage_denominator_absent")
+    required_exclusion_fields = (
+        "reason",
+        "source_path",
+        "source_status",
+        "sealed_at",
+        "potential_cluster_key",
+        "adverse_sensitivity_eligible",
+    )
+    if any(
+        any(field not in item or item[field] is None for field in required_exclusion_fields)
+        for item in exclusions
+    ):
+        gate_reasons.append("exclusion_audit_contract_incomplete")
+    if any(
+        item.get("adverse_sensitivity_eligible") is True
+        and (
+            item.get("reaction_session") is None
+            or item.get("reaction_quarter") is None
+            or not item.get("potential_cluster_key")
+        )
+        for item in exclusions
+    ):
+        gate_reasons.append("adverse_sensitivity_mapping_unproven")
+    if reporter_coverage < AGGREGATE_ORIGINAL_COVERAGE_MIN:
+        gate_reasons.append("aggregate_reporter_coverage_below_99_9_percent")
+    for dimension in ("year", "sic"):
+        for record in coverage_by_dimension[dimension]:
+            if record["denominator"] >= 100 and record["coverage"] < 0.99:
+                gate_reasons.append(
+                    f"material_{dimension}_stratum_below_99_percent::{record[dimension]}"
+                )
+    for record in coverage_by_dimension["issuer_cik"]:
+        if record["denominator"] >= 20 and record["coverage"] < 0.95:
+            gate_reasons.append(
+                "material_issuer_stratum_below_95_percent::"
+                + record["issuer_cik"]
+            )
+    concentration_status = (
+        "LOW_COUNT_NOT_SEPARATELY_TESTABLE" if total_missing < 10 else "TESTED"
+    )
+    if total_missing >= 10:
+        for dimension in ("year", "sic"):
+            for record in coverage_by_dimension[dimension]:
+                if (
+                    record["missing_share"] >= 0.50
+                    and record["missing_share"]
+                    >= 2.0 * record["denominator_share"]
+                ):
+                    gate_reasons.append(
+                        f"missingness_concentrated_by_{dimension}::{record[dimension]}"
+                    )
+        for record in coverage_by_dimension["issuer_cik"]:
+            if record["missing"] >= 3 and record["missing_share"] >= 0.25:
+                gate_reasons.append(
+                    "missingness_concentrated_by_issuer::" + record["issuer_cik"]
+                )
+    selection_reasons = [
+        "selection_related_exclusion"
+        for item in exclusions
+        if item.get("outcome_informed") is True
+    ]
+    gate_reasons.extend(selection_reasons)
+    return exclusions, {
+        "source_error_count": len(source_errors),
+        "coverage_by_dimension": coverage_by_dimension,
+        "reporter_relevance_denominator": len(reporter_rows),
+        "reporter_relevance_missing": sum(
+            not row["lineage_complete"] for row in reporter_rows
+        ),
+        "reporter_relevance_coverage": reporter_coverage,
+        "structural_denominator": total_denominator,
+        "structural_missing": total_missing,
+        "concentration_status": concentration_status,
+        "exclusion_count": len(exclusions),
+        "selection_relation_flags": selection_reasons,
+        "selection_gate_pass": not gate_reasons,
+        "selection_gate_reasons": sorted(set(gate_reasons)),
+        "outcome_informed_exclusions": 0,
+    }
+
+
+def _gate_summary(
+    source: Mapping[str, Any],
+    inventory: Mapping[str, Any],
+    structural: Mapping[str, Any],
+    paths: Mapping[str, Any],
+    missingness: Mapping[str, Any],
+    clusters: Sequence[Mapping[str, Any]],
+    event_audit: Mapping[str, Any],
+    header_audit: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    reporter_coverage = (
+        structural["reporter_included"] / structural["reporter_attempted"]
+        if structural["reporter_attempted"]
+        else 0.0
+    )
+    controls = [
+        ("aggregate_original_coverage", source["coverage"] >= AGGREGATE_ORIGINAL_COVERAGE_MIN, source["coverage"], AGGREGATE_ORIGINAL_COVERAGE_MIN),
+        ("source_inventory_unique_count_hash_acceptance", not source.get("inventory_census_failures"), source.get("inventory_census_failures", ()), "no census failures"),
+        ("aggregate_reporter_inventory_coverage", inventory["coverage"] >= AGGREGATE_ORIGINAL_COVERAGE_MIN, inventory["coverage"], AGGREGATE_ORIGINAL_COVERAGE_MIN),
+        ("item_2_02_accession_uniqueness", not event_audit["duplicate_event_ids"], len(event_audit["duplicate_event_ids"]), 0),
+        ("aggregate_original_header_integrity", header_audit["coverage"] >= AGGREGATE_ORIGINAL_COVERAGE_MIN, header_audit["coverage"], AGGREGATE_ORIGINAL_COVERAGE_MIN),
+        ("aggregate_event_time_sic_coverage", header_audit["sic_coverage"] >= PEER_MAPPING_COVERAGE_MIN, header_audit["sic_coverage"], PEER_MAPPING_COVERAGE_MIN),
+        ("aggregate_reporter_causal_coverage", reporter_coverage >= AGGREGATE_ORIGINAL_COVERAGE_MIN, reporter_coverage, AGGREGATE_ORIGINAL_COVERAGE_MIN),
+        ("eligible_peer_mapping", structural["peer_mapping_rate"] >= PEER_MAPPING_COVERAGE_MIN, structural["peer_mapping_rate"], PEER_MAPPING_COVERAGE_MIN),
+        ("potential_control_mapping", structural["control_mapping_rate"] >= PEER_MAPPING_COVERAGE_MIN, structural["control_mapping_rate"], PEER_MAPPING_COVERAGE_MIN),
+        ("eligible_peer_path_coverage", paths["peer_path_coverage"] >= PEER_MAPPING_COVERAGE_MIN, paths["peer_path_coverage"], PEER_MAPPING_COVERAGE_MIN),
+        ("potential_control_path_coverage", paths["control_path_coverage"] >= PEER_MAPPING_COVERAGE_MIN, paths["control_path_coverage"], PEER_MAPPING_COVERAGE_MIN),
+        ("included_reporter_peer_control_lineage", all(
+            cluster.get("reporter_lineage_pass")
+            and all(
+                item.get("included")
+                and item.get("terminal_disposition") == "COMPLETE_THROUGH_EXIT"
+                and item.get("terminal_outcome_required") is False
+                for item in (
+                    *cluster.get("included_peers", ()),
+                    *cluster.get("included_controls", ()),
+                )
+            )
+            for cluster in clusters if cluster.get("emitted_evaluator_eligible")
+        ), "100% included rows", "100% included rows"),
+        ("validation_structural_clusters", paths["validation_structural_cluster_count"] >= MIN_VALIDATION_CLUSTERS, paths["validation_structural_cluster_count"], MIN_VALIDATION_CLUSTERS),
+        ("validation_structural_unique_peers", paths["validation_structural_unique_peer_count"] >= MIN_VALIDATION_PEERS, paths["validation_structural_unique_peer_count"], MIN_VALIDATION_PEERS),
+        ("validation_structural_four_digit_sics", paths["validation_structural_four_digit_sic_count"] >= MIN_VALIDATION_SICS, paths["validation_structural_four_digit_sic_count"], MIN_VALIDATION_SICS),
+        ("potential_overlap_inputs_complete", all(cluster.get("potential_overlap_inputs_complete") for cluster in clusters if cluster.get("emitted_evaluator_eligible")), "inventoried_not_applied", "apply only after signal qualification"),
+        ("missingness_selection_diagnostics", missingness.get("selection_gate_pass") is True, missingness.get("selection_gate_reasons", ()), "complete and outcome-blind"),
+    ]
+    return [
+        {"control": name, "status": "PASS" if passed else "FAIL", "observed": observed, "required": required}
+        for name, passed, observed, required in controls
     ]
 
 
+def _write_jsonl_gz(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
+    with path.open("wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
+            with io.TextIOWrapper(compressed, encoding="utf-8", newline="") as stream:
+                for row in rows:
+                    stream.write(canonical_json(row) + "\n")
+
+
+def _manifest_rows(clusters: Sequence[Mapping[str, Any]]) -> Iterator[dict[str, Any]]:
+    for cluster in clusters:
+        if not cluster.get("emitted_evaluator_eligible"):
+            continue
+        yield {
+            "schema_version": "caerus_hyp015_structural_cluster_v2",
+            "cluster_id": cluster["cluster_id"],
+            "reaction_session": cluster["reaction_session"],
+            "reaction_quarter": _quarter_start(cluster["reaction_session"]),
+            "entry_session": cluster["entry_session"],
+            "exit_session": cluster["exit_session"],
+            "four_digit_sic": cluster["sic"],
+            "contributing_reporter_event_ids": cluster["reporter_event_ids"],
+            "reporter_ciks": cluster["reporter_ciks"],
+            "reporter_security_ids": cluster["reporter_security_ids"],
+            "reporters": cluster["reporters"],
+            "structural_peer_attempt_count": len(cluster["peers"]),
+            "potential_peer_security_ids": sorted(
+                item["security_id"]
+                for item in cluster["peers"]
+                if item.get("security_id")
+            ),
+            "included_peer_security_ids": sorted(
+                peer["security_id"] for peer in cluster.get("included_peers", ())
+            ),
+            "potential_control_attempt_count": len(cluster["controls"]),
+            "industry_control_security_ids": sorted(
+                item["security_id"]
+                for item in cluster.get("included_controls", ())
+            ),
+            "peer_report_during_hold_security_ids": cluster[
+                "peer_report_during_hold_security_ids"
+            ],
+            "potential_cluster_key": cluster["potential_cluster_key"],
+            "overlap_inputs": [
+                {
+                    "security_id": item["security_id"],
+                    "entry_session": item["overlap_entry_session"],
+                    "exit_session": item["overlap_exit_session"],
+                    "role": item["relevance"],
+                }
+                for item in (
+                    *cluster.get("included_peers", ()),
+                    *cluster.get("included_controls", ()),
+                )
+            ],
+            "overlap_applied": False,
+            "terminal_outcome_required": False,
+            "reporter_lineage_pass": cluster.get("reporter_lineage_pass", False),
+            "structural_breadth_pass": cluster.get("structural_breadth_pass", False),
+            "reaction_value_accessed": False,
+            "forward_return_accessed": False,
+        }
+
+
+def _write_append_only_bundle(
+    *,
+    repo_root: Path,
+    run_id: str,
+    result: Mapping[str, Any],
+    clusters: Sequence[Mapping[str, Any]],
+    exclusions: Sequence[Mapping[str, Any]],
+) -> tuple[Path, dict[str, Any]]:
+    research_root = (repo_root / "outputs/research/alpha_lab").resolve()
+    hypothesis_root = research_root / HYPOTHESIS_ID
+    final_dir = hypothesis_root / run_id
+    if final_dir.exists():
+        raise FileExistsError(f"research run already exists: {final_dir}")
+    staging_root = hypothesis_root / ".staging"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f"{run_id}.", dir=staging_root))
+    try:
+        result_path = staging / "result.json"
+        result_path.write_text(canonical_json(result) + "\n", encoding="utf-8")
+        eligibility_path = staging / "eligibility_manifest.jsonl.gz"
+        _write_jsonl_gz(eligibility_path, _manifest_rows(clusters))
+        exclusion_path = staging / "exclusion_manifest.jsonl.gz"
+        _write_jsonl_gz(exclusion_path, exclusions)
+        files = [
+            {"name": path.name, "bytes": path.stat().st_size, "sha256": _sha256_file(path)}
+            for path in (result_path, eligibility_path, exclusion_path)
+        ]
+        manifest = {
+            "schema_version": "caerus_alpha_lab_hyp015_evidence_bundle_v2",
+            "classification": "RESEARCH_ONLY_NON_EXECUTIONAL_NO_RETURN",
+            "run_id": run_id,
+            "hypothesis_id": HYPOTHESIS_ID,
+            "files": files,
+            "credentials_persisted": False,
+            "trading_behavior_changed": False,
+            "reporter_reaction_accessed": False,
+            "forward_return_accessed": False,
+            "challenge_accessed": False,
+            "bundle_hash": canonical_hash(files),
+        }
+        (staging / "manifest.json").write_text(
+            canonical_json(manifest) + "\n", encoding="utf-8"
+        )
+        hypothesis_root.mkdir(parents=True, exist_ok=True)
+        os.replace(staging, final_dir)
+        return final_dir, manifest
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
 def run_gate(
-    *, repo_root: Path, run_id: str, checked_at: datetime
+    *,
+    repo_root: Path,
+    run_id: str,
+    checked_at: datetime,
+    max_workers: int = 4,
+    enforce_canonical_gcp: bool = True,
 ) -> dict[str, Any]:
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError("run_id must be a path-safe research identifier")
     repo_root = repo_root.resolve()
-    research_root = (repo_root / "outputs/research/alpha_lab").resolve()
-    run_dir = (research_root / HYPOTHESIS_ID / run_id).resolve()
-    run_dir.relative_to(research_root)
-    if run_dir.exists():
-        raise FileExistsError(f"research run already exists: {run_dir}")
+    if enforce_canonical_gcp and repo_root != CANONICAL_GCP_REPO_ROOT:
+        raise ValueError(
+            "HYP-2026-015 evidence writes require the canonical GCP Alpha Lab root"
+        )
     spec = _verify_spec(repo_root)
-    code_record = {
-        "path": RUNNER_RELATIVE_PATH,
-        "sha256": _sha256_file(Path(__file__).resolve()),
-    }
-    source_record = _verified_file(
-        repo_root, SOURCE_MANIFEST_RELATIVE_PATH, SOURCE_MANIFEST_SHA256
-    )
-    earnings_record = _verified_file(
+    addendum = _verify_addendum(repo_root)
+    source = _source_preflight(repo_root)
+    if not source["gate_pass"]:
+        raise ValueError("aggregate original coverage is below Addendum 001's 99.9% gate")
+    earnings_record, tape_path, tape_file_record = _read_readiness_bound_file(
         repo_root, EARNINGS_READINESS_RELATIVE_PATH, EARNINGS_READINESS_SHA256
     )
-    prices_record = _verified_file(
+    events, event_audit = _load_earnings_events(
+        tape_path, set(source["excluded_accessions"])
+    )
+    included_events, inventory_audit, _ = _validate_event_inventory(
+        events, source["bundle_root"]
+    )
+    headers, header_failures = _scan_headers(source["bundle_root"], max_workers)
+    header_attempted = len(headers) + len(header_failures)
+    header_sic_count = sum(
+        row.get("sic_count") == 1 and bool(row.get("sic")) for row in headers
+    )
+    header_audit = {
+        "attempted_original_headers_through_2024": header_attempted,
+        "verified_header_rows": len(headers),
+        "failure_count": len(header_failures),
+        "coverage": len(headers) / header_attempted if header_attempted else 0.0,
+        "single_four_digit_sic_rows": header_sic_count,
+        "sic_coverage": header_sic_count / len(headers) if headers else 0.0,
+        "failures_by_reason": dict(
+            sorted(Counter(item.split(":", 1)[-1] for item in header_failures).items())
+        ),
+    }
+
+    prices_record, panel_path, panel_file_record = _read_readiness_bound_file(
         repo_root, PRICES_READINESS_RELATIVE_PATH, PRICES_READINESS_SHA256
     )
-
-    source_path = repo_root / SOURCE_MANIFEST_RELATIVE_PATH
-    source_manifest = _load_json(source_path)
-    if source_manifest.get("bundle_hash") != SOURCE_BUNDLE_SHA256:
-        raise ValueError("frozen original-filings bundle hash mismatch")
-    metadata = source_manifest.get("metadata")
-    if not isinstance(metadata, dict):
-        raise ValueError("source manifest metadata is absent")
-    candidate_count = metadata.get("candidate_count")
-    hydrated_count = metadata.get("hydrated_count")
-    acceptance_count = metadata.get("acceptance_timestamp_pass_count")
-    declared_error_count = metadata.get("error_count")
-    if not all(
-        isinstance(value, int)
-        for value in (candidate_count, hydrated_count, acceptance_count, declared_error_count)
-    ):
-        raise ValueError("source manifest count fields are invalid")
-
-    bundle_root = source_path.parent
-    errors = _status_errors(bundle_root)
-    if declared_error_count != len(errors):
-        raise ValueError("bundle error count does not match partition statuses")
-    missing_accessions = sorted(
-        accession
-        for accession in (_accession(item.get("source_filename")) for item in errors)
-        if accession is not None
-    )
-
-    earnings_readiness = _load_json(repo_root / EARNINGS_READINESS_RELATIVE_PATH)
-    data_files = earnings_readiness.get("data_files")
-    if not isinstance(data_files, list) or len(data_files) != 1:
-        raise ValueError("earnings readiness does not bind exactly one event tape")
-    tape_relative_path = data_files[0].get("path")
-    if not isinstance(tape_relative_path, str):
-        raise ValueError("earnings readiness event-tape path is invalid")
-    tape_path = repo_root / tape_relative_path
-    if not tape_path.is_file():
-        raise ValueError("earnings Item 2.02 event tape is absent")
-    tape_rows, missing_item_202 = _scan_item_202_tape(tape_path, missing_accessions)
-
-    prices_readiness = _load_json(repo_root / PRICES_READINESS_RELATIVE_PATH)
-    panel_hashes = {
-        item.get("sha256")
-        for item in prices_readiness.get("data_files", [])
-        if isinstance(item, dict)
-    }
-    if PRICES_PANEL_SHA256 not in panel_hashes:
+    if panel_file_record["sha256"] != PRICES_PANEL_SHA256:
         raise ValueError("observed-price readiness does not bind the frozen panel hash")
-
-    source_complete = (
-        declared_error_count == 0
-        and candidate_count == hydrated_count == acceptance_count
-        and not missing_item_202
+    sessions = _calendar_from_panel(panel_path)
+    identity = _build_identity(repo_root)
+    clusters, structural_audit = _build_structural_clusters(
+        events=included_events,
+        headers=headers,
+        identity=identity,
+        sessions=sessions,
+        excluded_event_metadata=event_audit[
+            "deterministically_excluded_missing_original_rows"
+        ],
     )
-    outcome = "SOURCE_READY" if source_complete else "BLOCKED_DATA"
-    if source_complete:
-        raise ValueError(
-            "source gate unexpectedly passed; this runner deliberately stops before "
-            "downstream identity, coverage, path, or outcome access"
-        )
-
-    coverage = (
-        f"{hydrated_count}/{candidate_count}" if candidate_count else "0/0"
+    path_audit = _apply_path_liquidity_overlap(
+        clusters=clusters, sessions=sessions, identity=identity, panel_path=panel_path
     )
+    exclusions, missingness = _build_exclusions_and_missingness(
+        source_errors=source["errors"],
+        event_audit=event_audit,
+        included_events=included_events,
+        headers=headers,
+        clusters=clusters,
+        checked_at=checked_at,
+        sessions=sessions,
+    )
+    controls = _gate_summary(
+        source,
+        inventory_audit,
+        structural_audit,
+        path_audit,
+        missingness,
+        clusters,
+        event_audit,
+        header_audit,
+    )
+    ready = all(item["status"] == "PASS" for item in controls)
     result = {
         "schema_version": SCHEMA_VERSION,
         "hypothesis_id": HYPOTHESIS_ID,
         "experiment_id": EXPERIMENT_ID,
         "run_id": run_id,
         "checked_at": checked_at,
-        "outcome": outcome,
+        "outcome": "READY_FOR_OUTCOME_REGISTRATION" if ready else "BLOCKED_DATA",
         "classification": "UNPROVEN",
-        "verdict": "ITERATE — BLOCKED_DATA",
         "spec": spec,
-        "frozen_inputs": {
-            "runner": code_record,
-            "source_manifest": source_record,
-            "source_bundle_sha256": SOURCE_BUNDLE_SHA256,
-            "earnings_readiness": earnings_record,
-            "observed_prices_readiness": prices_record,
-            "observed_prices_panel_sha256": PRICES_PANEL_SHA256,
+        "owner_addendum": addendum,
+        "runner": {"path": RUNNER_RELATIVE_PATH, "sha256": _sha256_file(Path(__file__))},
+        "source_manifest": source["record"],
+        "source_bundle_sha256": SOURCE_BUNDLE_SHA256,
+        "earnings_readiness": earnings_record,
+        "earnings_tape": tape_file_record,
+        "observed_prices_readiness": prices_record,
+        "observed_prices_panel": panel_file_record,
+        "identity_inputs": identity["input_records"],
+        "source_audit": {
+            "counts": source["counts"],
+            "source_candidate_count": source["source_candidate_count"],
+            "source_hydrated_count": source["source_hydrated_count"],
+            "coverage": source["coverage"],
+            "threshold": AGGREGATE_ORIGINAL_COVERAGE_MIN,
+            "inventory_census": source["inventory_census"],
+            "inventory_census_failures": source["inventory_census_failures"],
+            "deterministically_excluded_accessions": source["excluded_accessions"],
         },
-        "source_gate": {
-            "status": "FAIL",
-            "candidate_original_count": candidate_count,
-            "hydrated_original_count": hydrated_count,
-            "acceptance_timestamp_pass_count": acceptance_count,
-            "error_count": declared_error_count,
-            "source_coverage": coverage,
-            "item_2_02_discovery_row_count": tape_rows,
-            "missing_originals": errors,
-            "missing_originals_present_in_item_2_02_tape": missing_item_202,
-            "required_coverage": "100%",
-            "failure_reason": (
-                "At least one missing original filing belongs to the Item 2.02 "
-                "candidate tape, so exact original-source and acceptance-time "
-                "coverage cannot be certified at 100%."
-            ),
-        },
-        "deferred_controls": _deferred_controls(),
-        "return_data_accessed": False,
+        "item_2_02_audit": event_audit,
+        "included_event_inventory_audit": inventory_audit,
+        "header_audit": header_audit,
+        "structural_audit": structural_audit,
+        "path_overlap_audit": path_audit,
+        "missingness_concentration": missingness,
+        "exclusion_manifest_row_count": len(exclusions),
+        "eligibility_manifest_row_count": sum(
+            cluster.get("emitted_evaluator_eligible") is True for cluster in clusters
+        ),
+        "controls": controls,
+        "structural_counts_are_not_qualifying_signal_counts": True,
+        "outcome_evaluator_must_recheck_qualifying_cluster_peer_sic_floors": True,
+        "same_sic_same_reaction_reporters_preserved_without_aggregation": True,
+        "canonical_global_ledger_present": (
+            repo_root / "outputs/research/alpha_lab/ledger/research_events.v1.jsonl"
+        ).is_file(),
         "reporter_reaction_accessed": False,
         "forward_return_accessed": False,
         "validation_outcomes_accessed": False,
         "challenge_period_accessed": False,
         "statistical_trial_opened": False,
-        "canonical_global_ledger_present": (
-            repo_root
-            / "outputs/research/alpha_lab/ledger/research_events.v1.jsonl"
-        ).is_file(),
         "orders_submitted": False,
         "trading_behavior_changed": False,
         "next_executable_action": (
-            "Data Foundry must recover and hash every missing original SEC filing "
-            "into a new immutable source bundle, prove exact acceptance time, and "
-            "obtain owner approval to bind the replacement data snapshot before "
-            "rerunning this no-return gate."
+            "register the frozen family/wave/trial in the authenticated global ledger "
+            "and run the separately governed outcome evaluator"
+            if ready
+            else "remediate the failed no-return controls without changing the frozen signal"
         ),
         "boundary_attestation": (
-            "Research-only no-return source gate. No market return, reporter "
-            "reaction, validation outcome, challenge input, broker, order, "
-            "allocation, scheduler, cron, production, Paper, or Live surface "
-            "was accessed or changed."
+            "No reporter reaction, forward return, validation outcome, challenge input, "
+            "broker, order, allocation, scheduler, cron, Paper, Live, or production surface "
+            "was read or changed. Contemporaneous price/liquidity values were reduced to "
+            "eligibility booleans and were not persisted."
         ),
     }
-
-    run_dir.mkdir(parents=True, exist_ok=False)
-    result_path = run_dir / "result.json"
-    result_path.write_text(canonical_json(result) + "\n", encoding="utf-8")
-    receipt = {
-        "schema_version": "caerus_alpha_lab_hyp_2026_015_data_gate_receipt_v1",
-        "run_id": run_id,
-        "result_path": str(result_path.relative_to(repo_root)),
-        "result_sha256": _sha256_file(result_path),
-        "result_canonical_hash": canonical_hash(result),
-    }
-    receipt_path = run_dir / "receipt.json"
-    receipt_path.write_text(canonical_json(receipt) + "\n", encoding="utf-8")
-    store = AppendOnlyJSONLEventStore(
-        run_dir / "events.jsonl", research_root=research_root
+    run_dir, manifest = _write_append_only_bundle(
+        repo_root=repo_root,
+        run_id=run_id,
+        result=result,
+        clusters=clusters,
+        exclusions=exclusions,
     )
-    store.append(
-        event_id=f"{run_id}:started",
-        event_type="hyp_2026_015_no_return_gate_started",
-        occurred_at=checked_at,
-        recorded_at=checked_at,
-        payload={"spec_sha256": SPEC_SHA256, "outcome_data_accessed": False},
-    )
-    store.append(
-        event_id=f"{run_id}:blocked",
-        event_type="hyp_2026_015_no_return_gate_blocked_data",
-        occurred_at=checked_at,
-        recorded_at=checked_at,
-        payload={
-            "result_sha256": receipt["result_sha256"],
-            "source_coverage": coverage,
-            "error_count": declared_error_count,
-            "outcome_data_accessed": False,
-        },
-    )
-    return {
-        "run_dir": str(run_dir),
-        "result": result,
-        "receipt": receipt,
-    }
+    return {"run_dir": str(run_dir), "result": result, "manifest": manifest}
 
 
 def _parse_args() -> argparse.Namespace:
@@ -375,6 +1900,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--run-id")
     parser.add_argument("--checked-at")
+    parser.add_argument("--max-workers", type=int, default=4)
     return parser.parse_args()
 
 
@@ -387,15 +1913,16 @@ def main() -> int:
     )
     run_id = arguments.run_id or (
         checked_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        + "-hyp-2026-015-data-gate-v1"
+        + "-hyp-2026-015-no-return-gate-v2"
     )
     packet = run_gate(
         repo_root=arguments.repo_root.expanduser(),
         run_id=run_id,
         checked_at=checked_at,
+        max_workers=max(1, arguments.max_workers),
     )
     print(canonical_json(packet))
-    return 2 if packet["result"]["outcome"] == "BLOCKED_DATA" else 0
+    return 0 if packet["result"]["outcome"] == "READY_FOR_OUTCOME_REGISTRATION" else 2
 
 
 if __name__ == "__main__":
