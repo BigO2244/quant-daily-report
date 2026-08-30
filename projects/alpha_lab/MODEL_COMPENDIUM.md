@@ -44,6 +44,7 @@ This is not a parallel strategy registry or research ledger. Authority remains:
 | `EXP-2026-0011` | Net payout/share issuance | `DATA_BLOCKED` | Certified filing-time feature panel missing | Raw accounting facts are not model-ready until units, fiscal periods, restatements, and availability are resolved. |
 | `EXP-2026-0012` | Asset growth/investment | `DATA_BLOCKED` | Certified filing-time asset-growth panel missing | Factor familiarity does not excuse point-in-time feature construction; treat it as factor harvest unless residual evidence says otherwise. |
 | `EXP-2026-0013` | AI power/grid commitments | `ACTIVE_RESEARCH` / `DATA_BLOCKED` | Source-audited event tape still required; returns and challenge unread | The investable object must be an attributable, timestamped commitment with direct issuer exposure—not an AI/grid narrative or current-vintage control. |
+| `EXP-2026-0015` | Industry earnings-information diffusion | `FROZEN` / `NOT_RUN` | Freeze recorded; no outcome, holdout, challenge, or formal trial accessed | Use the reporter's causal post-filing reaction and event-time same-SIC peers; do not substitute analyst revisions, a relationship graph, generic momentum, or a threshold grid. |
 
 ## Strategy-registry inventory
 
@@ -128,10 +129,11 @@ hypothesis's mandatory **Memory-derived opportunity map and prior-model
 review** section. For `HYP-2026-015` onward, missing review evidence blocks
 freeze.
 
-The current discussion-stage industry earnings-information diffusion idea is
+The frozen `HYP-2026-015` industry earnings-information diffusion idea is
 potentially informative because it replaces unavailable analyst revisions and
-supplier graphs with observable, timestamped reporter reactions. It must still
-show that peer returns are not ordinary industry momentum.
+supplier graphs with observable, timestamped reporter reactions. It remains
+`UNPROVEN` and not authorized to run; it must still show that peer returns are
+not ordinary industry or raw momentum.
 
 ## Legacy-study intake queue
 
@@ -148,4 +150,3 @@ the legacy-study table above. `projects/alpha_lab/tests/test_model_compendium.py
 and `projects/alpha_lab/tests/test_model_memory_workflow.py` enforce inventory
 and workflow coverage; semantic lesson quality remains a required human and
 agent review responsibility.
-

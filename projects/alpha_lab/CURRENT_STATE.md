@@ -18,17 +18,21 @@ The active operating contract is now value-first:
   support, or parking the candidate; and
 - measure useful verdicts and decision latency instead of framework volume.
 
-The first discussion-stage candidate under this reset is industry
-earnings-information diffusion: test whether a large, volume-confirmed reaction
-to an early industry reporter predicts delayed returns in same-industry peers
-that have not yet reported. It is not frozen, authorized, or promotion-eligible.
+The first candidate under this reset is industry earnings-information
+diffusion: test whether a large, volume-confirmed reaction to an early industry
+reporter predicts delayed returns in same-industry peers that have not yet
+reported. Brett froze it as `HYP-2026-015` on 2026-08-30. It is not authorized
+to run, is not promotion-eligible, and has accessed no return or challenge
+outcome.
 Its initial read-only feasibility audit passed: the canonical GCP store has
 313,449 hydrated original 8-K/8-K-A filings with parsed acceptance timestamps,
 and `provider_readiness/pit_observed_prices_v1.json` certifies a 21,840,452-row
-price/volume panel as PIT-ready. The only identified pre-freeze data check is a
+price/volume panel as PIT-ready. The last identified pre-freeze data check was a
 sample audit of event-time SIC/industry extraction from original SEC filing
-headers. No new collector or paid dataset is currently required for the cheap
-falsification test.
+headers; that 30-payload audit passed on 2026-08-30. The frozen next gate
+is a full no-return source/identity/coverage manifest, which still requires a
+separate `RUN EXPERIMENT` instruction. No new collector or paid dataset is
+currently required for that cheap falsification path.
 
 Atlas remains the authority for the cross-repository phase program. Its current
 Phase 1 owner gate is not bypassed by this reset. Alpha Lab may continue

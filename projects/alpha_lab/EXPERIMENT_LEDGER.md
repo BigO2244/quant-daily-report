@@ -17,6 +17,11 @@ Append-only. Never delete failed or superseded experiments.
 | EXP-2026-0011 | HYP-2026-011 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0011.md` | `ITERATE` — `BLOCKED_DATA` |
 | EXP-2026-0012 | HYP-2026-012 | 2026-07-23 | `REVIEW` | `UNPROVEN` | `evidence/EXP-2026-0012.md` | `ITERATE` — `BLOCKED_DATA` |
 | EXP-2026-0013 | HYP-2026-013 | 2026-07-30 | `RUNNING` | `UNPROVEN` | Pending first immutable data-gate packet | `PENDING` — source-audited AI power/grid event tape required; returns and challenge period remain unread |
+| EXP-2026-0015 | HYP-2026-015 | 2026-08-30 | `FROZEN` | `UNPROVEN` | `hypotheses/HYP-2026-015_industry_earnings_information_diffusion.md` | `NOT_RUN` — separate `RUN EXPERIMENT` authority and canonical ledger registration required; no outcome or challenge read |
+
+`EXP-2026-0014` is intentionally absent pending the separately governed
+reconciliation of the already-completed HYP-2026-014 source-bridge work. This
+freeze does not infer, backfill, or register that evidence.
 
 ## State vocabulary
 
