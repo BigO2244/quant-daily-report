@@ -22,23 +22,24 @@ capital, or production behavior.
 | 12 | Asset growth / investment | `FROZEN_BLOCKED_DATA` | `UNPROVEN` | Does conservative balance-sheet expansion predict returns beyond CMA and value? | Materialize certified filing-time asset-growth features |
 | — | Defense procurement-intent events | `DISCUSS_SOURCE_READINESS` | `UNPROVEN` | Do public sources-sought, pre-solicitation, solicitation, budget-program, and company-confirmation events create delayed, explainable reactions in mapped defense issuers? | Timestamped SAM opportunity archive/API availability, official-announcement lineage, issuer/ticker mapping, and a frozen event contract; awards alone are confirmation, not the lead signal |
 | — | AI power/grid commitment events | `DISCUSS_SOURCE_READINESS` | `UNPROVEN` | Do public data-center load commitments, interconnection/power agreements, and associated grid approvals create delayed, explainable reactions in economically exposed utilities and equipment suppliers? | Project-to-issuer exposure map, official publication timestamps from utility/ISO/PUC/FERC sources, event de-duplication, and a frozen event contract; current-vintage EIA controls are context only |
-| — | Industry earnings-information diffusion | `DISCUSS_FEASIBILITY_AUDITED` | `ALPHA_CANDIDATE` | Does a large, volume-confirmed reaction to an early industry reporter predict delayed returns in same-industry peers that have not yet reported? | Existing exact-time SEC filings and PIT price/volume data are sufficient for a cheap test; sample-audit event-time SEC SIC extraction and deduplicate against the earnings-revision and supply-chain families before freezing |
+| — | Industry earnings-information diffusion | `FROZEN_NOT_AUTHORIZED_TO_RUN` | `ALPHA_CANDIDATE` | Does a large, volume-confirmed reaction to an early industry reporter predict delayed returns in same-industry peers that have not yet reported? | `HYP-2026-015` is frozen; the next permitted action requires a separate `RUN EXPERIMENT` instruction and begins with the no-return source/identity/coverage gate |
 
 Add an idea here only after identifying a distinct economic mechanism. Parameter
 variants remain inside one hypothesis family and count toward its trial budget.
 The two source-readiness rows above are Cassiopeia event-family discovery work,
 not new strategy identities, frozen hypotheses, authorized experiments, or
 Shadow candidates.
-The industry earnings-information diffusion row is a discussion-stage technique,
-not a frozen family or authorized experiment. Its intended cheap test uses the
-reporter's observable event reaction as the information shock and buys only
-not-yet-reporting peers, avoiding a dependency on licensed consensus history.
+The industry earnings-information diffusion row is frozen as `HYP-2026-015`
+but is not authorized to run. Its intended cheap test uses the reporter's
+observable event reaction as the information shock and buys only not-yet-
+reporting peers, avoiding a dependency on licensed consensus history.
 A read-only 2026-08-27 feasibility audit found 313,449 hydrated original
 8-K/8-K-A filings with parsed acceptance timestamps and a PIT-certified
 21,840,452-row observed-price panel containing price, volume, and availability
 fields. The remaining feasibility check is a bounded sample audit of
-event-time SIC/industry extraction from the original SEC filing headers; it is
-not a new data-collection program.
+event-time SIC/industry extraction from the original SEC filing headers. The
+sample audit passed on 2026-08-30; the frozen first gate is a full no-return
+source/identity/coverage manifest, not a new data-collection program.
 The eight 2026-07-23 rows are frozen and their authorized first run completed
 on 2026-07-24 UTC. A `RUN EXPERIMENT` authorization does not bypass a missing
 or blocked data contract and does not authorize challenge-period access.
