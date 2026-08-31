@@ -329,3 +329,95 @@ def test_nearest_feasible_proof_cannot_use_a_smaller_account_denominator() -> No
     assert payload["whole_share_feasibility_equity_basis"] == 1000.0
     assert payload["whole_share_feasibility_equity_basis_valid"] is False
     assert payload["nearest_feasible_verified"] is False
+
+
+def _fractional_policy() -> dict:
+    return {
+        "schema_version": "caerus.target_attainment_policy.v1",
+        "account_scope": "PAPER",
+        "share_mode": "FRACTIONAL_SHARES",
+        "target_cash_weight": 0.05,
+        "minimum_cash_weight": 0.025,
+        "fixed_drift_tolerance": 0.02,
+        "nearest_feasible_required": False,
+        "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+        "strict_green_propagation": True,
+        "owner_approved_at": "2026-08-31",
+    }
+
+
+def _fractional_plan(*, allow_fractional: bool = True) -> dict:
+    policy = _fractional_policy()
+    return {
+        "allow_fractional": allow_fractional,
+        "cash_target_weight": 0.05,
+        "target_attainment_policy": policy,
+        "target_portfolio": [{"symbol": "AAA", "target_weight": 0.95}],
+        "approved_execution_package": {
+            "content_hash": "approved-fractional-package-hash",
+            "approved_cash_weight": 0.05,
+            "approved_target_rows": [
+                {"symbol": "AAA", "target_weight": 0.95}
+            ],
+            "constraints": {"target_attainment_policy": policy},
+        },
+    }
+
+
+def test_fractional_policy_requires_no_integer_proof_and_attains_target() -> None:
+    payload = build_lane_target_attainment(
+        plan=_fractional_plan(),
+        post_snapshot={
+            "account": {"equity": "1000", "cash": "50"},
+            "positions": [
+                {"symbol": "AAA", "qty": "9.5", "market_value": "950"}
+            ],
+        },
+        reconciliation={"status": "CLEAN"},
+        run_id="paper-fractional",
+        trade_date="2026-08-31",
+        mode="paper",
+        dry_run=False,
+    )
+
+    assert payload["status"] == "OK_TARGET_ATTAINED"
+    assert payload["fractional_target_verified"] is True
+    assert payload["whole_share_feasibility"] is None
+
+
+def test_fractional_policy_fails_closed_when_plan_pin_is_false() -> None:
+    payload = build_lane_target_attainment(
+        plan=_fractional_plan(allow_fractional=False),
+        post_snapshot={
+            "account": {"equity": "1000", "cash": "50"},
+            "positions": [{"symbol": "AAA", "market_value": "950"}],
+        },
+        reconciliation={"status": "CLEAN"},
+        run_id="paper-fractional-mismatch",
+        trade_date="2026-08-31",
+        mode="paper",
+        dry_run=False,
+    )
+
+    assert payload["status"] == "FAIL_POLICY_INVALID"
+    assert "allow_fractional=true" in payload["reason_code"]
+
+
+def test_fractional_authorized_no_trade_requires_target_already_attained() -> None:
+    payload = build_lane_target_attainment(
+        plan=_fractional_plan(),
+        post_snapshot={
+            "account": {"equity": "1000", "cash": "50"},
+            "positions": [{"symbol": "AAA", "market_value": "950"}],
+        },
+        reconciliation={"status": "NOT_APPLICABLE_NO_TRADE"},
+        run_id="paper-fractional-no-trade",
+        trade_date="2026-08-31",
+        mode="paper",
+        dry_run=False,
+    )
+
+    assert payload["status"] == "OK_TARGET_ATTAINED"
+    assert payload["reason_code"] == (
+        "authorized_no_trade_already_within_fractional_target_tolerance"
+    )

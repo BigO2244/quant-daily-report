@@ -164,10 +164,14 @@ export CAERUS_PAPER_RECOVERY_POLICY="${CAERUS_PAPER_RECOVERY_POLICY:-}"
 # paper arms them with the wildcard so the full buy/sell/hold model is exercised.
 export CAERUS_LIVE_PILOT_SELLS_ENABLED="1"
 export CAERUS_LIVE_PILOT_SELL_WHITELIST="*"
-# Paper-only target-fidelity cleanup. Fractional entries remain disabled; this
-# permits exact exits of legacy fractional holdings that are no longer in the
-# target portfolio. The executor additionally requires the paper_lane output
-# ancestry, so this flag is inert on the real-money live-pilot lane.
+# Orion PAPER uses broker-supported fractional quantities for target fidelity.
+# Pin the runtime value so it must match the immutable plan; the executor fails
+# closed on any plan/runtime disagreement. This is scoped to the paper endpoint
+# asserted above and does not affect Lyra LIVE.
+export CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL="1"
+# Fractional exits remain explicitly enabled for legacy/off-target cleanup. The
+# executor additionally requires paper_lane output ancestry, so these pins are
+# inert on the real-money live-pilot lane.
 export CAERUS_PAPER_FRACTIONAL_EXIT_ENABLED="1"
 export CAERUS_PAPER_FRACTIONAL_EXIT_MIN_NOTIONAL_USD="1.00"
 # PAPER sell-first rotation contract: poll for up to two minutes for every sell
@@ -256,6 +260,7 @@ echo "lane_params_fingerprint=${CAERUS_LANE_PARAMS_FINGERPRINT}"
 echo "paper_account_scope=FULL_CURRENT_ACCOUNT"
 echo "max_orders=${CAERUS_LIVE_PILOT_MAX_ORDERS}"
 echo "min_trade_usd=${CAERUS_LIVE_PILOT_MIN_TRADE_USD}"
+echo "paper_fractional_rebalancing=${CAERUS_LIVE_PILOT_ALLOW_FRACTIONAL}"
 echo "paper_fractional_exit_enabled=${CAERUS_PAPER_FRACTIONAL_EXIT_ENABLED}"
 _DEPLOY_SHA="$(python3 -c "import json,sys; d=json.load(open('outputs/deploy_state.json')) if __import__('pathlib').Path('outputs/deploy_state.json').exists() else {}; print(d.get('deployed_sha','unknown'))" 2>/dev/null || echo "unknown")"
 echo "deployed_sha=${_DEPLOY_SHA}"
@@ -571,6 +576,7 @@ BUILD_ARGS=(
     --approved-sleeve "${CAERUS_LIVE_PILOT_SLEEVE_ID}"
     --capital-cap "${PLAN_CAP}"
     --max-orders "${CAERUS_LIVE_PILOT_MAX_ORDERS}"
+    --allow-fractional
     --output-dir "${PAPER_PLANS_DIR}"
     --state-dir "${PAPER_STATE_DIR}"
 )

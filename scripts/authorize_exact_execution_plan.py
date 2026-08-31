@@ -1424,9 +1424,9 @@ def authorize_exact_execution_plan(
         buy_buffer_pct=float(env.get("CAERUS_LIVE_PILOT_BUY_BUFFER_PCT") or 0.98),
         ledger_enabled=False,
     )
-    # Whole-share target-attainment is governed PAPER policy. The shared factory
-    # defaults to the live-pilot label, so preserve the constraints but carry the
-    # actual lane identity before planning (the executor already does this).
+    # Target-attainment is governed PAPER policy. The shared factory defaults to
+    # the live-pilot label, so preserve the constraints but carry the actual lane
+    # identity before planning (the executor already does this).
     config = dataclasses.replace(config, mode="paper")
     raw, trade_meta = compute_transition_trades(request=request, config=config)
     _capital, capital_budget, executable, filter_stats = apply_capital_budget_and_execution_filter(
@@ -1743,6 +1743,7 @@ def authorize_exact_execution_plan(
         account_id_hash=broker_account_id_hash,
         risk_state={
             "target_risk": risk_controls,
+            "target_attainment_policy": governed_target_attainment_policy,
             "trade_meta": trade_meta,
             "capital_budget": capital_budget,
             "execution_filter": filter_stats,

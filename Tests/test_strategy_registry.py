@@ -34,11 +34,11 @@ def test_default_registry_preserves_current_active_shadow_strategies() -> None:
     assert registry.paper_execution_config()["max_source_trading_session_lag"] == 1
     policy = registry.paper_execution_config()["target_attainment_policy"]
     assert policy["account_scope"] == "PAPER"
-    assert policy["share_mode"] == "WHOLE_SHARES"
+    assert policy["share_mode"] == "FRACTIONAL_SHARES"
     assert policy["target_cash_weight"] == 0.05
     assert policy["minimum_cash_weight"] == 0.025
     assert policy["fixed_drift_tolerance"] == 0.02
-    assert policy["nearest_feasible_required"] is True
+    assert policy["nearest_feasible_required"] is False
     assert policy["comparison_epoch_policy"] == "FIRST_CLEAN_POST_FIX_PAPER_RUN"
     assert policy["strict_green_propagation"] is True
     assert registry.promotion_candidate_ids() == (

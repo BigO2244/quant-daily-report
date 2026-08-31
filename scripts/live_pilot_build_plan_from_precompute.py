@@ -897,6 +897,21 @@ def build_live_pilot_plan(
         )
         if not target_policy:
             raise ValueError("governed PAPER target-attainment policy missing")
+        from core.target_attainment_policy import (
+            FRACTIONAL_SHARE_MODE,
+            validate_target_attainment_policy,
+        )
+
+        target_policy = validate_target_attainment_policy(
+            target_policy,
+            expected_target_cash_weight=float(result.cash_target_weight),
+        )
+        # The approved target policy, not a mutable caller default, owns PAPER
+        # quantity mode. The executor separately requires the runtime pin to
+        # match this immutable plan before any broker mutation.
+        allow_fractional = bool(
+            target_policy["share_mode"] == FRACTIONAL_SHARE_MODE
+        )
         risk_constraints["target_attainment_policy"] = target_policy
     risk = build_risk_package(
         package_id=f"risk:{authority_stem}",
@@ -1139,6 +1154,7 @@ def _plan_scaffold(
             "order_type": "market",
             "time_in_force": "day",
             "normal_market_hours_only": True,
+            "quantity_precision": 6 if allow_fractional else 0,
             "buys_capped_by": "CAERUS_LIVE_PILOT_MAX_ORDERS",
             "sells_gated_by": "CAERUS_LIVE_PILOT_SELLS_ENABLED + sell whitelist/wildcard",
             "sizing": "live portfolio value via execution core (same engine as paper)",

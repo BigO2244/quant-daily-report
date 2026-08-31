@@ -254,37 +254,77 @@ def compute_transition_trades(
         policy_payload = package.constraints.get("target_attainment_policy")
         if policy_payload:
             if str(config.mode or "").strip().lower() != "paper":
-                raise ValueError("whole-share target-attainment policy is PAPER-only")
-            from core.whole_share_feasibility import (
-                build_nearest_feasible_whole_share_trades,
-                seal_whole_share_proof,
+                raise ValueError("target-attainment policy is PAPER-only")
+            from core.target_attainment_policy import (
+                FRACTIONAL_SHARE_MODE,
+                WHOLE_SHARE_MODE,
+                validate_target_attainment_policy,
             )
+            normalized_policy = validate_target_attainment_policy(
+                policy_payload,
+                expected_target_cash_weight=float(package.approved_cash_weight),
+            )
+            share_mode = str(normalized_policy["share_mode"])
+            if share_mode == WHOLE_SHARE_MODE:
+                from core.whole_share_feasibility import (
+                    build_nearest_feasible_whole_share_trades,
+                    seal_whole_share_proof,
+                )
 
-            raw_trades, feasibility = build_nearest_feasible_whole_share_trades(
-                holdings=request.holdings,
-                targets=approved_targets,
-                prices=approved_prices,
-                total_equity=float(request.total_equity),
-                cfg=cfg,
-                policy=policy_payload,
-                max_orders=int(config.constraints.max_trades_per_day or 0),
-            )
-            feasibility = seal_whole_share_proof(
-                {
-                    **dict(feasibility),
-                    "approved_execution_package_hash": package.content_hash,
-                    "approved_risk_package_hash": package.risk_hash,
+                raw_trades, feasibility = build_nearest_feasible_whole_share_trades(
+                    holdings=request.holdings,
+                    targets=approved_targets,
+                    prices=approved_prices,
+                    total_equity=float(request.total_equity),
+                    cfg=cfg,
+                    policy=normalized_policy,
+                    max_orders=int(config.constraints.max_trades_per_day or 0),
+                )
+                feasibility = seal_whole_share_proof(
+                    {
+                        **dict(feasibility),
+                        "approved_execution_package_hash": package.content_hash,
+                        "approved_risk_package_hash": package.risk_hash,
+                    }
+                )
+                base_meta = {
+                    "deadband_skipped": [],
+                    "deadband_skipped_count": 0,
+                    "cash_sweep_added_shares": 0,
+                    "cash_sweep_iterations": 0,
+                    "cash_sweep_tickers": [],
+                    "cash_sweep_remaining_dollars": feasibility.get("projected_cash"),
+                    "whole_share_feasibility": feasibility,
                 }
-            )
-            base_meta = {
-                "deadband_skipped": [],
-                "deadband_skipped_count": 0,
-                "cash_sweep_added_shares": 0,
-                "cash_sweep_iterations": 0,
-                "cash_sweep_tickers": [],
-                "cash_sweep_remaining_dollars": feasibility.get("projected_cash"),
-                "whole_share_feasibility": feasibility,
-            }
+            elif share_mode == FRACTIONAL_SHARE_MODE:
+                if not bool(config.orders.allow_fractional) or not bool(
+                    cfg.allow_fractional
+                ):
+                    raise ValueError(
+                        "fractional target-attainment policy requires fractional execution"
+                    )
+                from paper import paper_broker as paper_broker_module
+
+                raw_trades, base_meta = paper_broker_module.build_rebalance_trades(
+                    holdings=request.holdings,
+                    targets=approved_targets,
+                    prices=approved_prices,
+                    total_equity=float(request.total_equity),
+                    starting_cash=float(request.starting_cash),
+                    target_cash_weight=float(package.approved_cash_weight),
+                    cfg=cfg,
+                )
+                base_meta = {
+                    **dict(base_meta),
+                    "fractional_target_attainment": {
+                        "status": "PASS",
+                        "share_mode": FRACTIONAL_SHARE_MODE,
+                        "approved_execution_package_hash": package.content_hash,
+                        "approved_risk_package_hash": package.risk_hash,
+                    },
+                }
+            else:  # Defensive: validator owns the accepted mode set.
+                raise ValueError("unsupported governed target-attainment share mode")
         else:
             from paper import paper_broker as paper_broker_module
 

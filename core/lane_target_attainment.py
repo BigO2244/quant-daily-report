@@ -140,7 +140,10 @@ def build_lane_target_attainment(
     policy_error: str | None = None
     if isinstance(policy_payload, Mapping) and policy_payload:
         try:
-            from core.target_attainment_policy import validate_target_attainment_policy
+            from core.target_attainment_policy import (
+                FRACTIONAL_SHARE_MODE,
+                validate_target_attainment_policy,
+            )
 
             if (
                 isinstance(plan_policy, Mapping)
@@ -162,10 +165,35 @@ def build_lane_target_attainment(
                 policy_payload,
                 expected_target_cash_weight=float(target_cash),
             )
+            if (
+                normalized_policy["share_mode"] == FRACTIONAL_SHARE_MODE
+                and plan.get("allow_fractional") is not True
+            ):
+                raise ValueError(
+                    "fractional target-attainment policy requires an immutable "
+                    "allow_fractional=true plan"
+                )
         except Exception as exc:
             policy_error = str(exc)
 
     proof = dict(feasibility_evidence or {})
+    share_mode = (
+        str(normalized_policy.get("share_mode") or "")
+        if normalized_policy is not None
+        else ""
+    )
+    from core.target_attainment_policy import (
+        FRACTIONAL_SHARE_MODE,
+        WHOLE_SHARE_MODE,
+    )
+
+    whole_share_policy = share_mode == WHOLE_SHARE_MODE
+    fractional_policy = share_mode == FRACTIONAL_SHARE_MODE
+    effective_drift_tolerance = (
+        float(normalized_policy["fixed_drift_tolerance"])
+        if normalized_policy is not None
+        else float(drift_tolerance)
+    )
     exact_plan_payload = (
         plan.get("exact_execution_plan")
         if isinstance(plan.get("exact_execution_plan"), Mapping)
@@ -249,7 +277,7 @@ def build_lane_target_attainment(
         for symbol, quantity in proof_quantities.items()
     )
     proof_valid = bool(
-        normalized_policy is not None
+        whole_share_policy
         and policy_error is None
         and proof.get("schema_version") == "caerus.whole_share_feasibility.v1"
         and str(proof.get("status") or "").upper() == "PASS"
@@ -267,6 +295,17 @@ def build_lane_target_attainment(
         and cash_floor is not None
         and actual_cash + 1e-12 >= cash_floor
     )
+    fractional_target_verified = bool(
+        fractional_policy
+        and policy_error is None
+        and not unapproved_symbols
+        and actual_cash is not None
+        and cash_floor is not None
+        and actual_cash + 1e-12 >= cash_floor
+        and max_position_drift <= effective_drift_tolerance
+        and abs(float(actual_cash) - float(target_cash))
+        <= effective_drift_tolerance
+    )
     authorized_no_trade = recon_status == "NOT_APPLICABLE_NO_TRADE"
     if dry_run:
         status = "DRY_RUN_NOT_APPLICABLE"
@@ -277,22 +316,28 @@ def build_lane_target_attainment(
     elif policy_error:
         status = "FAIL_POLICY_INVALID"
         reason = f"target_attainment_policy_invalid:{policy_error}"
-    elif normalized_policy is not None and not proof_valid:
+    elif whole_share_policy and not proof_valid:
         status = "FAIL_FEASIBILITY_PROOF_INVALID"
         reason = "governed_whole_share_feasibility_proof_missing_or_incomplete"
     elif authorized_no_trade and nearest_feasible_verified:
         status = "OK_NEAREST_FEASIBLE"
         reason = "authorized_no_trade_matches_proven_nearest_feasible_allocation"
+    elif authorized_no_trade and fractional_target_verified:
+        status = "OK_TARGET_ATTAINED"
+        reason = "authorized_no_trade_already_within_fractional_target_tolerance"
     elif recon_status != "CLEAN":
         status = "FAIL_EXECUTION_INCOMPLETE"
         reason = f"reconciliation_{recon_status.lower() or 'unknown'}"
-    elif normalized_policy is not None and not nearest_feasible_verified:
+    elif whole_share_policy and not nearest_feasible_verified:
         status = "FAIL_NEAREST_FEASIBLE_MISMATCH"
         reason = "posttrade_does_not_exactly_match_proven_whole_share_allocation"
+    elif fractional_policy and not fractional_target_verified:
+        status = "FAIL_TARGET_MISMATCH"
+        reason = "posttrade_does_not_meet_governed_fractional_target"
     elif (
-        max_position_drift > float(drift_tolerance)
+        max_position_drift > effective_drift_tolerance
         or cash_drift is None
-        or abs(cash_drift) > float(drift_tolerance)
+        or abs(cash_drift) > effective_drift_tolerance
     ):
         if nearest_feasible_verified:
             status = "OK_NEAREST_FEASIBLE"
@@ -311,7 +356,7 @@ def build_lane_target_attainment(
         "account_scope": str(mode or "").strip().upper(),
         "status": status,
         "reason_code": reason,
-        "drift_tolerance": float(drift_tolerance),
+        "drift_tolerance": effective_drift_tolerance,
         "target_cash_weight": round(float(target_cash), 10),
         "achieved_cash_weight": (
             round(float(actual_cash), 10) if actual_cash is not None else None
@@ -339,6 +384,7 @@ def build_lane_target_attainment(
         "posttrade_market_values_complete": market_values_complete,
         "approved_execution_package_hash": expected_package_hash or None,
         "nearest_feasible_verified": nearest_feasible_verified,
+        "fractional_target_verified": fractional_target_verified,
         "quantity_mismatches": quantity_mismatches,
         "unapproved_symbols": unapproved_symbols,
         "source_artifacts": {
