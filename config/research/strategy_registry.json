@@ -24,14 +24,14 @@
       "account_target_attainment_policy": {
         "schema_version": "caerus.target_attainment_policy.v1",
         "account_scope": "PAPER",
-        "share_mode": "WHOLE_SHARES",
+        "share_mode": "FRACTIONAL_SHARES",
         "target_cash_weight": 0.05,
         "minimum_cash_weight": 0.025,
         "fixed_drift_tolerance": 0.02,
-        "nearest_feasible_required": true,
+        "nearest_feasible_required": false,
         "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
         "strict_green_propagation": true,
-        "owner_approved_at": "2026-08-11"
+        "owner_approved_at": "2026-08-31"
       },
       "sleeve_risk_budgets": {
         "caerus_orion": 1.0
@@ -379,14 +379,14 @@
         "target_attainment_policy": {
           "schema_version": "caerus.target_attainment_policy.v1",
           "account_scope": "PAPER",
-          "share_mode": "WHOLE_SHARES",
+          "share_mode": "FRACTIONAL_SHARES",
           "target_cash_weight": 0.05,
           "minimum_cash_weight": 0.025,
           "fixed_drift_tolerance": 0.02,
-          "nearest_feasible_required": true,
+          "nearest_feasible_required": false,
           "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
           "strict_green_propagation": true,
-          "owner_approved_at": "2026-08-11"
+          "owner_approved_at": "2026-08-31"
         },
         "owner_approved_at": "2026-08-08",
         "approval_scope": "PAPER_ONLY",

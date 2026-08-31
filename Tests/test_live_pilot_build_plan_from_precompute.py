@@ -417,6 +417,7 @@ def test_paper_lane_skips_current_preclose_reporting_snapshot(
     )
     assert plan["decision_source_artifact"]["source_trading_session_lag"] == 1
     policy = plan["target_attainment_policy"]
+    assert plan["allow_fractional"] is True
     assert policy["target_cash_weight"] == 0.05
     assert policy["minimum_cash_weight"] == 0.025
     assert (

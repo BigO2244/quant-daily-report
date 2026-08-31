@@ -893,16 +893,26 @@ def _core_rows_from_frame(frame: pd.DataFrame, *, plan: Mapping[str, Any]) -> li
         order_type = str(source.get("order_type") or "market").strip().lower()
         if order_type not in {"market", "limit"}:
             order_type = "market"
+        shares = float(row.get("shares") or 0.0)
+        governed_paper_fractional = bool(
+            str(plan.get("execution_lane") or "").strip().lower() == "paper"
+            and plan.get("allow_fractional") is True
+        )
+        if governed_paper_fractional:
+            # Seal one broker-safe value so dry run, WAL identity, submission,
+            # and post-trade reconciliation compare the same exact quantity.
+            shares = round(shares, 6)
+        price = float(row.get("price") or 0.0)
         exact_row = {
                 "ticker": symbol,
                 "symbol": symbol,
                 "side": str(row.get("side") or "").strip().upper(),
-                "shares": float(row.get("shares") or 0.0),
-                "qty": float(row.get("shares") or 0.0),
-                "price": float(row.get("price") or 0.0),
-                "expected_price": float(row.get("price") or 0.0),
-                "cap_enforcement_price": float(row.get("price") or 0.0),
-                "notional": float(row.get("notional") or 0.0),
+                "shares": shares,
+                "qty": shares,
+                "price": price,
+                "expected_price": price,
+                "cap_enforcement_price": price,
+                "notional": float(shares * price),
                 "order_type": order_type,
                 "source_reason": row.get("reason"),
                 **{key: source[key] for key in PLAN_PROVENANCE_KEYS if key in source},

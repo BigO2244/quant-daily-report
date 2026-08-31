@@ -8,6 +8,8 @@ from typing import Any, Mapping
 
 SCHEMA_VERSION = "caerus.target_attainment_policy.v1"
 WHOLE_SHARE_MODE = "WHOLE_SHARES"
+FRACTIONAL_SHARE_MODE = "FRACTIONAL_SHARES"
+SUPPORTED_SHARE_MODES = frozenset({WHOLE_SHARE_MODE, FRACTIONAL_SHARE_MODE})
 FIRST_CLEAN_EPOCH = "FIRST_CLEAN_POST_FIX_PAPER_RUN"
 ACCEPTED_TARGET_STATUSES = frozenset(
     {"OK_TARGET_ATTAINED", "OK_NEAREST_FEASIBLE"}
@@ -36,8 +38,9 @@ def validate_target_attainment_policy(
     """Return a normalized policy or fail closed.
 
     The policy is PAPER-only. Five percent remains the portfolio target; the
-    lower cash value is only a hard feasibility boundary for whole-share
-    execution.
+    lower cash value is a hard execution boundary. Whole-share mode requires a
+    sealed nearest-feasible proof. Fractional mode requires direct post-trade
+    target attainment and therefore must not claim a nearest-feasible waiver.
     """
 
     if not isinstance(payload, Mapping) or not payload:
@@ -46,10 +49,24 @@ def validate_target_attainment_policy(
         raise TargetAttainmentPolicyError("unsupported target-attainment policy schema")
     if str(payload.get("account_scope") or "").upper() != "PAPER":
         raise TargetAttainmentPolicyError("target-attainment policy must be PAPER-only")
-    if str(payload.get("share_mode") or "").upper() != WHOLE_SHARE_MODE:
-        raise TargetAttainmentPolicyError("target-attainment policy must use whole shares")
-    if not bool(payload.get("nearest_feasible_required")):
-        raise TargetAttainmentPolicyError("nearest-feasible proof must be required")
+    share_mode = str(payload.get("share_mode") or "").upper()
+    if share_mode not in SUPPORTED_SHARE_MODES:
+        raise TargetAttainmentPolicyError(
+            "target-attainment policy share_mode is unsupported"
+        )
+    nearest_feasible_required = payload.get("nearest_feasible_required")
+    if type(nearest_feasible_required) is not bool:
+        raise TargetAttainmentPolicyError(
+            "nearest_feasible_required must be boolean"
+        )
+    if share_mode == WHOLE_SHARE_MODE and not nearest_feasible_required:
+        raise TargetAttainmentPolicyError(
+            "whole-share target attainment requires a nearest-feasible proof"
+        )
+    if share_mode == FRACTIONAL_SHARE_MODE and nearest_feasible_required:
+        raise TargetAttainmentPolicyError(
+            "fractional target attainment cannot use a nearest-feasible waiver"
+        )
     if not bool(payload.get("strict_green_propagation")):
         raise TargetAttainmentPolicyError("strict green propagation must be enabled")
     if str(payload.get("comparison_epoch_policy") or "").upper() != FIRST_CLEAN_EPOCH:
@@ -76,11 +93,11 @@ def validate_target_attainment_policy(
     return {
         "schema_version": SCHEMA_VERSION,
         "account_scope": "PAPER",
-        "share_mode": WHOLE_SHARE_MODE,
+        "share_mode": share_mode,
         "target_cash_weight": target_cash,
         "minimum_cash_weight": minimum_cash,
         "fixed_drift_tolerance": tolerance,
-        "nearest_feasible_required": True,
+        "nearest_feasible_required": bool(nearest_feasible_required),
         "comparison_epoch_policy": FIRST_CLEAN_EPOCH,
         "strict_green_propagation": True,
         "owner_approved_at": str(payload.get("owner_approved_at") or ""),
