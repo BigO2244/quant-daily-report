@@ -517,6 +517,11 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _file_stat_signature(path: Path) -> tuple[int, int]:
+    status = path.stat()
+    return status.st_size, status.st_mtime_ns
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
@@ -1428,24 +1433,26 @@ def _scan_headers_to_checkpoint(
             )
         for partition, tar_path, inventory_path in tasks:
             before = {
-                "inventory_sha256": _sha256_file(inventory_path),
-                "inventory_bytes": inventory_path.stat().st_size,
-                "tar_sha256": _sha256_file(tar_path),
-                "tar_bytes": tar_path.stat().st_size,
+                "inventory_stat": _file_stat_signature(inventory_path),
+                "tar_stat": _file_stat_signature(tar_path),
             }
             rows, failures = _scan_partition(
                 (str(tar_path), str(inventory_path), VALIDATION_END.isoformat())
             )
             after = {
-                "inventory_sha256": _sha256_file(inventory_path),
-                "inventory_bytes": inventory_path.stat().st_size,
-                "tar_sha256": _sha256_file(tar_path),
-                "tar_bytes": tar_path.stat().st_size,
+                "inventory_stat": _file_stat_signature(inventory_path),
+                "tar_stat": _file_stat_signature(tar_path),
             }
             if after != before:
                 raise ValueError(
                     f"SEC header partition changed during scan: {partition}"
                 )
+            committed_hashes = {
+                "inventory_sha256": _sha256_file(inventory_path),
+                "inventory_bytes": after["inventory_stat"][0],
+                "tar_sha256": _sha256_file(tar_path),
+                "tar_bytes": after["tar_stat"][0],
+            }
             with connection:
                 for failure in failures:
                     event_id, reason = failure.split(":", 1)
@@ -1468,10 +1475,10 @@ def _scan_headers_to_checkpoint(
                     """,
                     (
                         partition,
-                        before["inventory_sha256"],
-                        before["inventory_bytes"],
-                        before["tar_sha256"],
-                        before["tar_bytes"],
+                        committed_hashes["inventory_sha256"],
+                        committed_hashes["inventory_bytes"],
+                        committed_hashes["tar_sha256"],
+                        committed_hashes["tar_bytes"],
                     ),
                 )
             del rows, failures
@@ -1622,6 +1629,7 @@ def _build_structural_clusters(
     cluster_sink: Callable[[dict[str, Any]], None] | None = None,
     reporter_spool_path: Path | None = None,
     max_cluster_candidates: int | None = None,
+    phase_observer: Callable[[str], None] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     event_dates: dict[str, list[datetime]] = defaultdict(list)
     reporter_failures: Counter[str] = Counter()
@@ -1638,13 +1646,14 @@ def _build_structural_clusters(
             CREATE TABLE reporters (
                 reaction_session TEXT NOT NULL,
                 sic TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
                 event_id TEXT PRIMARY KEY,
                 payload_json TEXT NOT NULL
             )
             """
         )
         reporter_connection.execute(
-            "CREATE INDEX idx_reporter_group ON reporters(reaction_session, sic, event_id)"
+            "CREATE INDEX idx_reporter_group ON reporters(reaction_session, sic, sequence)"
         )
     for event in events:
         header = _header_get(headers, event["event_id"])
@@ -1713,16 +1722,21 @@ def _build_structural_clusters(
             reporter_rows.append(reporter_record)
         else:
             reporter_connection.execute(
-                "INSERT INTO reporters VALUES(?, ?, ?, ?)",
+                "INSERT INTO reporters VALUES(?, ?, ?, ?, ?)",
                 (
                     reporter_record["reaction_session"].isoformat(),
                     reporter_record["sic"],
+                    reporter_included,
                     reporter_record["event_id"],
                     canonical_json(reporter_record),
                 ),
             )
             if reporter_included % 1_000 == 0:
                 reporter_connection.commit()
+                if phase_observer is not None:
+                    phase_observer(
+                        f"structural_reporters_spooled::{reporter_included}"
+                    )
     if reporter_connection is not None:
         reporter_connection.commit()
 
@@ -1742,7 +1756,7 @@ def _build_structural_clusters(
             for (payload_text,) in reporter_connection.execute(
                 """
                 SELECT payload_json FROM reporters
-                WHERE reaction_session = ? AND sic = ? ORDER BY event_id
+                WHERE reaction_session = ? AND sic = ? ORDER BY sequence
                 """,
                 (reaction_text, sic),
             ):
@@ -1753,6 +1767,8 @@ def _build_structural_clusters(
                 )
                 rows.append(row)
             yield date.fromisoformat(reaction_text), sic, rows
+    if phase_observer is not None:
+        phase_observer("structural_reporter_grouping_complete")
 
     headers_iterator = iter(_header_iter(headers))
     next_header = next(headers_iterator, None)
@@ -2391,7 +2407,7 @@ def _decode_market_checkpoint_cluster(value: Mapping[str, Any]) -> dict[str, Any
     return cluster
 
 
-def _write_market_checkpoint(path: Path, payload: Mapping[str, Any]) -> None:
+def _write_market_checkpoint(path: Path, payload: Mapping[str, Any]) -> dict[str, Any]:
     """Publish an atomic chunk directory with an external integrity record."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2419,13 +2435,14 @@ def _write_market_checkpoint(path: Path, payload: Mapping[str, Any]) -> None:
         if path.exists():
             raise FileExistsError(f"market checkpoint already exists: {path}")
         os.replace(temporary, path)
+        return integrity
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
 
 
 def _read_market_checkpoint(
     path: Path, *, start: int, input_hash: str
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     payload_path = path / "chunk.json.gz"
     integrity_path = path / "integrity.json"
     if not path.is_dir() or not payload_path.is_file() or not integrity_path.is_file():
@@ -2458,7 +2475,7 @@ def _read_market_checkpoint(
     audit = payload.get("audit")
     if not isinstance(rows, list) or not isinstance(audit, dict):
         raise ValueError(f"HYP-015 market checkpoint payload invalid: {path}")
-    return [_decode_market_checkpoint_cluster(row) for row in rows], audit
+    return [_decode_market_checkpoint_cluster(row) for row in rows], audit, integrity
 
 
 def _apply_path_liquidity_overlap(
@@ -2486,6 +2503,7 @@ def _apply_path_liquidity_overlap(
     peak_cluster_chunk = 0
     peak_requested_security_count = 0
     peak_requested_pair_count = 0
+    checkpoint_integrity_records: list[dict[str, Any]] = []
 
     for start in range(0, len(clusters), cluster_chunk_size):
         stop = min(start + cluster_chunk_size, len(clusters))
@@ -2499,7 +2517,7 @@ def _apply_path_liquidity_overlap(
             else None
         )
         if checkpoint_path is not None and checkpoint_path.exists():
-            completed, chunk_audit = _read_market_checkpoint(
+            completed, chunk_audit, checkpoint_integrity = _read_market_checkpoint(
                 checkpoint_path, start=checkpoint_start, input_hash=input_hash
             )
             if len(completed) != len(chunk):
@@ -2516,7 +2534,7 @@ def _apply_path_liquidity_overlap(
             )
             clusters[start:stop] = chunk
             if checkpoint_path is not None:
-                _write_market_checkpoint(
+                checkpoint_integrity = _write_market_checkpoint(
                     checkpoint_path,
                     {
                         "bindings": {
@@ -2532,6 +2550,16 @@ def _apply_path_liquidity_overlap(
                     },
                 )
                 checkpoint_chunks_written += 1
+            else:
+                checkpoint_integrity = {}
+        if checkpoint_path is not None:
+            checkpoint_integrity_records.append(
+                {
+                    "checkpoint_start": checkpoint_start,
+                    "input_hash": input_hash,
+                    **checkpoint_integrity,
+                }
+            )
         if phase_observer is not None:
             phase_observer(f"market_chunk_complete::{checkpoint_start:08d}")
 
@@ -2593,6 +2621,7 @@ def _apply_path_liquidity_overlap(
         "checkpoint_chunks_written": checkpoint_chunks_written,
         "checkpoint_chunks_reused": checkpoint_chunks_reused,
         "checkpoint_resumable": checkpoint_dir is not None,
+        "checkpoint_integrity_records": checkpoint_integrity_records,
     }
 
 
@@ -2630,6 +2659,7 @@ def _spool_structural_clusters(
         cluster_sink=sink,
         reporter_spool_path=reporter_spool_path,
         max_cluster_candidates=MAX_CLUSTER_CANDIDATES,
+        phase_observer=phase_observer,
     )
     if retained:
         raise ValueError("HYP-015 spooled structural builder retained clusters")
@@ -2654,6 +2684,7 @@ def _annotate_cluster_spool(
     peak_requested_pair_count = 0
     written = 0
     reused = 0
+    checkpoint_integrity_records: list[dict[str, Any]] = []
     for chunk in spool.iter_structural_chunks(MARKET_CLUSTER_CHUNK):
         ordinals = [item[0] for item in chunk]
         clusters = [item[1] for item in chunk]
@@ -2682,6 +2713,9 @@ def _annotate_cluster_spool(
         )
         written += audit["checkpoint_chunks_written"]
         reused += audit["checkpoint_chunks_reused"]
+        checkpoint_integrity_records.extend(
+            audit.get("checkpoint_integrity_records", ())
+        )
 
     validation_clusters = 0
     included_peer_ids: set[str] = set()
@@ -2733,6 +2767,7 @@ def _annotate_cluster_spool(
         "checkpoint_resumable": True,
         "structural_clusters_retained_in_memory": 0,
         "annotated_clusters_retained_in_memory": 0,
+        "checkpoint_integrity_records": checkpoint_integrity_records,
     }
     spool.finish_annotated(result)
     return result
@@ -2786,6 +2821,8 @@ def _build_exclusions_and_missingness(
             dimensions[dimension]["denominator"][key] += 1
             if missing:
                 dimensions[dimension]["missing"][key] += 1
+        if phase_observer is not None and total_denominator % 10_000 == 0:
+            phase_observer(f"missingness_rows_observed::{total_denominator}")
 
     def emit_exclusion(row: dict[str, Any]) -> None:
         nonlocal exclusion_count, exclusion_contract_incomplete
@@ -2813,6 +2850,8 @@ def _build_exclusions_and_missingness(
         if cluster.get("reporter_lineage_pass") is True
         for event_id in cluster["reporter_event_ids"]
     }
+    if phase_observer is not None:
+        phase_observer("missingness_reporter_index_complete")
     source_error_by_accession = {
         item.get("accession"): item for item in source_errors if item.get("accession")
     }

@@ -437,7 +437,9 @@ def _identity_fixture() -> dict[str, object]:
     }
 
 
-def test_same_session_sic_cluster_preserves_all_reporter_ids_without_aggregation() -> None:
+def test_same_session_sic_cluster_preserves_all_reporter_ids_without_aggregation(
+    tmp_path: Path,
+) -> None:
     accepted = datetime(2020, 2, 3, 12, 0, tzinfo=timezone.utc)
     events = [
         {
@@ -526,6 +528,18 @@ def test_same_session_sic_cluster_preserves_all_reporter_ids_without_aggregation
             "security_id": "SEC:R",
         }
     ]
+    spooled: list[dict] = []
+    retained, spooled_audit = gate._build_structural_clusters(
+        events=events,
+        headers=headers,
+        identity=_identity_fixture(),
+        sessions=sessions,
+        cluster_sink=spooled.append,
+        reporter_spool_path=tmp_path / "reporters.sqlite",
+    )
+    assert retained == []
+    assert spooled == clusters
+    assert spooled_audit == audit
 
 
 def test_append_only_bundle_is_deterministic_and_create_only(tmp_path: Path) -> None:
@@ -1436,7 +1450,7 @@ def test_market_checkpoint_external_hash_detects_tampering(
 
     monkeypatch.setattr(gate, "_apply_path_liquidity_overlap_chunk", worker)
     checkpoint = tmp_path / "checkpoint"
-    gate._apply_path_liquidity_overlap(
+    first_audit = gate._apply_path_liquidity_overlap(
         clusters=copy.deepcopy(original),
         sessions=[],
         identity={},
@@ -1444,6 +1458,19 @@ def test_market_checkpoint_external_hash_detects_tampering(
         checkpoint_dir=checkpoint,
     )
     payload = checkpoint / "market_chunks/00000000/chunk.json.gz"
+    assert first_audit["checkpoint_integrity_records"] == [
+        {
+            "checkpoint_start": 0,
+            "input_hash": gate.canonical_hash(original),
+            "schema_version": gate.CHECKPOINT_SCHEMA_VERSION,
+            "file": "chunk.json.gz",
+            "bytes": payload.stat().st_size,
+            "sha256": hashlib.sha256(payload.read_bytes()).hexdigest(),
+            "bindings_sha256": first_audit["checkpoint_integrity_records"][0][
+                "bindings_sha256"
+            ],
+        }
+    ]
     payload.write_bytes(payload.read_bytes() + b"tamper")
     with pytest.raises(ValueError, match="integrity mismatch"):
         gate._apply_path_liquidity_overlap(
@@ -1552,6 +1579,16 @@ def test_header_checkpoint_rejects_changed_completed_partition(
     )
     checkpoint = tmp_path / "checkpoint/headers.sqlite"
     index = gate._scan_headers_to_checkpoint(bundle, checkpoint)
+    audit = index.audit()
+    assert audit["completed_partition_hashes"] == [
+        {
+            "partition": "part_00000",
+            "inventory_sha256": hashlib.sha256(b"inventory-v1").hexdigest(),
+            "inventory_bytes": len(b"inventory-v1"),
+            "tar_sha256": hashlib.sha256(b"archive-v1").hexdigest(),
+            "tar_bytes": len(b"archive-v1"),
+        }
+    ]
     index.close()
     inventory.write_bytes(b"inventory-v2")
     with pytest.raises(ValueError, match="partition integrity mismatch"):
