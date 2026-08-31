@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import gzip
 import hashlib
 import io
@@ -225,6 +226,81 @@ STANDARD INDUSTRIAL CLASSIFICATION: SEMICONDUCTORS [3674]
     assert len(rows[0]["actual_member_paths"]) == 2
     assert rows[0]["feed_cik_discrepancy_count"] == 2
     assert rows[0]["feed_filed_date_discrepancy_count"] == 2
+
+
+def test_header_checkpoint_resumes_by_partition_without_global_header_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = tmp_path / "bundle"
+    inventory_root = bundle / "data/inventory"
+    partition_root = bundle / "data/partitions"
+    inventory_root.mkdir(parents=True)
+    partition_root.mkdir(parents=True)
+    for index in range(40):
+        partition = f"part_{index:05d}"
+        (inventory_root / f"{partition}_inventory.jsonl.gz").touch()
+        (partition_root / f"{partition}.tar.gz").touch()
+
+    first_attempt: list[int] = []
+
+    def interrupted_scan(args: tuple[str, str, str]) -> tuple[list[dict], list[str]]:
+        index = int(Path(args[0]).name.split("_")[1].split(".")[0])
+        first_attempt.append(index)
+        if index == 7:
+            raise RuntimeError("simulated interruption")
+        return [_checkpoint_header(index)], []
+
+    monkeypatch.setattr(gate, "_scan_partition", interrupted_scan)
+    checkpoint = tmp_path / "checkpoint/headers.sqlite"
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        gate._scan_headers_to_checkpoint(bundle, checkpoint)
+
+    resumed: list[int] = []
+
+    def resumed_scan(args: tuple[str, str, str]) -> tuple[list[dict], list[str]]:
+        index = int(Path(args[0]).name.split("_")[1].split(".")[0])
+        resumed.append(index)
+        return [_checkpoint_header(index)], []
+
+    monkeypatch.setattr(gate, "_scan_partition", resumed_scan)
+    index = gate._scan_headers_to_checkpoint(bundle, checkpoint)
+    try:
+        audit = index.audit()
+        assert audit["verified_header_rows"] == 40
+        assert audit["headers_retained_in_memory"] == 0
+        assert [row["event_id"] for row in index][:2] == [
+            "0000000000-20-000001",
+            "0000000001-20-000001",
+        ]
+    finally:
+        index.close()
+
+    assert first_attempt == list(range(8))
+    assert resumed == list(range(7, 40))
+
+
+def _checkpoint_header(index: int) -> dict:
+    event_id = f"{index:010d}-20-000001"
+    source_path = f"edgar/{event_id}.txt"
+    return {
+        "event_id": event_id,
+        "cik": f"{index:010d}",
+        "sic": "3674",
+        "sic_count": 1,
+        "acceptance": datetime(2020, 1, 1, 12, 0, index, tzinfo=timezone.utc),
+        "form_type": "8-K",
+        "item_2_02": True,
+        "source_sha256": hashlib.sha256(event_id.encode()).hexdigest(),
+        "source_path": source_path,
+        "source_aliases": [
+            {
+                "source_filename": source_path,
+                "feed_cik": f"{index:010d}",
+                "feed_filed_date": "2020-01-01",
+            }
+        ],
+        "actual_member_paths": [source_path],
+    }
 
 
 def test_item_tape_excludes_missing_original_and_stops_at_challenge_boundary(
@@ -897,6 +973,140 @@ def test_reporter_missing_exit_path_blocks_structural_cluster(
     assert audit["path_failures"][
         "reporter_holding_path_or_terminal_lineage_incomplete"
     ] == 1
+
+
+def test_market_gate_bounds_peak_state_and_resumes_completed_chunks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = [
+        {
+            "cluster_id": f"HYP015-{index:04d}",
+            "reaction_session": date(2020, 1, 2),
+            "entry_session": date(2020, 1, 3),
+            "exit_session": date(2020, 1, 9),
+            "sic": f"{2000 + index % 25:04d}",
+            "reporter_security_ids": [f"SEC:R{index}"],
+            "peers": [],
+            "controls": [],
+        }
+        for index in range(257)
+    ]
+    chunk_sizes: list[int] = []
+
+    def bounded_worker(**kwargs: object) -> dict:
+        chunk = kwargs["clusters"]
+        assert isinstance(chunk, list)
+        chunk_sizes.append(len(chunk))
+        for cluster in chunk:
+            cluster["reporter_required_sessions"] = [date(2020, 1, 2)]
+            cluster["peer_required_sessions"] = [date(2020, 1, 3)]
+            cluster["reporter_lineage_pass"] = True
+            cluster["reporter_universe_eligible"] = True
+            cluster["included_peers"] = []
+            cluster["included_controls"] = []
+            cluster["structural_breadth_pass"] = False
+            cluster["emitted_evaluator_eligible"] = False
+            cluster["potential_overlap_inputs_complete"] = False
+        return {
+            "path_failures": {},
+            "mapping_path_counts": {},
+            "requested_security_count": len(chunk),
+            "requested_pair_count": 26 * len(chunk),
+        }
+
+    monkeypatch.setattr(
+        gate, "_apply_path_liquidity_overlap_chunk", bounded_worker
+    )
+    first = copy.deepcopy(original)
+    audit = gate._apply_path_liquidity_overlap(
+        clusters=first,
+        sessions=[],
+        identity={},
+        panel_path=tmp_path / "unused.parquet",
+        checkpoint_dir=tmp_path / "checkpoint",
+        cluster_chunk_size=7,
+    )
+
+    assert max(chunk_sizes) == 7
+    assert len(chunk_sizes) == 37
+    assert audit["peak_cluster_chunk"] == 7
+    assert audit["peak_requested_pair_count"] == 182
+    assert audit["global_request_state_retained"] is False
+    assert audit["global_market_rows_retained"] is False
+    assert audit["checkpoint_chunks_written"] == 37
+
+    def must_not_recompute(**_kwargs: object) -> dict:
+        raise AssertionError("completed market chunk was recomputed")
+
+    monkeypatch.setattr(
+        gate, "_apply_path_liquidity_overlap_chunk", must_not_recompute
+    )
+    resumed = copy.deepcopy(original)
+    resumed_audit = gate._apply_path_liquidity_overlap(
+        clusters=resumed,
+        sessions=[],
+        identity={},
+        panel_path=tmp_path / "unused.parquet",
+        checkpoint_dir=tmp_path / "checkpoint",
+        cluster_chunk_size=7,
+    )
+
+    assert resumed_audit["checkpoint_chunks_reused"] == 37
+    assert resumed[0]["reaction_session"] == date(2020, 1, 2)
+    assert resumed[0]["reporter_required_sessions"] == [date(2020, 1, 2)]
+
+
+def test_market_checkpoint_fails_closed_when_cluster_input_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = [
+        {
+            "cluster_id": "HYP015-bound",
+            "reaction_session": date(2020, 1, 2),
+            "entry_session": date(2020, 1, 3),
+            "exit_session": date(2020, 1, 9),
+            "sic": "3674",
+            "reporter_security_ids": [],
+            "peers": [],
+            "controls": [],
+        }
+    ]
+
+    def worker(**kwargs: object) -> dict:
+        chunk = kwargs["clusters"]
+        chunk[0].update(
+            {
+                "reporter_required_sessions": [],
+                "peer_required_sessions": [],
+                "reporter_lineage_pass": False,
+                "reporter_universe_eligible": False,
+                "included_peers": [],
+                "included_controls": [],
+                "structural_breadth_pass": False,
+                "emitted_evaluator_eligible": False,
+                "potential_overlap_inputs_complete": False,
+            }
+        )
+        return {"path_failures": {}, "mapping_path_counts": {}}
+
+    monkeypatch.setattr(gate, "_apply_path_liquidity_overlap_chunk", worker)
+    gate._apply_path_liquidity_overlap(
+        clusters=copy.deepcopy(original),
+        sessions=[],
+        identity={},
+        panel_path=tmp_path / "unused.parquet",
+        checkpoint_dir=tmp_path / "checkpoint",
+    )
+    changed = copy.deepcopy(original)
+    changed[0]["sic"] = "9999"
+    with pytest.raises(ValueError, match="checkpoint binding mismatch"):
+        gate._apply_path_liquidity_overlap(
+            clusters=changed,
+            sessions=[],
+            identity={},
+            panel_path=tmp_path / "unused.parquet",
+            checkpoint_dir=tmp_path / "checkpoint",
+        )
 
 
 def test_tolerated_validation_reporter_exclusion_is_adverse_mapped_once() -> None:

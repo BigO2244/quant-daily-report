@@ -19,6 +19,7 @@ import math
 import os
 import re
 import shutil
+import sqlite3
 import tarfile
 import tempfile
 from collections import Counter, defaultdict
@@ -96,6 +97,8 @@ PRICE_FLOOR = 5.0
 ADV_FLOOR = 10_000_000.0
 HEADER_LIMIT_BYTES = 512 * 1024
 MARKET_SCAN_SECURITY_CHUNK = 128
+MARKET_CLUSTER_CHUNK = 2
+CHECKPOINT_SCHEMA_VERSION = "caerus_hyp015_gate_checkpoint_v1"
 
 _SPEC_MARKER = "## Freeze record\n"
 _ADDENDUM_MARKER = "## Addendum record\n"
@@ -110,6 +113,122 @@ _HEADER_ACCEPTANCE = re.compile(r"<ACCEPTANCE-DATETIME>(\d{14})", re.I)
 _HEADER_FORM = re.compile(r"CONFORMED SUBMISSION TYPE:\s*([^\r\n]+)", re.I)
 _HEADER_ITEM = re.compile(r"ITEM INFORMATION:\s*([^\r\n]+)", re.I)
 _ET = ZoneInfo("America/New_York")
+
+
+class _HeaderIndex:
+    """Disk-backed, resumable SEC-header index for the production gate path."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.connection = sqlite3.connect(path)
+        self.connection.row_factory = sqlite3.Row
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def get(self, event_id: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM headers
+            WHERE event_id = ?
+              AND event_id NOT IN (SELECT event_id FROM failed_accessions)
+            """,
+            (event_id,),
+        ).fetchone()
+        return _decode_header_row(row) if row is not None else None
+
+    def __iter__(self) -> Iterator[dict[str, Any]]:
+        cursor = self.connection.execute(
+            """
+            SELECT * FROM headers
+            WHERE event_id NOT IN (SELECT event_id FROM failed_accessions)
+            ORDER BY acceptance, event_id
+            """
+        )
+        for row in cursor:
+            yield _decode_header_row(row)
+
+    def audit(self) -> dict[str, Any]:
+        verified = self.connection.execute(
+            """
+            SELECT COUNT(*) FROM headers
+            WHERE event_id NOT IN (SELECT event_id FROM failed_accessions)
+            """
+        ).fetchone()[0]
+        sic_count = self.connection.execute(
+            """
+            SELECT COUNT(*) FROM headers
+            WHERE event_id NOT IN (SELECT event_id FROM failed_accessions)
+              AND sic_count = 1 AND sic IS NOT NULL AND sic != ''
+            """
+        ).fetchone()[0]
+        failure_counts = dict(
+            self.connection.execute(
+                "SELECT reason, COUNT(*) FROM failures GROUP BY reason ORDER BY reason"
+            ).fetchall()
+        )
+        failed_count = self.connection.execute(
+            "SELECT COUNT(*) FROM failed_accessions"
+        ).fetchone()[0]
+        alias_groups = 0
+        advertised_extra = 0
+        actual_extra = 0
+        feed_cik = 0
+        feed_filed = 0
+        for row in self.connection.execute(
+            """
+            SELECT source_aliases_json, actual_member_paths_json,
+                   feed_cik_discrepancy_count,
+                   feed_filed_date_discrepancy_count
+            FROM headers
+            WHERE event_id NOT IN (SELECT event_id FROM failed_accessions)
+            """
+        ):
+            aliases = json.loads(row[0])
+            paths = json.loads(row[1])
+            alias_groups += len(aliases) > 1
+            advertised_extra += max(0, len(aliases) - 1)
+            actual_extra += max(0, len(paths) - 1)
+            feed_cik += int(row[2])
+            feed_filed += int(row[3])
+        attempted = verified + failed_count
+        return {
+            "attempted_original_headers_through_2024": attempted,
+            "verified_header_rows": verified,
+            "failure_count": failed_count,
+            "coverage": verified / attempted if attempted else 0.0,
+            "single_four_digit_sic_rows": sic_count,
+            "sic_coverage": sic_count / verified if verified else 0.0,
+            "duplicate_alias_group_count": alias_groups,
+            "advertised_alias_extra_row_count": advertised_extra,
+            "actual_member_alias_extra_count": actual_extra,
+            "feed_cik_discrepancy_count": feed_cik,
+            "feed_filed_date_discrepancy_count": feed_filed,
+            "failures_by_reason": failure_counts,
+            "checkpoint_path": str(self.path),
+            "checkpoint_resumable": True,
+            "headers_retained_in_memory": 0,
+        }
+
+
+def _decode_header_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "event_id": row["event_id"],
+        "cik": row["cik"],
+        "sic": row["sic"],
+        "sic_count": row["sic_count"],
+        "acceptance": parse_datetime(row["acceptance"]),
+        "form_type": row["form_type"],
+        "item_2_02": bool(row["item_2_02"]),
+        "source_sha256": row["source_sha256"],
+        "source_path": row["source_path"],
+        "source_aliases": json.loads(row["source_aliases_json"]),
+        "actual_member_paths": json.loads(row["actual_member_paths_json"]),
+        "feed_cik_discrepancy_count": row["feed_cik_discrepancy_count"],
+        "feed_filed_date_discrepancy_count": row[
+            "feed_filed_date_discrepancy_count"
+        ],
+    }
 
 
 def _sha256_file(path: Path) -> str:
@@ -816,6 +935,204 @@ def _scan_headers(
     return canonical_rows, sorted(set(failures))
 
 
+def _initialize_header_checkpoint(path: Path) -> sqlite3.Connection:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA synchronous=FULL")
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS checkpoint_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS completed_partitions (
+            partition TEXT PRIMARY KEY
+        );
+        CREATE TABLE IF NOT EXISTS headers (
+            event_id TEXT PRIMARY KEY,
+            cik TEXT,
+            sic TEXT,
+            sic_count INTEGER NOT NULL,
+            acceptance TEXT NOT NULL,
+            form_type TEXT,
+            item_2_02 INTEGER NOT NULL,
+            source_sha256 TEXT NOT NULL,
+            source_path TEXT NOT NULL,
+            source_aliases_json TEXT NOT NULL,
+            actual_member_paths_json TEXT NOT NULL,
+            feed_cik_discrepancy_count INTEGER NOT NULL,
+            feed_filed_date_discrepancy_count INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_headers_acceptance
+            ON headers(acceptance, event_id);
+        CREATE TABLE IF NOT EXISTS failed_accessions (
+            event_id TEXT PRIMARY KEY,
+            reason TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS failures (
+            partition TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            PRIMARY KEY(partition, event_id, reason)
+        );
+        """
+    )
+    bindings = {
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "runner_sha256": _sha256_file(Path(__file__)),
+        "source_bundle_sha256": SOURCE_BUNDLE_SHA256,
+        "validation_end": VALIDATION_END.isoformat(),
+    }
+    existing = dict(connection.execute("SELECT key, value FROM checkpoint_meta"))
+    if existing and existing != bindings:
+        connection.close()
+        raise ValueError("HYP-015 header checkpoint binding mismatch")
+    if not existing:
+        connection.executemany(
+            "INSERT INTO checkpoint_meta(key, value) VALUES(?, ?)",
+            sorted(bindings.items()),
+        )
+        connection.commit()
+    return connection
+
+
+def _merge_header_row(
+    connection: sqlite3.Connection, partition: str, row: Mapping[str, Any]
+) -> None:
+    event_id = str(row["event_id"])
+    existing = connection.execute(
+        "SELECT * FROM headers WHERE event_id = ?", (event_id,)
+    ).fetchone()
+    signature = (
+        row.get("source_sha256"),
+        row.get("cik"),
+        row.get("sic"),
+        row.get("sic_count"),
+        row.get("acceptance"),
+        row.get("form_type"),
+        bool(row.get("item_2_02")),
+    )
+    if existing is not None:
+        existing_signature = (
+            existing["source_sha256"],
+            existing["cik"],
+            existing["sic"],
+            existing["sic_count"],
+            parse_datetime(existing["acceptance"]),
+            existing["form_type"],
+            bool(existing["item_2_02"]),
+        )
+        if signature != existing_signature:
+            reason = "conflicting_cross_partition_payload"
+            connection.execute(
+                "INSERT OR REPLACE INTO failed_accessions(event_id, reason) VALUES(?, ?)",
+                (event_id, reason),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO failures VALUES(?, ?, ?)",
+                (partition, event_id, reason),
+            )
+            return
+        aliases = {
+            canonical_json(item): item
+            for item in (
+                *json.loads(existing["source_aliases_json"]),
+                *row.get("source_aliases", ()),
+            )
+        }
+        paths = sorted(
+            set(json.loads(existing["actual_member_paths_json"]))
+            | set(row.get("actual_member_paths", ()))
+        )
+        source_path = min(existing["source_path"], str(row["source_path"]))
+        alias_values = [aliases[key] for key in sorted(aliases)]
+    else:
+        alias_values = list(row.get("source_aliases", ()))
+        paths = sorted(set(row.get("actual_member_paths", ())))
+        source_path = str(row["source_path"])
+    feed_cik = sum(
+        item.get("feed_cik") != row.get("cik") for item in alias_values
+    )
+    acceptance_date = row["acceptance"].date().isoformat()
+    feed_filed = sum(
+        item.get("feed_filed_date") != acceptance_date for item in alias_values
+    )
+    connection.execute(
+        """
+        INSERT OR REPLACE INTO headers(
+            event_id, cik, sic, sic_count, acceptance, form_type, item_2_02,
+            source_sha256, source_path, source_aliases_json,
+            actual_member_paths_json, feed_cik_discrepancy_count,
+            feed_filed_date_discrepancy_count
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event_id,
+            row.get("cik"),
+            row.get("sic"),
+            int(row.get("sic_count") or 0),
+            row["acceptance"].isoformat(),
+            row.get("form_type"),
+            int(bool(row.get("item_2_02"))),
+            row["source_sha256"],
+            source_path,
+            canonical_json(alias_values),
+            canonical_json(paths),
+            feed_cik,
+            feed_filed,
+        ),
+    )
+
+
+def _scan_headers_to_checkpoint(
+    bundle_root: Path, checkpoint_path: Path
+) -> _HeaderIndex:
+    """Scan one archive partition at a time and commit each atomically."""
+
+    connection = _initialize_header_checkpoint(checkpoint_path)
+    try:
+        completed = {
+            row[0]
+            for row in connection.execute("SELECT partition FROM completed_partitions")
+        }
+        tasks = []
+        for inventory_path in sorted(
+            (bundle_root / "data/inventory").glob("*.jsonl.gz")
+        ):
+            partition = inventory_path.name.split("_inventory", 1)[0]
+            tar_path = bundle_root / "data/partitions" / f"{partition}.tar.gz"
+            if tar_path.is_file() and partition not in completed:
+                tasks.append((partition, tar_path, inventory_path))
+        for partition, tar_path, inventory_path in tasks:
+            rows, failures = _scan_partition(
+                (str(tar_path), str(inventory_path), VALIDATION_END.isoformat())
+            )
+            with connection:
+                for failure in failures:
+                    event_id, reason = failure.split(":", 1)
+                    connection.execute(
+                        "INSERT OR IGNORE INTO failures VALUES(?, ?, ?)",
+                        (partition, event_id, reason),
+                    )
+                    connection.execute(
+                        "INSERT OR REPLACE INTO failed_accessions VALUES(?, ?)",
+                        (event_id, reason),
+                    )
+                for row in rows:
+                    _merge_header_row(connection, partition, row)
+                connection.execute(
+                    "INSERT INTO completed_partitions(partition) VALUES(?)",
+                    (partition,),
+                )
+            del rows, failures
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        connection.close()
+    return _HeaderIndex(checkpoint_path)
+
+
 def _reaction_session(accepted: datetime, sessions: Sequence[date]) -> date | None:
     local = accepted.astimezone(_ET)
     index = bisect.bisect_left(sessions, local.date())
@@ -923,21 +1240,40 @@ def _reported_in_quarter(
     return left < len(values) and values[left] <= cutoff
 
 
+def _header_get(
+    headers: Sequence[dict[str, Any]] | _HeaderIndex, event_id: str
+) -> dict[str, Any] | None:
+    if isinstance(headers, _HeaderIndex):
+        return headers.get(event_id)
+    for row in headers:
+        if row["event_id"] == event_id:
+            return row
+    return None
+
+
+def _header_iter(
+    headers: Sequence[dict[str, Any]] | _HeaderIndex,
+) -> Iterator[dict[str, Any]]:
+    if isinstance(headers, _HeaderIndex):
+        yield from headers
+    else:
+        yield from sorted(headers, key=lambda row: (row["acceptance"], row["event_id"]))
+
+
 def _build_structural_clusters(
     *,
     events: Sequence[dict[str, Any]],
-    headers: Sequence[dict[str, Any]],
+    headers: Sequence[dict[str, Any]] | _HeaderIndex,
     identity: Mapping[str, Any],
     sessions: Sequence[date],
     excluded_event_metadata: Sequence[Mapping[str, Any]] = (),
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    header_by_event = {row["event_id"]: row for row in headers}
     event_dates: dict[str, list[datetime]] = defaultdict(list)
     reporter_failures: Counter[str] = Counter()
     reporter_metadata_discrepancies: Counter[str] = Counter()
     reporter_rows = []
     for event in events:
-        header = header_by_event.get(event["event_id"])
+        header = _header_get(headers, event["event_id"])
         if header and header.get("cik") and header.get("acceptance"):
             event_dates[header["cik"]].append(header["acceptance"])
     for event in excluded_event_metadata:
@@ -948,7 +1284,7 @@ def _build_structural_clusters(
     for values in event_dates.values():
         values.sort()
     for event in events:
-        header = header_by_event.get(event["event_id"])
+        header = _header_get(headers, event["event_id"])
         if header is None:
             reporter_failures["missing_verified_header"] += 1
             continue
@@ -1004,8 +1340,8 @@ def _build_structural_clusters(
     for row in reporter_rows:
         grouped[(row["reaction_session"], row["sic"])].append(row)
 
-    headers_sorted = sorted(headers, key=lambda row: (row["acceptance"], row["event_id"]))
-    header_cursor = 0
+    headers_iterator = iter(_header_iter(headers))
+    next_header = next(headers_iterator, None)
     current_sic: dict[str, str] = {}
     current_sic_source: dict[str, dict[str, Any]] = {}
     ciks_by_sic: dict[str, set[str]] = defaultdict(set)
@@ -1015,9 +1351,9 @@ def _build_structural_clusters(
     clusters: list[dict[str, Any]] = []
     for (reaction, sic), reporters in sorted(grouped.items()):
         cutoff = datetime.combine(reaction, time(16, 0), tzinfo=_ET).astimezone(timezone.utc)
-        while header_cursor < len(headers_sorted) and headers_sorted[header_cursor]["acceptance"] <= cutoff:
-            update = headers_sorted[header_cursor]
-            header_cursor += 1
+        while next_header is not None and next_header["acceptance"] <= cutoff:
+            update = next_header
+            next_header = next(headers_iterator, None)
             cik = update.get("cik")
             new_sic = update.get("sic")
             if not cik or not new_sic:
@@ -1360,9 +1696,15 @@ def _lineage_complete(
     return True
 
 
-def _apply_path_liquidity_overlap(
-    *, clusters: list[dict[str, Any]], sessions: Sequence[date], identity: Mapping[str, Any], panel_path: Path
+def _apply_path_liquidity_overlap_chunk(
+    *,
+    clusters: list[dict[str, Any]],
+    sessions: Sequence[date],
+    identity: Mapping[str, Any],
+    panel_path: Path,
 ) -> dict[str, Any]:
+    """Apply the no-return market gates to one bounded cluster chunk."""
+
     requests: dict[str, set[date]] = defaultdict(set)
     reaction_pairs: set[tuple[str, date]] = set()
     for cluster in clusters:
@@ -1380,6 +1722,7 @@ def _apply_path_liquidity_overlap(
             requests[security_id].update(peer_dates)
             requests[security_id].add(cluster["reaction_session"])
             reaction_pairs.add((security_id, cluster["reaction_session"]))
+    requested_pair_count = sum(len(values) for values in requests.values())
     found = _scan_requested_market_rows(panel_path, requests, reaction_pairs)
     path_failures: Counter[str] = Counter()
     included_peer_ids: set[str] = set()
@@ -1554,6 +1897,219 @@ def _apply_path_liquidity_overlap(
         "actual_qualifying_counts_rechecked_by_outcome_evaluator": True,
         "overlap_applied_pre_signal": False,
         "actual_overlap_deferred_until_qualifying_clusters_are_known": True,
+        "requested_security_count": len(requests),
+        "requested_pair_count": requested_pair_count,
+        "market_rows_retained_after_chunk": 0,
+    }
+
+
+def _decode_market_checkpoint_cluster(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Restore canonical JSON date/timestamp fields from a market checkpoint."""
+
+    cluster = dict(value)
+    for key in ("reaction_session", "entry_session", "exit_session"):
+        parsed = _parse_date(cluster.get(key))
+        if parsed is None:
+            raise ValueError(f"invalid market checkpoint {key}")
+        cluster[key] = parsed
+    for key in ("reporter_required_sessions", "peer_required_sessions"):
+        dates = [_parse_date(item) for item in cluster.get(key, ())]
+        if any(item is None for item in dates):
+            raise ValueError(f"invalid market checkpoint {key}")
+        cluster[key] = dates
+    for pool_name in (
+        "peers",
+        "controls",
+        "included_peers",
+        "included_controls",
+    ):
+        restored = []
+        for raw_candidate in cluster.get(pool_name, ()):
+            candidate = dict(raw_candidate)
+            for key in ("overlap_entry_session", "overlap_exit_session"):
+                if candidate.get(key) is not None:
+                    parsed = _parse_date(candidate[key])
+                    if parsed is None:
+                        raise ValueError(f"invalid market checkpoint {key}")
+                    candidate[key] = parsed
+            source = candidate.get("causal_sic_source")
+            if isinstance(source, Mapping):
+                restored_source = dict(source)
+                acceptance = restored_source.get("acceptance")
+                if isinstance(acceptance, str):
+                    restored_source["acceptance"] = parse_datetime(acceptance)
+                candidate["causal_sic_source"] = restored_source
+            restored.append(candidate)
+        cluster[pool_name] = restored
+    return cluster
+
+
+def _write_market_checkpoint(path: Path, payload: Mapping[str, Any]) -> None:
+    """Durably publish a completed chunk without exposing a partial checkpoint."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("wb") as raw:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as stream:
+                stream.write((canonical_json(payload) + "\n").encode("utf-8"))
+            raw.flush()
+            os.fsync(raw.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _read_market_checkpoint(
+    path: Path, *, start: int, input_hash: str
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    with gzip.open(path, "rt", encoding="utf-8") as stream:
+        payload = json.load(stream)
+    bindings = payload.get("bindings", {})
+    expected = {
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "runner_sha256": _sha256_file(Path(__file__)),
+        "start": start,
+        "input_hash": input_hash,
+        "observed_prices_sha256": PRICES_PANEL_SHA256,
+        "validation_end": VALIDATION_END.isoformat(),
+    }
+    if bindings != expected:
+        raise ValueError(f"HYP-015 market checkpoint binding mismatch: {path}")
+    rows = payload.get("clusters")
+    audit = payload.get("audit")
+    if not isinstance(rows, list) or not isinstance(audit, dict):
+        raise ValueError(f"HYP-015 market checkpoint payload invalid: {path}")
+    return [_decode_market_checkpoint_cluster(row) for row in rows], audit
+
+
+def _apply_path_liquidity_overlap(
+    *,
+    clusters: list[dict[str, Any]],
+    sessions: Sequence[date],
+    identity: Mapping[str, Any],
+    panel_path: Path,
+    checkpoint_dir: Path | None = None,
+    cluster_chunk_size: int = MARKET_CLUSTER_CHUNK,
+) -> dict[str, Any]:
+    """Apply path gates in bounded, atomically resumable cluster chunks."""
+
+    if cluster_chunk_size < 1:
+        raise ValueError("cluster_chunk_size must be positive")
+    path_failures: Counter[str] = Counter()
+    mapping_path_counts: Counter[str] = Counter()
+    included_peer_ids: set[str] = set()
+    included_sics: set[str] = set()
+    validation_clusters = 0
+    checkpoint_chunks_written = 0
+    checkpoint_chunks_reused = 0
+    peak_cluster_chunk = 0
+    peak_requested_security_count = 0
+    peak_requested_pair_count = 0
+
+    for start in range(0, len(clusters), cluster_chunk_size):
+        stop = min(start + cluster_chunk_size, len(clusters))
+        chunk = clusters[start:stop]
+        peak_cluster_chunk = max(peak_cluster_chunk, len(chunk))
+        input_hash = canonical_hash(chunk)
+        checkpoint_path = (
+            checkpoint_dir / "market_chunks" / f"{start:08d}.json.gz"
+            if checkpoint_dir is not None
+            else None
+        )
+        if checkpoint_path is not None and checkpoint_path.is_file():
+            completed, chunk_audit = _read_market_checkpoint(
+                checkpoint_path, start=start, input_hash=input_hash
+            )
+            if len(completed) != len(chunk):
+                raise ValueError("HYP-015 market checkpoint cluster count mismatch")
+            clusters[start:stop] = completed
+            chunk = completed
+            checkpoint_chunks_reused += 1
+        else:
+            chunk_audit = _apply_path_liquidity_overlap_chunk(
+                clusters=chunk,
+                sessions=sessions,
+                identity=identity,
+                panel_path=panel_path,
+            )
+            clusters[start:stop] = chunk
+            if checkpoint_path is not None:
+                _write_market_checkpoint(
+                    checkpoint_path,
+                    {
+                        "bindings": {
+                            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+                            "runner_sha256": _sha256_file(Path(__file__)),
+                            "start": start,
+                            "input_hash": input_hash,
+                            "observed_prices_sha256": PRICES_PANEL_SHA256,
+                            "validation_end": VALIDATION_END.isoformat(),
+                        },
+                        "clusters": chunk,
+                        "audit": chunk_audit,
+                    },
+                )
+                checkpoint_chunks_written += 1
+
+        path_failures.update(chunk_audit.get("path_failures", {}))
+        mapping_path_counts.update(chunk_audit.get("mapping_path_counts", {}))
+        peak_requested_security_count = max(
+            peak_requested_security_count,
+            int(chunk_audit.get("requested_security_count", 0)),
+        )
+        peak_requested_pair_count = max(
+            peak_requested_pair_count,
+            int(chunk_audit.get("requested_pair_count", 0)),
+        )
+        for cluster in chunk:
+            if not (
+                cluster.get("emitted_evaluator_eligible")
+                and VALIDATION_START
+                <= cluster["reaction_session"]
+                <= VALIDATION_END
+            ):
+                continue
+            validation_clusters += 1
+            included_peer_ids.update(
+                peer["security_id"] for peer in cluster.get("included_peers", ())
+            )
+            included_sics.add(cluster["sic"])
+
+    peer_path_rate = (
+        mapping_path_counts["peer_path_complete"]
+        / mapping_path_counts["peer_mapped"]
+        if mapping_path_counts["peer_mapped"]
+        else 0.0
+    )
+    control_path_rate = (
+        mapping_path_counts["control_path_complete"]
+        / mapping_path_counts["control_mapped"]
+        if mapping_path_counts["control_mapped"]
+        else 0.0
+    )
+    return {
+        "path_failures": dict(sorted(path_failures.items())),
+        "mapping_path_counts": dict(sorted(mapping_path_counts.items())),
+        "peer_path_coverage": peer_path_rate,
+        "control_path_coverage": control_path_rate,
+        "validation_structural_cluster_count": validation_clusters,
+        "validation_structural_unique_peer_count": len(included_peer_ids),
+        "validation_structural_four_digit_sic_count": len(included_sics),
+        "structural_counts_are_pre_signal": True,
+        "actual_qualifying_counts_rechecked_by_outcome_evaluator": True,
+        "overlap_applied_pre_signal": False,
+        "actual_overlap_deferred_until_qualifying_clusters_are_known": True,
+        "market_memory_model": "BOUNDED_CLUSTER_CHUNKS",
+        "cluster_chunk_size": cluster_chunk_size,
+        "peak_cluster_chunk": peak_cluster_chunk,
+        "peak_requested_security_count": peak_requested_security_count,
+        "peak_requested_pair_count": peak_requested_pair_count,
+        "global_request_state_retained": False,
+        "global_market_rows_retained": False,
+        "checkpoint_chunks_written": checkpoint_chunks_written,
+        "checkpoint_chunks_reused": checkpoint_chunks_reused,
+        "checkpoint_resumable": checkpoint_dir is not None,
     }
 
 
@@ -1562,14 +2118,13 @@ def _build_exclusions_and_missingness(
     source_errors: Sequence[Mapping[str, Any]],
     event_audit: Mapping[str, Any],
     included_events: Sequence[Mapping[str, Any]],
-    headers: Sequence[Mapping[str, Any]],
+    headers: Sequence[dict[str, Any]] | _HeaderIndex,
     clusters: Sequence[Mapping[str, Any]],
     checked_at: datetime,
     sessions: Sequence[date],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     exclusions: list[dict[str, Any]] = []
     coverage_rows: list[dict[str, Any]] = []
-    header_by_event = {row["event_id"]: row for row in headers}
     included_reporter_ids = {
         event_id
         for cluster in clusters
@@ -1652,7 +2207,7 @@ def _build_exclusions_and_missingness(
         coverage_rows.append({**row, "lineage_complete": False})
 
     for event in included_events:
-        header = header_by_event.get(event["event_id"], {})
+        header = _header_get(headers, event["event_id"]) or {}
         lineage_complete = event["event_id"] in included_reporter_ids
         row = {
             "stage": "REPORTER",
@@ -2060,7 +2615,7 @@ def run_gate(
     repo_root: Path,
     run_id: str,
     checked_at: datetime,
-    max_workers: int = 4,
+    max_workers: int = 1,
     enforce_canonical_gcp: bool = True,
 ) -> dict[str, Any]:
     if not _RUN_ID.fullmatch(run_id):
@@ -2070,6 +2625,11 @@ def run_gate(
         raise ValueError(
             "HYP-2026-015 evidence writes require the canonical GCP Alpha Lab root"
         )
+    hypothesis_root = repo_root / "outputs/research/alpha_lab" / HYPOTHESIS_ID
+    final_dir = hypothesis_root / run_id
+    if final_dir.exists():
+        raise FileExistsError(f"research run already exists: {final_dir}")
+    checkpoint_root = hypothesis_root / ".staging" / "checkpoints" / run_id
     spec = _verify_spec(repo_root)
     addendum = _verify_addendum(repo_root)
     source = _source_preflight(repo_root)
@@ -2084,39 +2644,12 @@ def run_gate(
     included_events, inventory_audit, _ = _validate_event_inventory(
         events, source["bundle_root"]
     )
-    headers, header_failures = _scan_headers(source["bundle_root"], max_workers)
-    header_attempted = len(headers) + len(header_failures)
-    header_sic_count = sum(
-        row.get("sic_count") == 1 and bool(row.get("sic")) for row in headers
+    headers = _scan_headers_to_checkpoint(
+        source["bundle_root"], checkpoint_root / "headers.sqlite"
     )
-    header_audit = {
-        "attempted_original_headers_through_2024": header_attempted,
-        "verified_header_rows": len(headers),
-        "failure_count": len(header_failures),
-        "coverage": len(headers) / header_attempted if header_attempted else 0.0,
-        "single_four_digit_sic_rows": header_sic_count,
-        "sic_coverage": header_sic_count / len(headers) if headers else 0.0,
-        "duplicate_alias_group_count": sum(
-            len(row.get("source_aliases", ())) > 1 for row in headers
-        ),
-        "advertised_alias_extra_row_count": sum(
-            max(0, len(row.get("source_aliases", ())) - 1) for row in headers
-        ),
-        "actual_member_alias_extra_count": sum(
-            max(0, len(row.get("actual_member_paths", ())) - 1)
-            for row in headers
-        ),
-        "feed_cik_discrepancy_count": sum(
-            row.get("feed_cik_discrepancy_count", 0) for row in headers
-        ),
-        "feed_filed_date_discrepancy_count": sum(
-            row.get("feed_filed_date_discrepancy_count", 0)
-            for row in headers
-        ),
-        "failures_by_reason": dict(
-            sorted(Counter(item.split(":", 1)[-1] for item in header_failures).items())
-        ),
-    }
+    header_audit = headers.audit()
+    header_audit["production_scan_workers"] = 1
+    header_audit["requested_max_workers_ignored_for_memory_safety"] = max_workers
 
     prices_record, panel_path, panel_file_record = _read_readiness_bound_file(
         repo_root, PRICES_READINESS_RELATIVE_PATH, PRICES_READINESS_SHA256
@@ -2135,7 +2668,11 @@ def run_gate(
         ],
     )
     path_audit = _apply_path_liquidity_overlap(
-        clusters=clusters, sessions=sessions, identity=identity, panel_path=panel_path
+        clusters=clusters,
+        sessions=sessions,
+        identity=identity,
+        panel_path=panel_path,
+        checkpoint_dir=checkpoint_root,
     )
     exclusions, missingness = _build_exclusions_and_missingness(
         source_errors=source["errors"],
@@ -2146,6 +2683,7 @@ def run_gate(
         checked_at=checked_at,
         sessions=sessions,
     )
+    headers.close()
     controls = _gate_summary(
         source,
         inventory_audit,
@@ -2193,6 +2731,18 @@ def run_gate(
         "header_audit": header_audit,
         "structural_audit": structural_audit,
         "path_overlap_audit": path_audit,
+        "runtime_memory_model": {
+            "headers": "SQLITE_DISK_BACKED_PARTITION_CHECKPOINT",
+            "headers_retained_in_memory": 0,
+            "header_partition_scan_workers": 1,
+            "market_rows": "PREDICATE_PUSHED_CLUSTER_CHUNKS",
+            "market_cluster_chunk_size": path_audit["cluster_chunk_size"],
+            "peak_market_cluster_chunk": path_audit["peak_cluster_chunk"],
+            "global_market_request_state_retained": False,
+            "checkpoint_root": str(checkpoint_root),
+            "checkpoint_retained_on_interruption": True,
+            "checkpoint_removed_after_atomic_evidence_publish": True,
+        },
         "missingness_concentration": missingness,
         "exclusion_manifest_row_count": len(exclusions),
         "eligibility_manifest_row_count": sum(
@@ -2232,6 +2782,7 @@ def run_gate(
         clusters=clusters,
         exclusions=exclusions,
     )
+    shutil.rmtree(checkpoint_root, ignore_errors=True)
     return {"run_dir": str(run_dir), "result": result, "manifest": manifest}
 
 
@@ -2240,7 +2791,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--run-id")
     parser.add_argument("--checked-at")
-    parser.add_argument("--max-workers", type=int, default=4)
+    parser.add_argument("--max-workers", type=int, default=1)
     return parser.parse_args()
 
 
