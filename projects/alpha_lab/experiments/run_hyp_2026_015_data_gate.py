@@ -97,6 +97,8 @@ PRICE_FLOOR = 5.0
 ADV_FLOOR = 10_000_000.0
 HEADER_LIMIT_BYTES = 512 * 1024
 MARKET_SCAN_SECURITY_CHUNK = 128
+MARKET_SCAN_BATCH_SIZE = 8_192
+CALENDAR_SCAN_BATCH_SIZE = 65_536
 MARKET_CLUSTER_CHUNK = 2
 CHECKPOINT_SCHEMA_VERSION = "caerus_hyp015_gate_checkpoint_v1"
 
@@ -1219,7 +1221,9 @@ def _calendar_from_panel(panel_path: Path) -> list[date]:
 
     sessions: set[date] = set()
     parquet = pq.ParquetFile(panel_path)
-    for batch in parquet.iter_batches(columns=["date"], batch_size=262_144):
+    for batch in parquet.iter_batches(
+        columns=["date"], batch_size=CALENDAR_SCAN_BATCH_SIZE
+    ):
         sessions.update(value for value in batch.column(0).to_pylist() if value <= VALIDATION_END)
     return sorted(sessions)
 
@@ -1586,7 +1590,7 @@ def _scan_requested_market_rows(
                 yield from dataset.to_batches(
                     columns=columns,
                     filter=challenge_filter & pair_filter,
-                    batch_size=262_144,
+                    batch_size=MARKET_SCAN_BATCH_SIZE,
                 )
 
     for batch in requested_batches():
@@ -2737,6 +2741,8 @@ def run_gate(
             "header_partition_scan_workers": 1,
             "market_rows": "PREDICATE_PUSHED_CLUSTER_CHUNKS",
             "market_cluster_chunk_size": path_audit["cluster_chunk_size"],
+            "market_arrow_batch_size": MARKET_SCAN_BATCH_SIZE,
+            "calendar_arrow_batch_size": CALENDAR_SCAN_BATCH_SIZE,
             "peak_market_cluster_chunk": path_audit["peak_cluster_chunk"],
             "global_market_request_state_retained": False,
             "checkpoint_root": str(checkpoint_root),

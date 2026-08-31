@@ -879,10 +879,12 @@ def test_market_scanner_pushes_exact_pairs_below_challenge_boundary(
     ]
     returned_rows = [requested_row]
     filters: list[str] = []
+    batch_sizes: list[int] = []
 
     class Dataset:
         def to_batches(self, *, filter: object, **_kwargs: object) -> list[Batch]:
             filters.append(repr(filter))
+            batch_sizes.append(int(_kwargs["batch_size"]))
             return [Batch(row) for row in returned_rows]
 
     pa = types.ModuleType("pyarrow")
@@ -906,6 +908,7 @@ def test_market_scanner_pushes_exact_pairs_below_challenge_boundary(
     assert found[("SEC:A", date(2020, 1, 2))]["price_floor_pass"] is True
     assert "date<2025-01-01" in filters[0]
     assert "security_id==SEC:A" in filters[0]
+    assert batch_sizes == [gate.MARKET_SCAN_BATCH_SIZE]
     returned_rows[:] = [
         [
             value if index != 1 else date(2025, 1, 2)
