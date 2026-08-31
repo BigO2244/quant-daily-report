@@ -18,6 +18,7 @@ import json
 import math
 import os
 import re
+import resource
 import shutil
 import sqlite3
 import tarfile
@@ -26,7 +27,7 @@ from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from datetime import date, datetime, time, timezone
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 from projects.alpha_lab.factory import canonical_hash, canonical_json
@@ -100,7 +101,11 @@ MARKET_SCAN_SECURITY_CHUNK = 128
 MARKET_SCAN_BATCH_SIZE = 8_192
 CALENDAR_SCAN_BATCH_SIZE = 65_536
 MARKET_CLUSTER_CHUNK = 2
-CHECKPOINT_SCHEMA_VERSION = "caerus_hyp015_gate_checkpoint_v1"
+MAX_CLUSTER_CANDIDATES = 5_000
+MAX_MARKET_REQUEST_PAIRS = 150_000
+PROCESS_RSS_LIMIT_BYTES = 384 * 1024 * 1024
+AGGREGATE_RSS_LIMIT_BYTES = 512 * 1024 * 1024
+CHECKPOINT_SCHEMA_VERSION = "caerus_hyp015_gate_checkpoint_v2"
 
 _SPEC_MARKER = "## Freeze record\n"
 _ADDENDUM_MARKER = "## Addendum record\n"
@@ -115,6 +120,59 @@ _HEADER_ACCEPTANCE = re.compile(r"<ACCEPTANCE-DATETIME>(\d{14})", re.I)
 _HEADER_FORM = re.compile(r"CONFORMED SUBMISSION TYPE:\s*([^\r\n]+)", re.I)
 _HEADER_ITEM = re.compile(r"ITEM INFORMATION:\s*([^\r\n]+)", re.I)
 _ET = ZoneInfo("America/New_York")
+
+
+def _current_rss_bytes() -> int:
+    """Return current resident bytes without adding a runtime dependency."""
+
+    proc_statm = Path("/proc/self/statm")
+    if proc_statm.is_file():
+        resident_pages = int(proc_statm.read_text(encoding="ascii").split()[1])
+        return resident_pages * os.sysconf("SC_PAGE_SIZE")
+    value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    # Linux reports KiB; Darwin reports bytes. /proc handles production Linux.
+    return value if value > 16 * 1024 * 1024 else value * 1024
+
+
+class _RssMonitor:
+    """Fail the no-return preflight before it exceeds the VM memory envelope."""
+
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+        self.peak_rss_bytes = 0
+        self.measurement_count = 0
+
+    def record(self, phase: str) -> None:
+        rss = _current_rss_bytes()
+        self.measurement_count += 1
+        self.peak_rss_bytes = max(self.peak_rss_bytes, rss)
+        record = {"phase": phase, "rss_bytes": rss}
+        if len(self.records) < 256:
+            self.records.append(record)
+        else:
+            self.records[-1] = record
+        if rss > PROCESS_RSS_LIMIT_BYTES:
+            raise MemoryError(
+                f"HYP-015 process RSS guard exceeded at {phase}: {rss} bytes"
+            )
+        if rss > AGGREGATE_RSS_LIMIT_BYTES:
+            raise MemoryError(
+                f"HYP-015 aggregate RSS guard exceeded at {phase}: {rss} bytes"
+            )
+
+    def audit(self) -> dict[str, Any]:
+        return {
+            "measurement": "CURRENT_PROCESS_RSS",
+            "single_process_pipeline": True,
+            "process_limit_bytes": PROCESS_RSS_LIMIT_BYTES,
+            "aggregate_limit_bytes": AGGREGATE_RSS_LIMIT_BYTES,
+            "peak_rss_bytes": self.peak_rss_bytes,
+            "measurement_count": self.measurement_count,
+            "retained_measurement_count": len(self.records),
+            "process_limit_pass": self.peak_rss_bytes <= PROCESS_RSS_LIMIT_BYTES,
+            "aggregate_limit_pass": self.peak_rss_bytes <= AGGREGATE_RSS_LIMIT_BYTES,
+            "phase_records": self.records,
+        }
 
 
 class _HeaderIndex:
@@ -193,6 +251,18 @@ class _HeaderIndex:
             actual_extra += max(0, len(paths) - 1)
             feed_cik += int(row[2])
             feed_filed += int(row[3])
+        partition_records = [
+            {
+                "partition": row["partition"],
+                "inventory_sha256": row["inventory_sha256"],
+                "inventory_bytes": row["inventory_bytes"],
+                "tar_sha256": row["tar_sha256"],
+                "tar_bytes": row["tar_bytes"],
+            }
+            for row in self.connection.execute(
+                "SELECT * FROM completed_partitions ORDER BY partition"
+            )
+        ]
         attempted = verified + failed_count
         return {
             "attempted_original_headers_through_2024": attempted,
@@ -210,6 +280,11 @@ class _HeaderIndex:
             "checkpoint_path": str(self.path),
             "checkpoint_resumable": True,
             "headers_retained_in_memory": 0,
+            "completed_partition_count": len(partition_records),
+            "completed_partition_hashes": partition_records,
+            "completed_partition_inventory_sha256": canonical_hash(
+                partition_records
+            ),
         }
 
 
@@ -231,6 +306,207 @@ def _decode_header_row(row: sqlite3.Row) -> dict[str, Any]:
             "feed_filed_date_discrepancy_count"
         ],
     }
+
+
+class _ClusterSpool:
+    """Integrity-checked disk spool for structural and annotated clusters."""
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
+        self.connection = sqlite3.connect(path)
+        self.connection.row_factory = sqlite3.Row
+        self.connection.execute("PRAGMA journal_mode=WAL")
+        self.connection.execute("PRAGMA synchronous=FULL")
+        self.connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS spool_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS clusters (
+                ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+                reaction_session TEXT NOT NULL,
+                sic TEXT NOT NULL,
+                structural_json TEXT NOT NULL,
+                structural_sha256 TEXT NOT NULL,
+                annotated_json TEXT,
+                annotated_sha256 TEXT,
+                UNIQUE(reaction_session, sic)
+            );
+            """
+        )
+        bindings = {
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "runner_sha256": _sha256_file(Path(__file__)),
+            "source_bundle_sha256": SOURCE_BUNDLE_SHA256,
+            "observed_prices_sha256": PRICES_PANEL_SHA256,
+            "validation_end": VALIDATION_END.isoformat(),
+        }
+        existing = dict(self.connection.execute("SELECT key, value FROM spool_meta"))
+        bound = {key: existing.get(key) for key in bindings}
+        if any(value is not None for value in bound.values()) and bound != bindings:
+            self.close()
+            raise ValueError("HYP-015 structural spool binding mismatch")
+        if not any(value is not None for value in bound.values()):
+            self.connection.executemany(
+                "INSERT INTO spool_meta(key, value) VALUES(?, ?)",
+                sorted(bindings.items()),
+            )
+            self.connection.commit()
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def _meta(self, key: str) -> str | None:
+        row = self.connection.execute(
+            "SELECT value FROM spool_meta WHERE key = ?", (key,)
+        ).fetchone()
+        return str(row[0]) if row is not None else None
+
+    def _set_meta(self, key: str, value: str) -> None:
+        self.connection.execute(
+            "INSERT OR REPLACE INTO spool_meta(key, value) VALUES(?, ?)",
+            (key, value),
+        )
+
+    def structural_ready(self) -> bool:
+        if self._meta("structural_complete") != "1":
+            return False
+        expected_count = int(self._meta("structural_cluster_count") or -1)
+        observed_count = self.connection.execute(
+            "SELECT COUNT(*) FROM clusters"
+        ).fetchone()[0]
+        if expected_count != observed_count:
+            raise ValueError("HYP-015 structural spool count mismatch")
+        for row in self.connection.execute(
+            "SELECT structural_json, structural_sha256 FROM clusters ORDER BY ordinal"
+        ):
+            if hashlib.sha256(row[0].encode("utf-8")).hexdigest() != row[1]:
+                raise ValueError("HYP-015 structural spool integrity mismatch")
+        return True
+
+    def begin_structural_rebuild(self) -> None:
+        with self.connection:
+            self.connection.execute("DELETE FROM clusters")
+            for key in (
+                "structural_complete",
+                "structural_cluster_count",
+                "structural_audit_json",
+                "structural_audit_sha256",
+                "annotated_complete",
+                "path_audit_json",
+                "path_audit_sha256",
+            ):
+                self.connection.execute("DELETE FROM spool_meta WHERE key = ?", (key,))
+
+    def append_structural(self, cluster: Mapping[str, Any]) -> None:
+        payload = canonical_json(cluster)
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO clusters(
+                    reaction_session, sic, structural_json, structural_sha256
+                ) VALUES(?, ?, ?, ?)
+                """,
+                (
+                    cluster["reaction_session"].isoformat(),
+                    cluster["sic"],
+                    payload,
+                    hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+                ),
+            )
+
+    def finish_structural(self, audit: Mapping[str, Any]) -> None:
+        payload = canonical_json(audit)
+        count = self.connection.execute("SELECT COUNT(*) FROM clusters").fetchone()[0]
+        with self.connection:
+            self._set_meta("structural_cluster_count", str(count))
+            self._set_meta("structural_audit_json", payload)
+            self._set_meta(
+                "structural_audit_sha256",
+                hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+            )
+            self._set_meta("structural_complete", "1")
+
+    def structural_audit(self) -> dict[str, Any]:
+        payload = self._meta("structural_audit_json")
+        expected = self._meta("structural_audit_sha256")
+        if payload is None or expected is None:
+            raise ValueError("HYP-015 structural audit absent from spool")
+        if hashlib.sha256(payload.encode("utf-8")).hexdigest() != expected:
+            raise ValueError("HYP-015 structural audit integrity mismatch")
+        return json.loads(payload)
+
+    def iter_structural_chunks(
+        self, chunk_size: int
+    ) -> Iterator[list[tuple[int, dict[str, Any]]]]:
+        if chunk_size < 1:
+            raise ValueError("structural spool chunk_size must be positive")
+        chunk: list[tuple[int, dict[str, Any]]] = []
+        for row in self.connection.execute(
+            """
+            SELECT ordinal, structural_json, structural_sha256
+            FROM clusters ORDER BY ordinal
+            """
+        ):
+            if hashlib.sha256(row[1].encode("utf-8")).hexdigest() != row[2]:
+                raise ValueError("HYP-015 structural spool integrity mismatch")
+            chunk.append((int(row[0]), _decode_market_checkpoint_cluster(json.loads(row[1]))))
+            if len(chunk) == chunk_size:
+                yield chunk
+                chunk = []
+        if chunk:
+            yield chunk
+
+    def write_annotated(self, ordinal: int, cluster: Mapping[str, Any]) -> None:
+        payload = canonical_json(cluster)
+        with self.connection:
+            updated = self.connection.execute(
+                """
+                UPDATE clusters
+                SET annotated_json = ?, annotated_sha256 = ?
+                WHERE ordinal = ?
+                """,
+                (
+                    payload,
+                    hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+                    ordinal,
+                ),
+            ).rowcount
+        if updated != 1:
+            raise ValueError("HYP-015 annotated spool ordinal absent")
+
+    def finish_annotated(self, audit: Mapping[str, Any]) -> None:
+        missing = self.connection.execute(
+            "SELECT COUNT(*) FROM clusters WHERE annotated_json IS NULL"
+        ).fetchone()[0]
+        if missing:
+            raise ValueError("HYP-015 annotated spool is incomplete")
+        payload = canonical_json(audit)
+        with self.connection:
+            self._set_meta("path_audit_json", payload)
+            self._set_meta(
+                "path_audit_sha256",
+                hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+            )
+            self._set_meta("annotated_complete", "1")
+
+    def __iter__(self) -> Iterator[dict[str, Any]]:
+        for row in self.connection.execute(
+            """
+            SELECT annotated_json, annotated_sha256
+            FROM clusters ORDER BY ordinal
+            """
+        ):
+            if row[0] is None or row[1] is None:
+                raise ValueError("HYP-015 annotated spool row absent")
+            if hashlib.sha256(row[0].encode("utf-8")).hexdigest() != row[1]:
+                raise ValueError("HYP-015 annotated spool integrity mismatch")
+            yield _decode_market_checkpoint_cluster(json.loads(row[0]))
+
+    def __len__(self) -> int:
+        return int(self.connection.execute("SELECT COUNT(*) FROM clusters").fetchone()[0])
 
 
 def _sha256_file(path: Path) -> str:
@@ -950,7 +1226,11 @@ def _initialize_header_checkpoint(path: Path) -> sqlite3.Connection:
             value TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS completed_partitions (
-            partition TEXT PRIMARY KEY
+            partition TEXT PRIMARY KEY,
+            inventory_sha256 TEXT NOT NULL,
+            inventory_bytes INTEGER NOT NULL,
+            tar_sha256 TEXT NOT NULL,
+            tar_bytes INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS headers (
             event_id TEXT PRIMARY KEY,
@@ -1089,28 +1369,83 @@ def _merge_header_row(
 
 
 def _scan_headers_to_checkpoint(
-    bundle_root: Path, checkpoint_path: Path
+    bundle_root: Path,
+    checkpoint_path: Path,
+    phase_observer: Callable[[str], None] | None = None,
 ) -> _HeaderIndex:
     """Scan one archive partition at a time and commit each atomically."""
 
     connection = _initialize_header_checkpoint(checkpoint_path)
     try:
         completed = {
-            row[0]
-            for row in connection.execute("SELECT partition FROM completed_partitions")
+            row["partition"]: dict(row)
+            for row in connection.execute("SELECT * FROM completed_partitions")
         }
         tasks = []
+        discovered_partitions: set[str] = set()
         for inventory_path in sorted(
             (bundle_root / "data/inventory").glob("*.jsonl.gz")
         ):
             partition = inventory_path.name.split("_inventory", 1)[0]
+            discovered_partitions.add(partition)
             tar_path = bundle_root / "data/partitions" / f"{partition}.tar.gz"
-            if tar_path.is_file() and partition not in completed:
-                tasks.append((partition, tar_path, inventory_path))
+            if partition in completed:
+                record = completed[partition]
+                if not tar_path.is_file():
+                    raise ValueError(
+                        f"completed SEC header partition source missing: {partition}"
+                    )
+                observed = {
+                    "inventory_sha256": _sha256_file(inventory_path),
+                    "inventory_bytes": inventory_path.stat().st_size,
+                    "tar_sha256": _sha256_file(tar_path),
+                    "tar_bytes": tar_path.stat().st_size,
+                }
+                expected = {
+                    key: record[key]
+                    for key in (
+                        "inventory_sha256",
+                        "inventory_bytes",
+                        "tar_sha256",
+                        "tar_bytes",
+                    )
+                }
+                if observed != expected:
+                    raise ValueError(
+                        f"completed SEC header partition integrity mismatch: {partition}"
+                    )
+                if phase_observer is not None:
+                    phase_observer(f"header_partition_reverified::{partition}")
+                continue
+            if not tar_path.is_file():
+                raise ValueError(f"SEC header partition archive missing: {partition}")
+            tasks.append((partition, tar_path, inventory_path))
+        missing_completed = sorted(set(completed) - discovered_partitions)
+        if missing_completed:
+            raise ValueError(
+                "completed SEC header inventory partition missing: "
+                + ",".join(missing_completed)
+            )
         for partition, tar_path, inventory_path in tasks:
+            before = {
+                "inventory_sha256": _sha256_file(inventory_path),
+                "inventory_bytes": inventory_path.stat().st_size,
+                "tar_sha256": _sha256_file(tar_path),
+                "tar_bytes": tar_path.stat().st_size,
+            }
             rows, failures = _scan_partition(
                 (str(tar_path), str(inventory_path), VALIDATION_END.isoformat())
             )
+            after = {
+                "inventory_sha256": _sha256_file(inventory_path),
+                "inventory_bytes": inventory_path.stat().st_size,
+                "tar_sha256": _sha256_file(tar_path),
+                "tar_bytes": tar_path.stat().st_size,
+            }
+            if after != before:
+                raise ValueError(
+                    f"SEC header partition changed during scan: {partition}"
+                )
             with connection:
                 for failure in failures:
                     event_id, reason = failure.split(":", 1)
@@ -1125,10 +1460,23 @@ def _scan_headers_to_checkpoint(
                 for row in rows:
                     _merge_header_row(connection, partition, row)
                 connection.execute(
-                    "INSERT INTO completed_partitions(partition) VALUES(?)",
-                    (partition,),
+                    """
+                    INSERT INTO completed_partitions(
+                        partition, inventory_sha256, inventory_bytes,
+                        tar_sha256, tar_bytes
+                    ) VALUES(?, ?, ?, ?, ?)
+                    """,
+                    (
+                        partition,
+                        before["inventory_sha256"],
+                        before["inventory_bytes"],
+                        before["tar_sha256"],
+                        before["tar_bytes"],
+                    ),
                 )
             del rows, failures
+            if phase_observer is not None:
+                phase_observer(f"header_partition_committed::{partition}")
         connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     finally:
         connection.close()
@@ -1271,11 +1619,33 @@ def _build_structural_clusters(
     identity: Mapping[str, Any],
     sessions: Sequence[date],
     excluded_event_metadata: Sequence[Mapping[str, Any]] = (),
+    cluster_sink: Callable[[dict[str, Any]], None] | None = None,
+    reporter_spool_path: Path | None = None,
+    max_cluster_candidates: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     event_dates: dict[str, list[datetime]] = defaultdict(list)
     reporter_failures: Counter[str] = Counter()
     reporter_metadata_discrepancies: Counter[str] = Counter()
-    reporter_rows = []
+    reporter_rows: list[dict[str, Any]] = []
+    reporter_connection: sqlite3.Connection | None = None
+    reporter_included = 0
+    if reporter_spool_path is not None:
+        reporter_spool_path.parent.mkdir(parents=True, exist_ok=True)
+        reporter_spool_path.unlink(missing_ok=True)
+        reporter_connection = sqlite3.connect(reporter_spool_path)
+        reporter_connection.execute(
+            """
+            CREATE TABLE reporters (
+                reaction_session TEXT NOT NULL,
+                sic TEXT NOT NULL,
+                event_id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL
+            )
+            """
+        )
+        reporter_connection.execute(
+            "CREATE INDEX idx_reporter_group ON reporters(reaction_session, sic, event_id)"
+        )
     for event in events:
         header = _header_get(headers, event["event_id"])
         if header and header.get("cik") and header.get("acceptance"):
@@ -1323,8 +1693,7 @@ def _build_structural_clusters(
         if security_id is None:
             reporter_failures[f"reporter_mapping_{mapping.lower()}"] += 1
             continue
-        reporter_rows.append(
-            {
+        reporter_record = {
                 **event,
                 "issuer_cik": header["cik"],
                 "acceptance": header["acceptance"],
@@ -1339,10 +1708,51 @@ def _build_structural_clusters(
                     "actual_member_paths", ()
                 ),
             }
+        reporter_included += 1
+        if reporter_connection is None:
+            reporter_rows.append(reporter_record)
+        else:
+            reporter_connection.execute(
+                "INSERT INTO reporters VALUES(?, ?, ?, ?)",
+                (
+                    reporter_record["reaction_session"].isoformat(),
+                    reporter_record["sic"],
+                    reporter_record["event_id"],
+                    canonical_json(reporter_record),
+                ),
+            )
+            if reporter_included % 1_000 == 0:
+                reporter_connection.commit()
+    if reporter_connection is not None:
+        reporter_connection.commit()
+
+    def reporter_groups() -> Iterator[tuple[date, str, list[dict[str, Any]]]]:
+        if reporter_connection is None:
+            grouped: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
+            for row in reporter_rows:
+                grouped[(row["reaction_session"], row["sic"])].append(row)
+            for (reaction, sic), rows in sorted(grouped.items()):
+                yield reaction, sic, rows
+            return
+        group_cursor = reporter_connection.execute(
+            "SELECT DISTINCT reaction_session, sic FROM reporters ORDER BY 1, 2"
         )
-    grouped: dict[tuple[date, str], list[dict[str, Any]]] = defaultdict(list)
-    for row in reporter_rows:
-        grouped[(row["reaction_session"], row["sic"])].append(row)
+        for reaction_text, sic in group_cursor:
+            rows = []
+            for (payload_text,) in reporter_connection.execute(
+                """
+                SELECT payload_json FROM reporters
+                WHERE reaction_session = ? AND sic = ? ORDER BY event_id
+                """,
+                (reaction_text, sic),
+            ):
+                row = json.loads(payload_text)
+                row["acceptance"] = parse_datetime(row["acceptance"])
+                row["reaction_session"] = date.fromisoformat(
+                    row["reaction_session"]
+                )
+                rows.append(row)
+            yield date.fromisoformat(reaction_text), sic, rows
 
     headers_iterator = iter(_header_iter(headers))
     next_header = next(headers_iterator, None)
@@ -1353,7 +1763,7 @@ def _build_structural_clusters(
     peer_mapping: Counter[str] = Counter()
     control_mapping: Counter[str] = Counter()
     clusters: list[dict[str, Any]] = []
-    for (reaction, sic), reporters in sorted(grouped.items()):
+    for reaction, sic, reporters in reporter_groups():
         cutoff = datetime.combine(reaction, time(16, 0), tzinfo=_ET).astimezone(timezone.utc)
         while next_header is not None and next_header["acceptance"] <= cutoff:
             update = next_header
@@ -1380,15 +1790,39 @@ def _build_structural_clusters(
         reporter_ciks = sorted({row["issuer_cik"] for row in reporters})
         reporter_set = set(reporter_ciks)
 
+        candidate_count = len(reporters)
+        if (
+            max_cluster_candidates is not None
+            and candidate_count > max_cluster_candidates
+        ):
+            raise MemoryError(
+                "HYP-015 structural cluster exceeds deterministic pre-outcome "
+                "participant guard: "
+                f"{reaction.isoformat()}::{sic}::{candidate_count}>"
+                f"{max_cluster_candidates}"
+            )
+
         def map_potentials(
             ciks: Iterable[str], counter: Counter[str], relevance: str
         ) -> list[dict[str, Any]]:
+            nonlocal candidate_count
             potentials = []
             for peer_cik in sorted(set(ciks) - reporter_set):
                 if _reported_in_quarter(
                     event_dates, peer_cik, _quarter_start(reaction), cutoff
                 ):
                     continue
+                candidate_count += 1
+                if (
+                    max_cluster_candidates is not None
+                    and candidate_count > max_cluster_candidates
+                ):
+                    raise MemoryError(
+                        "HYP-015 structural cluster exceeds deterministic "
+                        "pre-outcome participant guard: "
+                        f"{reaction.isoformat()}::{sic}::{candidate_count}>"
+                        f"{max_cluster_candidates}"
+                    )
                 counter["attempted"] += 1
                 security_id, mapping = _unique_security(identity, peer_cik, reaction)
                 if security_id is None:
@@ -1459,8 +1893,7 @@ def _build_structural_clusters(
                 }
             ).encode()
         ).hexdigest()[:20]
-        clusters.append(
-            {
+        cluster = {
                 "cluster_id": f"HYP015-{cluster_id}",
                 "reaction_session": reaction,
                 "entry_session": entry,
@@ -1497,7 +1930,12 @@ def _build_structural_clusters(
                     + ",".join(sorted(row["event_id"] for row in reporters))
                 ),
             }
-        )
+        if cluster_sink is None:
+            clusters.append(cluster)
+        else:
+            cluster_sink(cluster)
+    if reporter_connection is not None:
+        reporter_connection.close()
     mapping_rate = (
         peer_mapping["mapped"] / peer_mapping["attempted"]
         if peer_mapping["attempted"]
@@ -1510,7 +1948,7 @@ def _build_structural_clusters(
     )
     return clusters, {
         "reporter_attempted": len(events),
-        "reporter_included": len(reporter_rows),
+        "reporter_included": reporter_included,
         "reporter_failures": dict(sorted(reporter_failures.items())),
         "reporter_metadata_discrepancies": dict(
             sorted(reporter_metadata_discrepancies.items())
@@ -1727,6 +2165,11 @@ def _apply_path_liquidity_overlap_chunk(
             requests[security_id].add(cluster["reaction_session"])
             reaction_pairs.add((security_id, cluster["reaction_session"]))
     requested_pair_count = sum(len(values) for values in requests.values())
+    if requested_pair_count > MAX_MARKET_REQUEST_PAIRS:
+        raise MemoryError(
+            "HYP-015 market request shard exceeds deterministic pre-outcome guard: "
+            f"{requested_pair_count}>{MAX_MARKET_REQUEST_PAIRS}"
+        )
     found = _scan_requested_market_rows(panel_path, requests, reaction_pairs)
     path_failures: Counter[str] = Counter()
     included_peer_ids: set[str] = set()
@@ -1949,25 +2392,54 @@ def _decode_market_checkpoint_cluster(value: Mapping[str, Any]) -> dict[str, Any
 
 
 def _write_market_checkpoint(path: Path, payload: Mapping[str, Any]) -> None:
-    """Durably publish a completed chunk without exposing a partial checkpoint."""
+    """Publish an atomic chunk directory with an external integrity record."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary = Path(
+        tempfile.mkdtemp(prefix=f".{path.name}.{os.getpid()}.", dir=path.parent)
+    )
     try:
-        with temporary.open("wb") as raw:
+        payload_path = temporary / "chunk.json.gz"
+        with payload_path.open("wb") as raw:
             with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as stream:
                 stream.write((canonical_json(payload) + "\n").encode("utf-8"))
             raw.flush()
             os.fsync(raw.fileno())
+        integrity = {
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "file": payload_path.name,
+            "bytes": payload_path.stat().st_size,
+            "sha256": _sha256_file(payload_path),
+            "bindings_sha256": canonical_hash(payload["bindings"]),
+        }
+        integrity_path = temporary / "integrity.json"
+        integrity_path.write_text(canonical_json(integrity) + "\n", encoding="utf-8")
+        with integrity_path.open("rb") as stream:
+            os.fsync(stream.fileno())
+        if path.exists():
+            raise FileExistsError(f"market checkpoint already exists: {path}")
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        shutil.rmtree(temporary, ignore_errors=True)
 
 
 def _read_market_checkpoint(
     path: Path, *, start: int, input_hash: str
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    with gzip.open(path, "rt", encoding="utf-8") as stream:
+    payload_path = path / "chunk.json.gz"
+    integrity_path = path / "integrity.json"
+    if not path.is_dir() or not payload_path.is_file() or not integrity_path.is_file():
+        raise ValueError(f"HYP-015 market checkpoint integrity files missing: {path}")
+    integrity = json.loads(integrity_path.read_text(encoding="utf-8"))
+    observed_integrity = {
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "file": payload_path.name,
+        "bytes": payload_path.stat().st_size,
+        "sha256": _sha256_file(payload_path),
+    }
+    if any(integrity.get(key) != value for key, value in observed_integrity.items()):
+        raise ValueError(f"HYP-015 market checkpoint integrity mismatch: {path}")
+    with gzip.open(payload_path, "rt", encoding="utf-8") as stream:
         payload = json.load(stream)
     bindings = payload.get("bindings", {})
     expected = {
@@ -1980,6 +2452,8 @@ def _read_market_checkpoint(
     }
     if bindings != expected:
         raise ValueError(f"HYP-015 market checkpoint binding mismatch: {path}")
+    if integrity.get("bindings_sha256") != canonical_hash(bindings):
+        raise ValueError(f"HYP-015 market checkpoint binding hash mismatch: {path}")
     rows = payload.get("clusters")
     audit = payload.get("audit")
     if not isinstance(rows, list) or not isinstance(audit, dict):
@@ -1995,6 +2469,8 @@ def _apply_path_liquidity_overlap(
     panel_path: Path,
     checkpoint_dir: Path | None = None,
     cluster_chunk_size: int = MARKET_CLUSTER_CHUNK,
+    checkpoint_start_offset: int = 0,
+    phase_observer: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Apply path gates in bounded, atomically resumable cluster chunks."""
 
@@ -2013,17 +2489,18 @@ def _apply_path_liquidity_overlap(
 
     for start in range(0, len(clusters), cluster_chunk_size):
         stop = min(start + cluster_chunk_size, len(clusters))
+        checkpoint_start = checkpoint_start_offset + start
         chunk = clusters[start:stop]
         peak_cluster_chunk = max(peak_cluster_chunk, len(chunk))
         input_hash = canonical_hash(chunk)
         checkpoint_path = (
-            checkpoint_dir / "market_chunks" / f"{start:08d}.json.gz"
+            checkpoint_dir / "market_chunks" / f"{checkpoint_start:08d}"
             if checkpoint_dir is not None
             else None
         )
-        if checkpoint_path is not None and checkpoint_path.is_file():
+        if checkpoint_path is not None and checkpoint_path.exists():
             completed, chunk_audit = _read_market_checkpoint(
-                checkpoint_path, start=start, input_hash=input_hash
+                checkpoint_path, start=checkpoint_start, input_hash=input_hash
             )
             if len(completed) != len(chunk):
                 raise ValueError("HYP-015 market checkpoint cluster count mismatch")
@@ -2045,7 +2522,7 @@ def _apply_path_liquidity_overlap(
                         "bindings": {
                             "schema_version": CHECKPOINT_SCHEMA_VERSION,
                             "runner_sha256": _sha256_file(Path(__file__)),
-                            "start": start,
+                            "start": checkpoint_start,
                             "input_hash": input_hash,
                             "observed_prices_sha256": PRICES_PANEL_SHA256,
                             "validation_end": VALIDATION_END.isoformat(),
@@ -2055,6 +2532,8 @@ def _apply_path_liquidity_overlap(
                     },
                 )
                 checkpoint_chunks_written += 1
+        if phase_observer is not None:
+            phase_observer(f"market_chunk_complete::{checkpoint_start:08d}")
 
         path_failures.update(chunk_audit.get("path_failures", {}))
         mapping_path_counts.update(chunk_audit.get("mapping_path_counts", {}))
@@ -2117,18 +2596,217 @@ def _apply_path_liquidity_overlap(
     }
 
 
+def _spool_structural_clusters(
+    *,
+    spool: _ClusterSpool,
+    events: Sequence[dict[str, Any]],
+    headers: Sequence[dict[str, Any]] | _HeaderIndex,
+    identity: Mapping[str, Any],
+    sessions: Sequence[date],
+    excluded_event_metadata: Sequence[Mapping[str, Any]],
+    reporter_spool_path: Path,
+    phase_observer: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    if spool.structural_ready():
+        if phase_observer is not None:
+            phase_observer("structural_spool_reverified")
+        return spool.structural_audit()
+    spool.begin_structural_rebuild()
+
+    def sink(cluster: dict[str, Any]) -> None:
+        spool.append_structural(cluster)
+        if phase_observer is not None:
+            phase_observer(
+                "structural_cluster_spooled::"
+                f"{cluster['reaction_session'].isoformat()}::{cluster['sic']}"
+            )
+
+    retained, audit = _build_structural_clusters(
+        events=events,
+        headers=headers,
+        identity=identity,
+        sessions=sessions,
+        excluded_event_metadata=excluded_event_metadata,
+        cluster_sink=sink,
+        reporter_spool_path=reporter_spool_path,
+        max_cluster_candidates=MAX_CLUSTER_CANDIDATES,
+    )
+    if retained:
+        raise ValueError("HYP-015 spooled structural builder retained clusters")
+    spool.finish_structural(audit)
+    reporter_spool_path.unlink(missing_ok=True)
+    return audit
+
+
+def _annotate_cluster_spool(
+    *,
+    spool: _ClusterSpool,
+    sessions: Sequence[date],
+    identity: Mapping[str, Any],
+    panel_path: Path,
+    checkpoint_dir: Path,
+    phase_observer: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    path_failures: Counter[str] = Counter()
+    mapping_path_counts: Counter[str] = Counter()
+    peak_cluster_chunk = 0
+    peak_requested_security_count = 0
+    peak_requested_pair_count = 0
+    written = 0
+    reused = 0
+    for chunk in spool.iter_structural_chunks(MARKET_CLUSTER_CHUNK):
+        ordinals = [item[0] for item in chunk]
+        clusters = [item[1] for item in chunk]
+        audit = _apply_path_liquidity_overlap(
+            clusters=clusters,
+            sessions=sessions,
+            identity=identity,
+            panel_path=panel_path,
+            checkpoint_dir=checkpoint_dir,
+            cluster_chunk_size=MARKET_CLUSTER_CHUNK,
+            checkpoint_start_offset=ordinals[0] - 1,
+            phase_observer=phase_observer,
+        )
+        for ordinal, cluster in zip(ordinals, clusters):
+            spool.write_annotated(ordinal, cluster)
+        path_failures.update(audit.get("path_failures", {}))
+        mapping_path_counts.update(audit.get("mapping_path_counts", {}))
+        peak_cluster_chunk = max(peak_cluster_chunk, audit["peak_cluster_chunk"])
+        peak_requested_security_count = max(
+            peak_requested_security_count,
+            audit["peak_requested_security_count"],
+        )
+        peak_requested_pair_count = max(
+            peak_requested_pair_count,
+            audit["peak_requested_pair_count"],
+        )
+        written += audit["checkpoint_chunks_written"]
+        reused += audit["checkpoint_chunks_reused"]
+
+    validation_clusters = 0
+    included_peer_ids: set[str] = set()
+    included_sics: set[str] = set()
+    for cluster in spool:
+        if not (
+            cluster.get("emitted_evaluator_eligible")
+            and VALIDATION_START <= cluster["reaction_session"] <= VALIDATION_END
+        ):
+            continue
+        validation_clusters += 1
+        included_peer_ids.update(
+            item["security_id"] for item in cluster.get("included_peers", ())
+        )
+        included_sics.add(cluster["sic"])
+    peer_path_rate = (
+        mapping_path_counts["peer_path_complete"]
+        / mapping_path_counts["peer_mapped"]
+        if mapping_path_counts["peer_mapped"]
+        else 0.0
+    )
+    control_path_rate = (
+        mapping_path_counts["control_path_complete"]
+        / mapping_path_counts["control_mapped"]
+        if mapping_path_counts["control_mapped"]
+        else 0.0
+    )
+    result = {
+        "path_failures": dict(sorted(path_failures.items())),
+        "mapping_path_counts": dict(sorted(mapping_path_counts.items())),
+        "peer_path_coverage": peer_path_rate,
+        "control_path_coverage": control_path_rate,
+        "validation_structural_cluster_count": validation_clusters,
+        "validation_structural_unique_peer_count": len(included_peer_ids),
+        "validation_structural_four_digit_sic_count": len(included_sics),
+        "structural_counts_are_pre_signal": True,
+        "actual_qualifying_counts_rechecked_by_outcome_evaluator": True,
+        "overlap_applied_pre_signal": False,
+        "actual_overlap_deferred_until_qualifying_clusters_are_known": True,
+        "market_memory_model": "DISK_SPOOLED_BOUNDED_CLUSTER_CHUNKS",
+        "cluster_chunk_size": MARKET_CLUSTER_CHUNK,
+        "peak_cluster_chunk": peak_cluster_chunk,
+        "peak_requested_security_count": peak_requested_security_count,
+        "peak_requested_pair_count": peak_requested_pair_count,
+        "global_request_state_retained": False,
+        "global_market_rows_retained": False,
+        "checkpoint_chunks_written": written,
+        "checkpoint_chunks_reused": reused,
+        "checkpoint_resumable": True,
+        "structural_clusters_retained_in_memory": 0,
+        "annotated_clusters_retained_in_memory": 0,
+    }
+    spool.finish_annotated(result)
+    return result
+
+
 def _build_exclusions_and_missingness(
     *,
     source_errors: Sequence[Mapping[str, Any]],
     event_audit: Mapping[str, Any],
     included_events: Sequence[Mapping[str, Any]],
     headers: Sequence[dict[str, Any]] | _HeaderIndex,
-    clusters: Sequence[Mapping[str, Any]],
+    clusters: Iterable[Mapping[str, Any]],
     checked_at: datetime,
     sessions: Sequence[date],
+    exclusion_sink: Callable[[Mapping[str, Any]], None] | None = None,
+    phase_observer: Callable[[str], None] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     exclusions: list[dict[str, Any]] = []
-    coverage_rows: list[dict[str, Any]] = []
+    dimensions: dict[str, dict[str, Counter[str]]] = {
+        name: {"denominator": Counter(), "missing": Counter()}
+        for name in ("year", "sic", "issuer_cik", "relevance")
+    }
+    total_denominator = 0
+    total_missing = 0
+    reporter_denominator = 0
+    reporter_missing = 0
+    exclusion_count = 0
+    exclusion_contract_incomplete = False
+    adverse_mapping_unproven = False
+    selection_reasons: list[str] = []
+    required_exclusion_fields = (
+        "reason",
+        "source_path",
+        "source_status",
+        "sealed_at",
+        "potential_cluster_key",
+        "adverse_sensitivity_eligible",
+    )
+
+    def observe_coverage(row: Mapping[str, Any]) -> None:
+        nonlocal total_denominator, total_missing
+        nonlocal reporter_denominator, reporter_missing
+        total_denominator += 1
+        missing = not bool(row["lineage_complete"])
+        total_missing += int(missing)
+        if row["relevance"] == "ITEM_2_02_REPORTER":
+            reporter_denominator += 1
+            reporter_missing += int(missing)
+        for dimension in dimensions:
+            key = str(row.get(dimension) or "UNKNOWN")
+            dimensions[dimension]["denominator"][key] += 1
+            if missing:
+                dimensions[dimension]["missing"][key] += 1
+
+    def emit_exclusion(row: dict[str, Any]) -> None:
+        nonlocal exclusion_count, exclusion_contract_incomplete
+        nonlocal adverse_mapping_unproven
+        exclusion_count += 1
+        if any(field not in row or row[field] is None for field in required_exclusion_fields):
+            exclusion_contract_incomplete = True
+        if row.get("adverse_sensitivity_eligible") is True and (
+            row.get("reaction_session") is None
+            or row.get("reaction_quarter") is None
+            or not row.get("potential_cluster_key")
+        ):
+            adverse_mapping_unproven = True
+        if row.get("outcome_informed") is True:
+            selection_reasons.append("selection_related_exclusion")
+        if exclusion_sink is None:
+            exclusions.append(row)
+        else:
+            exclusion_sink(row)
+        if phase_observer is not None and exclusion_count % 1_000 == 0:
+            phase_observer(f"exclusions_streamed::{exclusion_count}")
     included_reporter_ids = {
         event_id
         for cluster in clusters
@@ -2207,8 +2885,8 @@ def _build_exclusions_and_missingness(
             adverse_sensitivity_eligible=adverse_eligible,
             reaction_session=reaction_session,
         )
-        exclusions.append(row)
-        coverage_rows.append({**row, "lineage_complete": False})
+        emit_exclusion(row)
+        observe_coverage({**row, "lineage_complete": False})
 
     for event in included_events:
         header = _header_get(headers, event["event_id"]) or {}
@@ -2222,7 +2900,7 @@ def _build_exclusions_and_missingness(
             "relevance": "ITEM_2_02_REPORTER",
             "lineage_complete": lineage_complete,
         }
-        coverage_rows.append(row)
+        observe_coverage(row)
         if not lineage_complete:
             accepted_date = event["acceptance"].date()
             reaction_session = _reaction_session(event["acceptance"], sessions)
@@ -2248,7 +2926,7 @@ def _build_exclusions_and_missingness(
                 ),
                 reaction_session=reaction_session,
             )
-            exclusions.append(exclusion)
+            emit_exclusion(exclusion)
 
     for cluster in clusters:
         year = str(cluster["reaction_session"].year)
@@ -2271,7 +2949,7 @@ def _build_exclusions_and_missingness(
                     "relevance": relevance,
                     "lineage_complete": lineage_complete,
                 }
-                coverage_rows.append(row)
+                observe_coverage(row)
                 if candidate.get("included") is not True:
                     is_lineage_missing = (
                         candidate.get("exclusion_class") == "LINEAGE_MISSING"
@@ -2303,10 +2981,10 @@ def _build_exclusions_and_missingness(
                         reaction_session=cluster["reaction_session"],
                     )
                     exclusion["security_id"] = candidate.get("security_id")
-                    exclusions.append(exclusion)
+                    emit_exclusion(exclusion)
 
         if not cluster.get("emitted_evaluator_eligible"):
-            exclusions.append(
+            emit_exclusion(
                 base_exclusion(
                     stage="CLUSTER",
                     reason="STRUCTURAL_CLUSTER_NOT_EVALUATOR_ELIGIBLE",
@@ -2324,18 +3002,6 @@ def _build_exclusions_and_missingness(
                 )
             )
 
-    dimensions: dict[str, dict[str, Counter[str]]] = {
-        name: {"denominator": Counter(), "missing": Counter()}
-        for name in ("year", "sic", "issuer_cik", "relevance")
-    }
-    for row in coverage_rows:
-        for dimension in dimensions:
-            key = str(row.get(dimension) or "UNKNOWN")
-            dimensions[dimension]["denominator"][key] += 1
-            if not row["lineage_complete"]:
-                dimensions[dimension]["missing"][key] += 1
-    total_denominator = len(coverage_rows)
-    total_missing = sum(not row["lineage_complete"] for row in coverage_rows)
     coverage_by_dimension: dict[str, list[dict[str, Any]]] = {}
     for dimension, counters in dimensions.items():
         records = []
@@ -2356,39 +3022,17 @@ def _build_exclusions_and_missingness(
                 }
             )
         coverage_by_dimension[dimension] = records
-    reporter_rows = [
-        row for row in coverage_rows if row["relevance"] == "ITEM_2_02_REPORTER"
-    ]
     reporter_coverage = (
-        sum(row["lineage_complete"] for row in reporter_rows) / len(reporter_rows)
-        if reporter_rows
+        (reporter_denominator - reporter_missing) / reporter_denominator
+        if reporter_denominator
         else 0.0
     )
     gate_reasons = []
-    if not coverage_rows:
+    if not total_denominator:
         gate_reasons.append("coverage_denominator_absent")
-    required_exclusion_fields = (
-        "reason",
-        "source_path",
-        "source_status",
-        "sealed_at",
-        "potential_cluster_key",
-        "adverse_sensitivity_eligible",
-    )
-    if any(
-        any(field not in item or item[field] is None for field in required_exclusion_fields)
-        for item in exclusions
-    ):
+    if exclusion_contract_incomplete:
         gate_reasons.append("exclusion_audit_contract_incomplete")
-    if any(
-        item.get("adverse_sensitivity_eligible") is True
-        and (
-            item.get("reaction_session") is None
-            or item.get("reaction_quarter") is None
-            or not item.get("potential_cluster_key")
-        )
-        for item in exclusions
-    ):
+    if adverse_mapping_unproven:
         gate_reasons.append("adverse_sensitivity_mapping_unproven")
     if reporter_coverage < AGGREGATE_ORIGINAL_COVERAGE_MIN:
         gate_reasons.append("aggregate_reporter_coverage_below_99_9_percent")
@@ -2423,24 +3067,17 @@ def _build_exclusions_and_missingness(
                 gate_reasons.append(
                     "missingness_concentrated_by_issuer::" + record["issuer_cik"]
                 )
-    selection_reasons = [
-        "selection_related_exclusion"
-        for item in exclusions
-        if item.get("outcome_informed") is True
-    ]
     gate_reasons.extend(selection_reasons)
     return exclusions, {
         "source_error_count": len(source_errors),
         "coverage_by_dimension": coverage_by_dimension,
-        "reporter_relevance_denominator": len(reporter_rows),
-        "reporter_relevance_missing": sum(
-            not row["lineage_complete"] for row in reporter_rows
-        ),
+        "reporter_relevance_denominator": reporter_denominator,
+        "reporter_relevance_missing": reporter_missing,
         "reporter_relevance_coverage": reporter_coverage,
         "structural_denominator": total_denominator,
         "structural_missing": total_missing,
         "concentration_status": concentration_status,
-        "exclusion_count": len(exclusions),
+        "exclusion_count": exclusion_count,
         "selection_relation_flags": selection_reasons,
         "selection_gate_pass": not gate_reasons,
         "selection_gate_reasons": sorted(set(gate_reasons)),
@@ -2454,7 +3091,7 @@ def _gate_summary(
     structural: Mapping[str, Any],
     paths: Mapping[str, Any],
     missingness: Mapping[str, Any],
-    clusters: Sequence[Mapping[str, Any]],
+    clusters: Iterable[Mapping[str, Any]],
     event_audit: Mapping[str, Any],
     header_audit: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
@@ -2508,7 +3145,39 @@ def _write_jsonl_gz(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
                     stream.write(canonical_json(row) + "\n")
 
 
-def _manifest_rows(clusters: Sequence[Mapping[str, Any]]) -> Iterator[dict[str, Any]]:
+class _JsonlGzipSink:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.raw: Any = None
+        self.compressed: Any = None
+        self.stream: Any = None
+
+    def __enter__(self) -> "_JsonlGzipSink":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.raw = self.path.open("wb")
+        self.compressed = gzip.GzipFile(
+            filename="", mode="wb", fileobj=self.raw, mtime=0
+        )
+        self.stream = io.TextIOWrapper(
+            self.compressed, encoding="utf-8", newline=""
+        )
+        return self
+
+    def write(self, row: Mapping[str, Any]) -> None:
+        if self.stream is None:
+            raise RuntimeError("JSONL sink is not open")
+        self.stream.write(canonical_json(row) + "\n")
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        if self.stream is not None:
+            self.stream.close()
+        elif self.compressed is not None:
+            self.compressed.close()
+        if self.raw is not None and not self.raw.closed:
+            self.raw.close()
+
+
+def _manifest_rows(clusters: Iterable[Mapping[str, Any]]) -> Iterator[dict[str, Any]]:
     for cluster in clusters:
         if not cluster.get("emitted_evaluator_eligible"):
             continue
@@ -2568,8 +3237,9 @@ def _write_append_only_bundle(
     repo_root: Path,
     run_id: str,
     result: Mapping[str, Any],
-    clusters: Sequence[Mapping[str, Any]],
-    exclusions: Sequence[Mapping[str, Any]],
+    clusters: Iterable[Mapping[str, Any]],
+    exclusions: Sequence[Mapping[str, Any]] = (),
+    exclusion_spool_path: Path | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     research_root = (repo_root / "outputs/research/alpha_lab").resolve()
     hypothesis_root = research_root / HYPOTHESIS_ID
@@ -2585,7 +3255,12 @@ def _write_append_only_bundle(
         eligibility_path = staging / "eligibility_manifest.jsonl.gz"
         _write_jsonl_gz(eligibility_path, _manifest_rows(clusters))
         exclusion_path = staging / "exclusion_manifest.jsonl.gz"
-        _write_jsonl_gz(exclusion_path, exclusions)
+        if exclusion_spool_path is None:
+            _write_jsonl_gz(exclusion_path, exclusions)
+        else:
+            if not exclusion_spool_path.is_file():
+                raise ValueError("streamed exclusion spool is absent")
+            shutil.copyfile(exclusion_spool_path, exclusion_path)
         files = [
             {"name": path.name, "bytes": path.stat().st_size, "sha256": _sha256_file(path)}
             for path in (result_path, eligibility_path, exclusion_path)
@@ -2634,9 +3309,12 @@ def run_gate(
     if final_dir.exists():
         raise FileExistsError(f"research run already exists: {final_dir}")
     checkpoint_root = hypothesis_root / ".staging" / "checkpoints" / run_id
+    memory = _RssMonitor()
+    memory.record("gate_start")
     spec = _verify_spec(repo_root)
     addendum = _verify_addendum(repo_root)
     source = _source_preflight(repo_root)
+    memory.record("source_preflight_complete")
     if not source["gate_pass"]:
         raise ValueError("aggregate original coverage is below Addendum 001's 99.9% gate")
     earnings_record, tape_path, tape_file_record = _read_readiness_bound_file(
@@ -2648,8 +3326,11 @@ def run_gate(
     included_events, inventory_audit, _ = _validate_event_inventory(
         events, source["bundle_root"]
     )
+    memory.record("event_inventory_complete")
     headers = _scan_headers_to_checkpoint(
-        source["bundle_root"], checkpoint_root / "headers.sqlite"
+        source["bundle_root"],
+        checkpoint_root / "headers.sqlite",
+        phase_observer=memory.record,
     )
     header_audit = headers.audit()
     header_audit["production_scan_workers"] = 1
@@ -2661,8 +3342,12 @@ def run_gate(
     if panel_file_record["sha256"] != PRICES_PANEL_SHA256:
         raise ValueError("observed-price readiness does not bind the frozen panel hash")
     sessions = _calendar_from_panel(panel_path)
+    memory.record("calendar_complete")
     identity = _build_identity(repo_root)
-    clusters, structural_audit = _build_structural_clusters(
+    memory.record("identity_complete")
+    clusters = _ClusterSpool(checkpoint_root / "clusters.sqlite")
+    structural_audit = _spool_structural_clusters(
+        spool=clusters,
         events=included_events,
         headers=headers,
         identity=identity,
@@ -2670,23 +3355,35 @@ def run_gate(
         excluded_event_metadata=event_audit[
             "deterministically_excluded_missing_original_rows"
         ],
+        reporter_spool_path=checkpoint_root / "reporters.sqlite",
+        phase_observer=memory.record,
     )
-    path_audit = _apply_path_liquidity_overlap(
-        clusters=clusters,
+    memory.record("structural_spool_complete")
+    path_audit = _annotate_cluster_spool(
+        spool=clusters,
         sessions=sessions,
         identity=identity,
         panel_path=panel_path,
         checkpoint_dir=checkpoint_root,
+        phase_observer=memory.record,
     )
-    exclusions, missingness = _build_exclusions_and_missingness(
-        source_errors=source["errors"],
-        event_audit=event_audit,
-        included_events=included_events,
-        headers=headers,
-        clusters=clusters,
-        checked_at=checked_at,
-        sessions=sessions,
-    )
+    memory.record("market_annotation_complete")
+    exclusion_spool_path = checkpoint_root / "exclusion_manifest.jsonl.gz"
+    with _JsonlGzipSink(exclusion_spool_path) as exclusion_sink:
+        exclusions, missingness = _build_exclusions_and_missingness(
+            source_errors=source["errors"],
+            event_audit=event_audit,
+            included_events=included_events,
+            headers=headers,
+            clusters=clusters,
+            checked_at=checked_at,
+            sessions=sessions,
+            exclusion_sink=exclusion_sink.write,
+            phase_observer=memory.record,
+        )
+    if exclusions:
+        raise ValueError("streamed HYP-015 exclusions were retained in memory")
+    memory.record("exclusion_missingness_complete")
     headers.close()
     controls = _gate_summary(
         source,
@@ -2739,7 +3436,12 @@ def run_gate(
             "headers": "SQLITE_DISK_BACKED_PARTITION_CHECKPOINT",
             "headers_retained_in_memory": 0,
             "header_partition_scan_workers": 1,
-            "market_rows": "PREDICATE_PUSHED_CLUSTER_CHUNKS",
+            "structural_clusters": "SQLITE_DISK_SPOOL_REACTION_SESSION_SIC_ATOMIC",
+            "structural_clusters_retained_in_memory": 0,
+            "annotated_clusters_retained_in_memory": 0,
+            "exclusions": "STREAMED_DETERMINISTIC_GZIP_SPOOL",
+            "exclusions_retained_in_memory": 0,
+            "market_rows": "PREDICATE_PUSHED_DISK_SPOOLED_CLUSTER_CHUNKS",
             "market_cluster_chunk_size": path_audit["cluster_chunk_size"],
             "market_arrow_batch_size": MARKET_SCAN_BATCH_SIZE,
             "calendar_arrow_batch_size": CALENDAR_SCAN_BATCH_SIZE,
@@ -2748,9 +3450,12 @@ def run_gate(
             "checkpoint_root": str(checkpoint_root),
             "checkpoint_retained_on_interruption": True,
             "checkpoint_removed_after_atomic_evidence_publish": True,
+            "oversized_cluster_candidate_guard": MAX_CLUSTER_CANDIDATES,
+            "oversized_market_request_pair_guard": MAX_MARKET_REQUEST_PAIRS,
+            "rss_preflight": memory.audit(),
         },
         "missingness_concentration": missingness,
-        "exclusion_manifest_row_count": len(exclusions),
+        "exclusion_manifest_row_count": missingness["exclusion_count"],
         "eligibility_manifest_row_count": sum(
             cluster.get("emitted_evaluator_eligible") is True for cluster in clusters
         ),
@@ -2786,8 +3491,9 @@ def run_gate(
         run_id=run_id,
         result=result,
         clusters=clusters,
-        exclusions=exclusions,
+        exclusion_spool_path=exclusion_spool_path,
     )
+    clusters.close()
     shutil.rmtree(checkpoint_root, ignore_errors=True)
     return {"run_dir": str(run_dir), "result": result, "manifest": manifest}
 

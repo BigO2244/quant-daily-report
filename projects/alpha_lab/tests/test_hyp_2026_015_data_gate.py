@@ -7,8 +7,9 @@ import io
 import json
 import sys
 import tarfile
+import tracemalloc
 import types
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -166,6 +167,15 @@ def test_source_census_rejects_conflicting_accession_payload_or_acceptance(
     assert census["ambiguous_duplicate_accessions"] == [
         "0000000001-20-000001"
     ]
+    assert gate.canonical_hash(
+        {
+            "ambiguous_duplicate_accessions": census[
+                "ambiguous_duplicate_accessions"
+            ],
+            "duplicate_accession_count": census["duplicate_accession_count"],
+            "duplicate_alias_extra_rows": census["duplicate_alias_extra_rows"],
+        }
+    ) == "e1dfa87bded77dc7de3a75fdef22fe3ff065910842a6ef1ba9f235f2915f2588"
 
 
 def test_partition_scan_collapses_verified_aliases_using_payload_header(
@@ -226,6 +236,22 @@ STANDARD INDUSTRIAL CLASSIFICATION: SEMICONDUCTORS [3674]
     assert len(rows[0]["actual_member_paths"]) == 2
     assert rows[0]["feed_cik_discrepancy_count"] == 2
     assert rows[0]["feed_filed_date_discrepancy_count"] == 2
+    assert gate.canonical_hash(
+        {
+            "failures": failures,
+            "canonical_source_path": rows[0]["source_path"],
+            "source_aliases": rows[0]["source_aliases"],
+            "actual_member_paths": rows[0]["actual_member_paths"],
+            "cik": rows[0]["cik"],
+            "sic": rows[0]["sic"],
+            "feed_cik_discrepancy_count": rows[0][
+                "feed_cik_discrepancy_count"
+            ],
+            "feed_filed_date_discrepancy_count": rows[0][
+                "feed_filed_date_discrepancy_count"
+            ],
+        }
+    ) == "5e264045fbf946a36adfc48b2d1d30455fdcdb75245287211875c24f71ca5fe2"
 
 
 def test_header_checkpoint_resumes_by_partition_without_global_header_list(
@@ -1163,3 +1189,540 @@ def test_tolerated_validation_reporter_exclusion_is_adverse_mapped_once() -> Non
     assert adverse[0]["potential_cluster_key"].endswith("::event-0999")
     assert audit["reporter_relevance_coverage"] == pytest.approx(0.999)
     assert audit["selection_gate_pass"] is True
+
+
+def _legacy_semantic_clusters() -> tuple[list[date], list[dict], dict]:
+    sessions = [date(2020, 1, 1) + timedelta(days=index) for index in range(60)]
+    clusters = []
+    security_by_id = {}
+    for index in range(3):
+        reaction = sessions[20 + index * 10]
+        entry = sessions[21 + index * 10]
+        exit_session = sessions[25 + index * 10]
+        prefix = f"C{index}"
+        reporter = f"SEC:{prefix}:R"
+        valid_peer_count = 2 if index == 2 else 3
+
+        def candidate(suffix: str, relevance: str) -> dict:
+            security_id = f"SEC:{prefix}:{suffix}"
+            security_by_id[security_id] = {}
+            return {
+                "cik": f"{index}{suffix:0>9}",
+                "security_id": security_id,
+                "mapping_status": "UNIQUE",
+                "relevance": relevance,
+                "causal_sic_source": {
+                    "event_id": f"source-{prefix}-{suffix}",
+                    "source_path": f"source/{prefix}/{suffix}.txt",
+                    "source_sha256": hashlib.sha256(
+                        f"{prefix}-{suffix}".encode()
+                    ).hexdigest(),
+                    "acceptance": datetime(
+                        2019, 12, 1, tzinfo=timezone.utc
+                    ),
+                },
+            }
+
+        peers = [
+            candidate(f"P{peer_index}", "FOUR_DIGIT_PEER")
+            for peer_index in range(valid_peer_count)
+        ]
+        peers.extend(
+            [
+                candidate("T", "FOUR_DIGIT_PEER"),
+                candidate("L", "FOUR_DIGIT_PEER"),
+            ]
+        )
+        controls = [candidate("CTRL", "TWO_DIGIT_INDUSTRY_CONTROL")]
+        security_by_id[reporter] = {}
+        clusters.append(
+            {
+                "cluster_id": f"HYP015-legacy-{index}",
+                "potential_cluster_key": (
+                    f"{reaction.isoformat()}::367{index}::event-{index}"
+                ),
+                "reaction_session": reaction,
+                "entry_session": entry,
+                "exit_session": exit_session,
+                "sic": f"367{index}",
+                "reporter_event_ids": [f"event-{index}"],
+                "reporter_ciks": [f"{index:010d}"],
+                "reporter_security_ids": [reporter],
+                "reporters": [
+                    {
+                        "accessions": [f"event-{index}"],
+                        "cik": f"{index:010d}",
+                        "security_id": reporter,
+                    }
+                ],
+                "peers": peers,
+                "controls": controls,
+                "peer_report_during_hold_security_ids": [],
+            }
+        )
+    return sessions, clusters, {"security_by_id": security_by_id}
+
+
+def _legacy_semantic_projection(
+    monkeypatch: pytest.MonkeyPatch, chunk_size: int
+) -> dict:
+    sessions, clusters, identity = _legacy_semantic_clusters()
+
+    def scanner(
+        _panel: Path,
+        requests: dict[str, set[date]],
+        reaction_pairs: set[tuple[str, date]],
+    ) -> dict:
+        found = {}
+        for security_id, dates in requests.items():
+            for row_date in dates:
+                terminal = security_id.endswith(":T") and row_date == max(dates)
+                found[(security_id, row_date)] = {
+                    "row_present": True,
+                    "duplicate_row": False,
+                    "open_valid": True,
+                    "closeadj_valid": True,
+                    "available_at": datetime(2019, 1, 1, tzinfo=timezone.utc),
+                    "corporate_action_present": False,
+                    "corporate_action_lineage_present": True,
+                    "terminal_value_present": terminal,
+                    "price_floor_pass": not security_id.endswith(":L"),
+                    "adv_floor_pass": True,
+                }
+        assert all(pair in found for pair in reaction_pairs)
+        return found
+
+    monkeypatch.setattr(gate, "_scan_requested_market_rows", scanner)
+    audit = gate._apply_path_liquidity_overlap(
+        clusters=clusters,
+        sessions=sessions,
+        identity=identity,
+        panel_path=Path("unused.parquet"),
+        cluster_chunk_size=chunk_size,
+    )
+    exclusions, missingness = gate._build_exclusions_and_missingness(
+        source_errors=[],
+        event_audit={"deterministically_excluded_missing_original_rows": []},
+        included_events=[],
+        headers=[],
+        clusters=clusters,
+        checked_at=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        sessions=sessions,
+    )
+    semantic_audit_keys = (
+        "path_failures",
+        "mapping_path_counts",
+        "peer_path_coverage",
+        "control_path_coverage",
+        "validation_structural_cluster_count",
+        "validation_structural_unique_peer_count",
+        "validation_structural_four_digit_sic_count",
+    )
+    return {
+        "clusters": clusters,
+        "path_audit": {key: audit[key] for key in semantic_audit_keys},
+        "eligibility": list(gate._manifest_rows(clusters)),
+        "exclusions": exclusions,
+        "missingness": missingness,
+    }
+
+
+def test_legacy_8fca853_semantics_match_chunk_sizes_and_disk_spool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projections = [
+        _legacy_semantic_projection(monkeypatch, chunk_size)
+        for chunk_size in (1, 2, 99)
+    ]
+    hashes = [gate.canonical_hash(item) for item in projections]
+    assert len(set(hashes)) == 1
+    # Frozen by executing this exact fixture against legacy commit 8fca853.
+    assert hashes[0] == (
+        "8e0d060354a8eac9454e2b3fa999bf973cf76d4c72481133d78a3fcdcd629302"
+    )
+
+    baseline = projections[0]
+    spool = gate._ClusterSpool(tmp_path / "clusters.sqlite")
+    try:
+        spool.begin_structural_rebuild()
+        for cluster in baseline["clusters"]:
+            spool.append_structural(cluster)
+        spool.finish_structural({"fixture": "8fca853"})
+        for chunk in spool.iter_structural_chunks(2):
+            for ordinal, cluster in chunk:
+                spool.write_annotated(ordinal, cluster)
+        spool.finish_annotated(baseline["path_audit"])
+
+        streamed_exclusions = []
+        sessions, _, _ = _legacy_semantic_clusters()
+        retained, missingness = gate._build_exclusions_and_missingness(
+            source_errors=[],
+            event_audit={
+                "deterministically_excluded_missing_original_rows": []
+            },
+            included_events=[],
+            headers=[],
+            clusters=spool,
+            checked_at=datetime(2026, 8, 31, tzinfo=timezone.utc),
+            sessions=sessions,
+            exclusion_sink=streamed_exclusions.append,
+        )
+        assert retained == []
+        assert streamed_exclusions == baseline["exclusions"]
+        assert missingness == baseline["missingness"]
+        assert list(gate._manifest_rows(spool)) == baseline["eligibility"]
+        assert max(len(chunk) for chunk in spool.iter_structural_chunks(2)) == 2
+
+        exclusion_path = tmp_path / "streamed_exclusions.jsonl.gz"
+        with gate._JsonlGzipSink(exclusion_path) as sink:
+            retained_again, missingness_again = (
+                gate._build_exclusions_and_missingness(
+                    source_errors=[],
+                    event_audit={
+                        "deterministically_excluded_missing_original_rows": []
+                    },
+                    included_events=[],
+                    headers=[],
+                    clusters=spool,
+                    checked_at=datetime(2026, 8, 31, tzinfo=timezone.utc),
+                    sessions=sessions,
+                    exclusion_sink=sink.write,
+                )
+            )
+        with gzip.open(exclusion_path, "rt", encoding="utf-8") as stream:
+            streamed_rows = [json.loads(line) for line in stream]
+        assert retained_again == []
+        assert missingness_again == baseline["missingness"]
+        assert streamed_rows == [
+            json.loads(gate.canonical_json(item))
+            for item in baseline["exclusions"]
+        ]
+    finally:
+        spool.close()
+
+
+def test_market_checkpoint_external_hash_detects_tampering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = [
+        {
+            "cluster_id": "HYP015-integrity",
+            "reaction_session": date(2020, 1, 2),
+            "entry_session": date(2020, 1, 3),
+            "exit_session": date(2020, 1, 9),
+            "sic": "3674",
+            "reporter_security_ids": [],
+            "peers": [],
+            "controls": [],
+        }
+    ]
+
+    def worker(**kwargs: object) -> dict:
+        cluster = kwargs["clusters"][0]
+        cluster.update(
+            {
+                "reporter_required_sessions": [],
+                "peer_required_sessions": [],
+                "reporter_lineage_pass": False,
+                "reporter_universe_eligible": False,
+                "included_peers": [],
+                "included_controls": [],
+                "structural_breadth_pass": False,
+                "emitted_evaluator_eligible": False,
+                "potential_overlap_inputs_complete": False,
+            }
+        )
+        return {"path_failures": {}, "mapping_path_counts": {}}
+
+    monkeypatch.setattr(gate, "_apply_path_liquidity_overlap_chunk", worker)
+    checkpoint = tmp_path / "checkpoint"
+    gate._apply_path_liquidity_overlap(
+        clusters=copy.deepcopy(original),
+        sessions=[],
+        identity={},
+        panel_path=tmp_path / "unused.parquet",
+        checkpoint_dir=checkpoint,
+    )
+    payload = checkpoint / "market_chunks/00000000/chunk.json.gz"
+    payload.write_bytes(payload.read_bytes() + b"tamper")
+    with pytest.raises(ValueError, match="integrity mismatch"):
+        gate._apply_path_liquidity_overlap(
+            clusters=copy.deepcopy(original),
+            sessions=[],
+            identity={},
+            panel_path=tmp_path / "unused.parquet",
+            checkpoint_dir=checkpoint,
+        )
+
+
+def test_market_checkpoint_resumes_after_mid_run_interruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = [
+        {
+            "cluster_id": f"HYP015-restart-{index}",
+            "reaction_session": date(2020, 1, 2) + timedelta(days=index),
+            "entry_session": date(2020, 1, 3) + timedelta(days=index),
+            "exit_session": date(2020, 1, 9) + timedelta(days=index),
+            "sic": f"{3600 + index:04d}",
+            "reporter_security_ids": [],
+            "peers": [],
+            "controls": [],
+        }
+        for index in range(5)
+    ]
+
+    def annotate(chunk: list[dict]) -> dict:
+        for cluster in chunk:
+            cluster.update(
+                {
+                    "reporter_required_sessions": [],
+                    "peer_required_sessions": [],
+                    "reporter_lineage_pass": False,
+                    "reporter_universe_eligible": False,
+                    "included_peers": [],
+                    "included_controls": [],
+                    "structural_breadth_pass": False,
+                    "emitted_evaluator_eligible": False,
+                    "potential_overlap_inputs_complete": False,
+                }
+            )
+        return {"path_failures": {}, "mapping_path_counts": {}}
+
+    first_calls = 0
+
+    def interrupted_worker(**kwargs: object) -> dict:
+        nonlocal first_calls
+        first_calls += 1
+        if first_calls == 2:
+            raise RuntimeError("simulated market interruption")
+        return annotate(kwargs["clusters"])
+
+    checkpoint = tmp_path / "checkpoint"
+    monkeypatch.setattr(
+        gate, "_apply_path_liquidity_overlap_chunk", interrupted_worker
+    )
+    with pytest.raises(RuntimeError, match="simulated market interruption"):
+        gate._apply_path_liquidity_overlap(
+            clusters=copy.deepcopy(original),
+            sessions=[],
+            identity={},
+            panel_path=tmp_path / "unused.parquet",
+            checkpoint_dir=checkpoint,
+            cluster_chunk_size=2,
+        )
+    assert (checkpoint / "market_chunks/00000000/integrity.json").is_file()
+    assert not (checkpoint / "market_chunks/00000002").exists()
+
+    resumed_calls = 0
+
+    def resumed_worker(**kwargs: object) -> dict:
+        nonlocal resumed_calls
+        resumed_calls += 1
+        return annotate(kwargs["clusters"])
+
+    monkeypatch.setattr(gate, "_apply_path_liquidity_overlap_chunk", resumed_worker)
+    audit = gate._apply_path_liquidity_overlap(
+        clusters=copy.deepcopy(original),
+        sessions=[],
+        identity={},
+        panel_path=tmp_path / "unused.parquet",
+        checkpoint_dir=checkpoint,
+        cluster_chunk_size=2,
+    )
+    assert resumed_calls == 2
+    assert audit["checkpoint_chunks_reused"] == 1
+    assert audit["checkpoint_chunks_written"] == 2
+
+
+def test_header_checkpoint_rejects_changed_completed_partition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = tmp_path / "bundle"
+    inventory = bundle / "data/inventory/part_00000_inventory.jsonl.gz"
+    archive = bundle / "data/partitions/part_00000.tar.gz"
+    inventory.parent.mkdir(parents=True)
+    archive.parent.mkdir(parents=True)
+    inventory.write_bytes(b"inventory-v1")
+    archive.write_bytes(b"archive-v1")
+    monkeypatch.setattr(
+        gate,
+        "_scan_partition",
+        lambda _args: ([_checkpoint_header(0)], []),
+    )
+    checkpoint = tmp_path / "checkpoint/headers.sqlite"
+    index = gate._scan_headers_to_checkpoint(bundle, checkpoint)
+    index.close()
+    inventory.write_bytes(b"inventory-v2")
+    with pytest.raises(ValueError, match="partition integrity mismatch"):
+        gate._scan_headers_to_checkpoint(bundle, checkpoint)
+
+
+def test_deterministic_oversized_market_request_guard_blocks_before_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cluster = {
+        "cluster_id": "HYP015-oversized",
+        "reaction_session": date(2020, 1, 21),
+        "entry_session": date(2020, 1, 22),
+        "exit_session": date(2020, 1, 26),
+        "sic": "3674",
+        "reporter_security_ids": [],
+        "peers": [
+            {
+                "security_id": f"SEC:{index}",
+                "mapping_status": "UNIQUE",
+            }
+            for index in range(10)
+        ],
+        "controls": [],
+    }
+    monkeypatch.setattr(gate, "MAX_MARKET_REQUEST_PAIRS", 10)
+    monkeypatch.setattr(
+        gate,
+        "_scan_requested_market_rows",
+        lambda *_args, **_kwargs: pytest.fail("market scan must not open"),
+    )
+    sessions = [date(2020, 1, 1) + timedelta(days=index) for index in range(40)]
+    with pytest.raises(MemoryError, match="pre-outcome guard"):
+        gate._apply_path_liquidity_overlap_chunk(
+            clusters=[cluster],
+            sessions=sessions,
+            identity={"security_by_id": {}},
+            panel_path=tmp_path / "unopened.parquet",
+        )
+
+
+def test_deterministic_oversized_structural_cluster_guard_is_pre_outcome() -> None:
+    acceptance = datetime(2020, 1, 20, 12, 0, tzinfo=timezone.utc)
+    reporter_event = {
+        "event_id": "0000000001-20-000001",
+        "issuer_cik": "0000000001",
+        "acceptance": acceptance,
+        "form_type": "8-K",
+        "inventory_source_sha256": "a" * 64,
+    }
+    headers = [
+        {
+            "event_id": reporter_event["event_id"],
+            "cik": "0000000001",
+            "sic": "3674",
+            "sic_count": 1,
+            "acceptance": acceptance,
+            "form_type": "8-K",
+            "item_2_02": True,
+            "source_sha256": "a" * 64,
+            "source_path": "reporter.txt",
+        },
+        {
+            "event_id": "0000000002-19-000001",
+            "cik": "0000000002",
+            "sic": "3674",
+            "sic_count": 1,
+            "acceptance": datetime(2019, 12, 1, tzinfo=timezone.utc),
+            "form_type": "8-K",
+            "item_2_02": True,
+            "source_sha256": "b" * 64,
+            "source_path": "peer.txt",
+        },
+    ]
+    identity = {
+        "by_cik": {
+            "0000000001": [
+                {
+                    "security_id": "SEC:R",
+                    "effective_start": "2010-01-01",
+                    "effective_end": "",
+                }
+            ],
+            "0000000002": [
+                {
+                    "security_id": "SEC:P",
+                    "effective_start": "2010-01-01",
+                    "effective_end": "",
+                }
+            ],
+        },
+        "memberships": {
+            security_id: [
+                {
+                    "membership_start_date": "2010-01-01",
+                    "membership_end_date": "",
+                }
+            ]
+            for security_id in ("SEC:R", "SEC:P")
+        },
+        "security_by_id": {"SEC:R": {}, "SEC:P": {}},
+    }
+    sessions = [date(2020, 1, 1) + timedelta(days=index) for index in range(50)]
+    with pytest.raises(MemoryError, match="participant guard"):
+        gate._build_structural_clusters(
+            events=[reporter_event],
+            headers=headers,
+            identity=identity,
+            sessions=sessions,
+            max_cluster_candidates=1,
+        )
+
+
+def test_rss_monitor_records_bounded_phase_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readings = iter((100, 200, 150))
+    monkeypatch.setattr(gate, "_current_rss_bytes", lambda: next(readings))
+    monitor = gate._RssMonitor()
+    for phase in ("source", "structural", "market"):
+        monitor.record(phase)
+    audit = monitor.audit()
+    assert audit["peak_rss_bytes"] == 200
+    assert audit["measurement_count"] == 3
+    assert audit["process_limit_pass"] is True
+
+
+def test_synthetic_production_shape_structural_spool_has_bounded_peak_state(
+    tmp_path: Path,
+) -> None:
+    spool = gate._ClusterSpool(tmp_path / "heavy-shape.sqlite")
+    tracemalloc.start()
+    try:
+        spool.begin_structural_rebuild()
+        for index in range(500):
+            reaction = date(2020, 1, 1) + timedelta(days=index)
+            candidates = [
+                {
+                    "cik": f"{index:04d}{candidate_index:06d}",
+                    "security_id": f"SEC:{index}:{candidate_index}",
+                    "mapping_status": "UNIQUE",
+                    "relevance": "FOUR_DIGIT_PEER",
+                    "causal_sic_source": {
+                        "event_id": f"source-{index}-{candidate_index}",
+                        "source_path": f"source/{index}/{candidate_index}.txt",
+                    },
+                }
+                for candidate_index in range(100)
+            ]
+            spool.append_structural(
+                {
+                    "cluster_id": f"HYP015-heavy-{index}",
+                    "reaction_session": reaction,
+                    "entry_session": reaction + timedelta(days=1),
+                    "exit_session": reaction + timedelta(days=5),
+                    "sic": f"{2000 + index % 100:04d}",
+                    "reporter_security_ids": [f"SEC:R:{index}"],
+                    "peers": candidates,
+                    "controls": [],
+                }
+            )
+        spool.finish_structural({"fixture": "synthetic-heavy-shape-v1"})
+        peak_chunk = 0
+        row_count = 0
+        for chunk in spool.iter_structural_chunks(2):
+            peak_chunk = max(peak_chunk, len(chunk))
+            row_count += len(chunk)
+        _, traced_peak = tracemalloc.get_traced_memory()
+        assert row_count == 500
+        assert peak_chunk == 2
+        assert traced_peak < 64 * 1024 * 1024
+    finally:
+        tracemalloc.stop()
+        spool.close()
