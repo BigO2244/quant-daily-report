@@ -596,6 +596,20 @@ def test_append_only_bundle_is_deterministic_and_create_only(tmp_path: Path) -> 
         )
 
 
+def test_streamed_canonical_json_matches_frozen_canonical_encoding(
+    tmp_path: Path,
+) -> None:
+    payload = {
+        "date": date(2020, 1, 2),
+        "timestamp": datetime(2020, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
+        "path": Path("bounded/result.json"),
+        "nested": [{"float": 0.999, "unicode": "Caerus α"}],
+    }
+    output = tmp_path / "result.json"
+    gate._write_canonical_json_stream(output, payload)
+    assert output.read_text(encoding="utf-8") == gate.canonical_json(payload) + "\n"
+
+
 def test_gate_summary_labels_structural_counts_as_pre_signal() -> None:
     controls = gate._gate_summary(
         {"coverage": 0.9995, "inventory_census_failures": []},

@@ -1453,6 +1453,14 @@ def _scan_headers_to_checkpoint(
                 "tar_sha256": _sha256_file(tar_path),
                 "tar_bytes": after["tar_stat"][0],
             }
+            final_stat = {
+                "inventory_stat": _file_stat_signature(inventory_path),
+                "tar_stat": _file_stat_signature(tar_path),
+            }
+            if final_stat != after:
+                raise ValueError(
+                    f"SEC header partition changed during commit hash: {partition}"
+                )
             with connection:
                 for failure in failures:
                     event_id, reason = failure.split(":", 1)
@@ -3184,6 +3192,33 @@ def _write_jsonl_gz(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
                     stream.write(canonical_json(row) + "\n")
 
 
+def _write_canonical_json_stream(path: Path, value: Any) -> None:
+    """Write canonical-compatible JSON without materializing one global string."""
+
+    def encode_special(item: Any) -> Any:
+        if isinstance(item, datetime):
+            if item.tzinfo is None or item.utcoffset() is None:
+                raise ValueError("timestamps must be timezone-aware")
+            return item.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        if isinstance(item, date):
+            return item.isoformat()
+        if isinstance(item, Path):
+            return str(item)
+        raise TypeError(f"unsupported canonical JSON value: {type(item).__name__}")
+
+    encoder = json.JSONEncoder(
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=encode_special,
+    )
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        for chunk in encoder.iterencode(value):
+            stream.write(chunk)
+        stream.write("\n")
+
+
 class _JsonlGzipSink:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -3290,7 +3325,7 @@ def _write_append_only_bundle(
     staging = Path(tempfile.mkdtemp(prefix=f"{run_id}.", dir=staging_root))
     try:
         result_path = staging / "result.json"
-        result_path.write_text(canonical_json(result) + "\n", encoding="utf-8")
+        _write_canonical_json_stream(result_path, result)
         eligibility_path = staging / "eligibility_manifest.jsonl.gz"
         _write_jsonl_gz(eligibility_path, _manifest_rows(clusters))
         exclusion_path = staging / "exclusion_manifest.jsonl.gz"
@@ -3317,9 +3352,7 @@ def _write_append_only_bundle(
             "challenge_accessed": False,
             "bundle_hash": canonical_hash(files),
         }
-        (staging / "manifest.json").write_text(
-            canonical_json(manifest) + "\n", encoding="utf-8"
-        )
+        _write_canonical_json_stream(staging / "manifest.json", manifest)
         hypothesis_root.mkdir(parents=True, exist_ok=True)
         os.replace(staging, final_dir)
         return final_dir, manifest
