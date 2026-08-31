@@ -11,7 +11,7 @@ import zipfile
 from datetime import date, datetime, time, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, Sequence
+from typing import Any, Dict, Iterable, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 from pandas.tseries.holiday import (
@@ -127,6 +127,7 @@ def certify_asset(
     pit_verified: bool,
     methodology: str,
     blockers: Sequence[str] = (),
+    evaluator_contract: Mapping[str, Any] | None = None,
 ) -> Path:
     records = [_file_record(repo_root, path) for path in sorted(data_files)]
     schema = []
@@ -164,6 +165,8 @@ def certify_asset(
         "methodology": methodology,
         "blockers": all_blockers,
     }
+    if evaluator_contract is not None:
+        unsigned["evaluator_contract"] = dict(evaluator_contract)
     payload = dict(unsigned)
     payload["evidence_hash"] = canonical_hash(unsigned)
     path = repo_root / asset.certification_path

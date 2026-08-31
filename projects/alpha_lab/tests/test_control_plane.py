@@ -262,12 +262,13 @@ def test_evaluator_contract_is_bounded_and_hash_checked(tmp_path):
     assert boundary["findings"] == ["forbidden_import:brokers.alpaca_broker"]
 
 
-def test_eight_newly_frozen_evaluator_specs_are_hash_valid():
+def test_frozen_evaluator_specs_are_hash_valid():
     spec_root = (
         Path(__file__).parents[1] / "experiments" / "evaluator_specs"
     )
     expected = {
         "HYP-2026-001",
+        "HYP-2026-003",
         "HYP-2026-006",
         "HYP-2026-007",
         "HYP-2026-008",
@@ -280,6 +281,7 @@ def test_eight_newly_frozen_evaluator_specs_are_hash_valid():
     assert loaded == expected
     for module_name in (
         "blocked_families.py",
+        "insider_conviction.py",
         "price_families.py",
     ):
         boundary = inspect_evaluator_boundary(

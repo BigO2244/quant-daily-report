@@ -101,7 +101,15 @@ will earn positive factor-adjusted, transaction-cost-net returns over the next
 
 - Primary investable baseline: all otherwise eligible single-insider code-`P`
   purchases, using the same entry, 60-day hold, issuer cooldown, portfolio caps,
-  and cost model.
+  and cost model. The first eligible filing creates a single-purchase event. If
+  a later filing first completes a qualifying cluster, the existing single
+  position continues under its original frozen hold, while the cluster-
+  completing filing creates only the cluster event and never a second single
+  event. Later purchases during the cluster cooldown enrich attribution only.
+  No earlier single event is removed or reclassified using future information.
+  Filings with the exact same SEC acceptance timestamp are evaluated as one
+  public-information batch; if that batch completes a cluster, none of its
+  filings creates an artificial earlier single event.
 - Simple signal baseline: equal-weight PIT universe matched on date, sector,
   log market cap, book-to-market proxy, prior 60-day return, and liquidity.
 - Factor controls: daily `MKT-RF`, `SMB`, `HML`, `RMW`, `CMA`, `UMD`, a
@@ -132,8 +140,10 @@ will earn positive factor-adjusted, transaction-cost-net returns over the next
   and `$10M` reference capital; capacity failures remain in diagnostics.
 - Maximum variants in this family: 5 total, including the primary. Allowed
   alternatives are CEO/CFO-required, three-insider minimum, purchase-value floor
-  of 5 bps of market cap, 20-day hold, and 120-day hold. Cluster windows other
-  than 10 calendar days require a new hypothesis ID.
+  of 5 bps of market cap, and 20-day hold. The 120-day return remains a
+  descriptive secondary diagnostic only and cannot enter promotion, parameter
+  selection, or the multiple-testing family. Cluster windows other than 10
+  calendar days require a new hypothesis ID.
 - Multiple-testing correction: Romano-Wolf/max-T block bootstrap at one-sided
   `alpha=0.10` across all five variants; resample issuer clusters and event months
   so same-issuer and same-market-event observations never become independent.
@@ -180,6 +190,11 @@ adequate cluster count, or positive direction stops the full build.
 
 - Frozen by: Brett Olson, CIO, via explicit `FREEZE HYPOTHESIS, then RUN EXPERIMENT`; drafted by Codex.
 - Frozen at: 2026-07-14, America/New_York.
-- Spec hash: `sha256:e2195542db5acee6c5825b6ee8fa660e212c4ba632b26d72d43c3e4b3f919992` (all bytes before `## Freeze record`).
+- Governance clarification approved by Brett Olson on 2026-08-03 before any
+  return or challenge-period access: causal single comparator uses Option B;
+  120-day hold removed from the formal variant family and retained only as a
+  descriptive diagnostic.
+- Original spec hash: `sha256:e2195542db5acee6c5825b6ee8fa660e212c4ba632b26d72d43c3e4b3f919992`.
+- Spec hash: `sha256:c8426e20909f2a45e936b06339defae99b06989c3fbce16333456cf418d3f75b` (all bytes before `## Freeze record`).
 - Code hash: no experiment code existed at freeze; repository baseline `4d15ade69799a0eff161d5e9819e4d9d574de66d`.
 - Data snapshot/hash: `NOT_ACQUIRED`; SEC acquisition and PIT audit are part of the frozen experiment.

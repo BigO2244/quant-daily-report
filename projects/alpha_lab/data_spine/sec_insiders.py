@@ -1148,18 +1148,28 @@ def materialize_original_insider_events(
         retrieved_at=timestamp,
     )
     finalized_events = bundle["paths"]["events.jsonl.gz"]
+    evaluator_blockers = tuple(quality_blockers) + (
+        "causal_amendment_lineage_not_certified",
+        "beneficial_owner_independence_not_certified",
+        "prechallenge_extract_not_materialized",
+    )
     certify_asset(
         repo_root=repo_root,
         asset=FORM4_EVENTS,
         data_files=(finalized_events,),
-        pit_verified=quality["status"] == "READY_FULL_HISTORY",
+        pit_verified=False,
         methodology=(
             "Original SEC ownership XML with exact EDGAR acceptance timestamp, "
             "effective-dated CIK/security identity, and conservative next-session availability; "
             "quarterly flat file used for discovery only; issuers with any captured "
             "Form 4/A are excluded fail-closed rather than heuristically superseded"
         ),
-        blockers=tuple(quality_blockers),
+        blockers=evaluator_blockers,
+        evaluator_contract={
+            "prechallenge_extract": False,
+            "causal_amendment_lineage_certified": False,
+            "beneficial_owner_independence_certified": False,
+        },
     )
     event_path.unlink(missing_ok=True)
     quality_path.unlink(missing_ok=True)

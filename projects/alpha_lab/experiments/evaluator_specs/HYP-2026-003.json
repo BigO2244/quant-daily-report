@@ -1,0 +1,22 @@
+{
+  "schema_version": "caerus_alpha_lab_evaluator_spec_v1",
+  "hypothesis_id": "HYP-2026-003",
+  "evaluator_id": "insider_conviction_clusters_v1",
+  "technique_family": "EVENT_STUDY",
+  "module": "projects.alpha_lab.evaluators.insider_conviction",
+  "callable_name": "evaluate",
+  "maximum_variants": 5,
+  "primary_metric": "annualized_factor_adjusted_net_cluster_minus_single_alpha",
+  "data_contract_ids": [
+    "pit_security_master_v1",
+    "pit_membership_v1",
+    "pit_prices_liquidity_v1",
+    "pit_characteristics_v1",
+    "factor_panel_v1",
+    "sector_returns_v1",
+    "cik_identity_input_v1",
+    "form4_event_tape_v1"
+  ],
+  "challenge_period": "2025-01-01/2026-06-30",
+  "spec_hash": "06fbfd37f73964af197af0889dea72bf47d5981c7cecfa88e64b192d69902226"
+}

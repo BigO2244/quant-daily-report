@@ -256,6 +256,10 @@ def test_provider_certification_is_bound_to_file_hash_and_physical_schema(tmp_pa
                 "data_type": "timestamp",
             },
         ],
+        "evaluator_contract": {
+            "prechallenge_extract": True,
+            "maximum_observation_date": "2024-12-31",
+        },
         "blockers": [],
     }
     certification["evidence_hash"] = canonical_hash(certification)
@@ -270,6 +274,10 @@ def test_provider_certification_is_bound_to_file_hash_and_physical_schema(tmp_pa
         datetime(2026, 7, 15, 1, 0, tzinfo=timezone.utc),
     )
     assert result["gate"]["ready"] is True
+    assert result["evaluator_contract"] == {
+        "prechallenge_extract": True,
+        "maximum_observation_date": "2024-12-31",
+    }
 
     certification["schema_manifest"][1]["physical_field"] = "invented_timestamp"
     certification["evidence_hash"] = canonical_hash(
