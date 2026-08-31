@@ -247,6 +247,18 @@ def test_fractional_policy_cannot_claim_nearest_feasible_waiver() -> None:
         )
 
 
+def test_risk_may_raise_cash_above_policy_but_may_not_reduce_it() -> None:
+    assert validate_target_attainment_policy(
+        POLICY,
+        expected_target_cash_weight=0.20,
+    )["target_cash_weight"] == 0.05
+    with pytest.raises(ValueError, match="cannot exceed the approved cash target"):
+        validate_target_attainment_policy(
+            POLICY,
+            expected_target_cash_weight=0.04,
+        )
+
+
 def _exact_plan(*, allow_fractional: bool = True, expected_cash: float = 50.0):
     return SimpleNamespace(
         risk_state={

@@ -81,13 +81,12 @@ def validate_target_attainment_policy(
         )
     if not 0.0 <= tolerance < 1.0:
         raise TargetAttainmentPolicyError("fixed_drift_tolerance must be in [0, 1)")
-    if expected_target_cash_weight is not None and not math.isclose(
-        target_cash,
-        float(expected_target_cash_weight),
-        abs_tol=1e-12,
+    if (
+        expected_target_cash_weight is not None
+        and target_cash > float(expected_target_cash_weight) + 1e-12
     ):
         raise TargetAttainmentPolicyError(
-            "policy target_cash_weight does not match the approved cash target"
+            "policy target_cash_weight cannot exceed the approved cash target"
         )
 
     return {
