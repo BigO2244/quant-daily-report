@@ -177,6 +177,70 @@ def test_append_only_preserves_immutable_rows_and_flags_restatements(tmp_path: P
     assert any(r["date"] == "2026-03-04" and r["candidate_equity"] == 10100.0 for r in rc)
 
 
+def test_historical_restatement_candidate_is_advisory_to_fresh_causal_reporting(
+    tmp_path: Path,
+) -> None:
+    _seed_perf(tmp_path)
+    ledger_dir = tmp_path / "outputs" / "ledger" / "paper"
+    (ledger_dir / "causal_fills.jsonl").write_text(
+        json.dumps(
+            {
+                "trade_date_et": "2026-03-05",
+                "transaction_time_utc": "2026-03-05T14:35:00Z",
+                "broker_order_id": "order-1",
+                "activity_id": "activity-1",
+                "symbol": "AAPL",
+                "side": "buy",
+                "quantity": 1,
+                "price": 100,
+                "notional": 100,
+                "decision_contributions": [{"sleeve_id": "caerus_orion"}],
+                "attribution_status": "ATTRIBUTED",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    as_of = "2026-03-05T23:15:00Z"
+    (ledger_dir / "valuation_latest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "caerus.causal_valuation.v1",
+                "as_of": as_of,
+                "equity": 10050,
+                "cash": 9950,
+                "positions_market_value": 100,
+                "positions": [],
+                "reconciliation": {"status": "PASS"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (ledger_dir / "ownership_latest.json").write_text(
+        json.dumps({"as_of": as_of, "reconciliation": {"status": "PASS"}}),
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "outputs" / "portfolio_history"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "nav.csv").write_text(
+        "date,equity,source\n2026-03-04,9700,broker_backfill\n",
+        encoding="utf-8",
+    )
+
+    payload = build_portfolio_history(
+        tmp_path,
+        report_date="2026-03-05",
+        require_causal_valuation=True,
+    )
+
+    snapshot = payload["reporting_snapshot"]
+    assert snapshot["status"] == "PASS"
+    assert snapshot["warnings"] == []
+    assert len(snapshot["advisories"]) == 1
+    assert "append-only guard kept the canonical values" in snapshot["advisories"][0]
+    assert payload["summary"]["restatement_candidates"]
+
+
 def test_append_only_can_be_disabled(tmp_path: Path) -> None:
     _seed_perf(tmp_path)
     out_dir = tmp_path / "outputs" / "portfolio_history"
@@ -244,3 +308,10 @@ def test_causal_valuation_materializes_lagging_current_nav_row(tmp_path: Path) -
     assert payload["nav"][-1]["cash"] == 625
     assert payload["nav"][-1]["source"].endswith("valuation_latest.json")
     assert "Canonical NAV and causal valuation do not share one reporting as-of." not in payload["summary"]["warnings"]
+    assert payload["reporting_snapshot"]["status"] == "DEGRADED"
+    assert payload["reporting_snapshot"]["warnings"] == [
+        "No broker fills or ledger transactions were available."
+    ]
+    assert payload["reporting_snapshot"]["advisories"] == [
+        "No SPY benchmark close history available; benchmark/beta columns are null."
+    ]
