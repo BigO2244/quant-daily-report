@@ -121,3 +121,123 @@ def test_daily_audit_rejects_tampered_exact_plan(tmp_path: Path) -> None:
     _write(plan_path, plan)
     with pytest.raises(DailyPortfolioAuditError, match="exact_plan_content_hash_invalid"):
         build_daily_portfolio_audit(repo_root=tmp_path, trade_date=trade_date)
+
+
+def _convert_to_canonical_handoff(tmp_path: Path, trade_date: str, plan_path: Path) -> Path:
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["run_id"] = "run:authority"
+    body = dict(plan)
+    body.pop("content_hash")
+    plan["content_hash"] = hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    handoff_path = (
+        tmp_path
+        / "outputs"
+        / "paper_lane"
+        / "plans"
+        / "authority"
+        / trade_date
+        / "plan_authorized.json"
+    )
+    _write(
+        handoff_path,
+        {
+            "schema_version": "caerus.authorized_execution_handoff.v1",
+            "trade_date": trade_date,
+            "exact_execution_plan": plan,
+            "exact_execution_plan_hash": plan["content_hash"],
+            "exact_execution_plan_id": plan["plan_id"],
+            "exact_execution_authority_run_id": plan["run_id"],
+        },
+    )
+    _write(
+        plan_path,
+        {
+            "schema_version": "caerus.exact_execution_plan_pointer.v1",
+            "trade_date": trade_date,
+            "plan_id": plan["plan_id"],
+            "plan_hash": plan["content_hash"],
+            "json_path": str(handoff_path.relative_to(tmp_path)),
+        },
+    )
+    execution_run_id = "run:submit"
+    run_root = tmp_path / "outputs" / "paper_lane" / "runs" / execution_run_id
+    _write(
+        run_root / "execution_results.json",
+        {
+            "run_id": execution_run_id,
+            "plan_id_received": plan["plan_id"],
+            "plan_hash_received": plan["content_hash"],
+            "plan_hash_validated": True,
+            "authorization_validated": True,
+        },
+    )
+    _write(
+        tmp_path / "outputs" / "workflow" / trade_date / "execution.json",
+        {
+            "status": "success",
+            "run_id": execution_run_id,
+            "run_root": str(run_root.relative_to(tmp_path)),
+        },
+    )
+    return handoff_path
+
+
+def test_daily_audit_resolves_canonical_pointer_handoff_and_execution_result(
+    tmp_path: Path,
+) -> None:
+    trade_date, plan_path = _fixture(tmp_path)
+    handoff_path = _convert_to_canonical_handoff(tmp_path, trade_date, plan_path)
+
+    result = build_daily_portfolio_audit(repo_root=tmp_path, trade_date=trade_date)
+
+    assert result["status"] == "PASS"
+    assert result["sources"]["exact_execution_plan_pointer"]["path"] == str(
+        plan_path.relative_to(tmp_path)
+    )
+    assert result["sources"]["exact_execution_handoff"]["path"] == str(
+        handoff_path.relative_to(tmp_path)
+    )
+    assert "execution_result" in result["sources"]
+
+
+def test_daily_audit_rejects_pointer_outside_authority_boundary(tmp_path: Path) -> None:
+    trade_date, plan_path = _fixture(tmp_path)
+    _convert_to_canonical_handoff(tmp_path, trade_date, plan_path)
+    pointer = json.loads(plan_path.read_text(encoding="utf-8"))
+    pointer["json_path"] = "outputs/workflow/escape.json"
+    _write(plan_path, pointer)
+
+    with pytest.raises(DailyPortfolioAuditError, match="path_outside_boundary"):
+        build_daily_portfolio_audit(repo_root=tmp_path, trade_date=trade_date)
+
+
+def test_daily_audit_rejects_pointer_plan_identity_mismatch(tmp_path: Path) -> None:
+    trade_date, plan_path = _fixture(tmp_path)
+    _convert_to_canonical_handoff(tmp_path, trade_date, plan_path)
+    pointer = json.loads(plan_path.read_text(encoding="utf-8"))
+    pointer["plan_id"] = "plan:tampered"
+    _write(plan_path, pointer)
+
+    with pytest.raises(DailyPortfolioAuditError, match="pointer_identity_mismatch"):
+        build_daily_portfolio_audit(repo_root=tmp_path, trade_date=trade_date)
+
+
+def test_daily_audit_rejects_execution_result_plan_hash_mismatch(tmp_path: Path) -> None:
+    trade_date, plan_path = _fixture(tmp_path)
+    _convert_to_canonical_handoff(tmp_path, trade_date, plan_path)
+    execution = json.loads(
+        (tmp_path / "outputs" / "workflow" / trade_date / "execution.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    result_path = tmp_path / execution["run_root"] / "execution_results.json"
+    execution_result = json.loads(result_path.read_text(encoding="utf-8"))
+    execution_result["plan_hash_received"] = "tampered"
+    _write(result_path, execution_result)
+
+    with pytest.raises(
+        DailyPortfolioAuditError, match="exact_plan_execution_plan_hash_mismatch"
+    ):
+        build_daily_portfolio_audit(repo_root=tmp_path, trade_date=trade_date)

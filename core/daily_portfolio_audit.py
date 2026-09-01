@@ -34,6 +34,107 @@ def _content_hash(payload: Mapping[str, Any]) -> str:
     ).hexdigest()
 
 
+def _require_relative_source(
+    *, root: Path, relative: Any, boundary: Path, label: str
+) -> Path:
+    candidate = Path(str(relative or ""))
+    if not str(candidate) or candidate.is_absolute():
+        raise DailyPortfolioAuditError(
+            f"daily portfolio audit failed: {label}_path_invalid"
+        )
+    resolved = (root / candidate).resolve()
+    if not resolved.is_relative_to(boundary.resolve()) or resolved.is_symlink():
+        raise DailyPortfolioAuditError(
+            f"daily portfolio audit failed: {label}_path_outside_boundary"
+        )
+    if not resolved.is_file():
+        raise DailyPortfolioAuditError(
+            f"daily portfolio audit failed: {label}_missing"
+        )
+    return resolved
+
+
+def _resolve_exact_plan(
+    *, root: Path, trade_date: str
+) -> tuple[dict[str, Any], dict[str, Path], bool, str | None]:
+    """Resolve either a legacy direct v3 plan or the canonical pointer/handoff."""
+
+    plans_root = root / "outputs" / "paper_lane" / "plans"
+    canonical = plans_root / f"exact_execution_plan_{trade_date}.json"
+    if canonical.is_file():
+        payload = _read(canonical)
+        schema = payload.get("schema_version")
+        if schema == "caerus.execution_plan.v3":
+            return payload, {"exact_execution_plan": canonical}, False, None
+        if schema != "caerus.exact_execution_plan_pointer.v1":
+            raise DailyPortfolioAuditError(
+                "daily portfolio audit failed: exact_plan_pointer_schema_invalid"
+            )
+        if payload.get("trade_date") != trade_date:
+            raise DailyPortfolioAuditError(
+                "daily portfolio audit failed: exact_plan_pointer_trade_date_mismatch"
+            )
+        handoff_path = _require_relative_source(
+            root=root,
+            relative=payload.get("json_path"),
+            boundary=plans_root / "authority" / trade_date,
+            label="exact_plan_handoff",
+        )
+        handoff = _read(handoff_path)
+        if handoff.get("schema_version") != "caerus.authorized_execution_handoff.v1":
+            raise DailyPortfolioAuditError(
+                "daily portfolio audit failed: exact_plan_handoff_schema_invalid"
+            )
+        if handoff.get("trade_date") != trade_date:
+            raise DailyPortfolioAuditError(
+                "daily portfolio audit failed: exact_plan_handoff_trade_date_mismatch"
+            )
+        plan = handoff.get("exact_execution_plan")
+        if not isinstance(plan, dict):
+            raise DailyPortfolioAuditError(
+                "daily portfolio audit failed: exact_plan_handoff_plan_missing"
+            )
+        plan_hash = str(plan.get("content_hash") or "")
+        plan_id = str(plan.get("plan_id") or "")
+        if not plan_hash or not plan_id:
+            raise DailyPortfolioAuditError(
+                "daily portfolio audit failed: exact_plan_identity_missing"
+            )
+        if (
+            str(payload.get("plan_hash") or "") != plan_hash
+            or str(handoff.get("exact_execution_plan_hash") or "") != plan_hash
+            or str(payload.get("plan_id") or "") != plan_id
+            or str(handoff.get("exact_execution_plan_id") or "") != plan_id
+        ):
+            raise DailyPortfolioAuditError(
+                "daily portfolio audit failed: exact_plan_pointer_identity_mismatch"
+            )
+        authority_run_id = str(handoff.get("exact_execution_authority_run_id") or "")
+        if not authority_run_id or str(plan.get("run_id") or "") != authority_run_id:
+            raise DailyPortfolioAuditError(
+                "daily portfolio audit failed: exact_plan_authority_run_mismatch"
+            )
+        return (
+            plan,
+            {
+                "exact_execution_plan_pointer": canonical,
+                "exact_execution_handoff": handoff_path,
+            },
+            True,
+            authority_run_id,
+        )
+
+    legacy_candidates = sorted(
+        plans_root.rglob(f"exact_execution_plan*{trade_date}*.json")
+    )
+    if not legacy_candidates:
+        raise DailyPortfolioAuditError(
+            "daily audit source is missing: exact_execution_plan"
+        )
+    plan_path = max(legacy_candidates, key=lambda path: path.stat().st_mtime_ns)
+    return _read(plan_path), {"exact_execution_plan": plan_path}, False, None
+
+
 def build_daily_portfolio_audit(*, repo_root: Path, trade_date: str) -> dict[str, Any]:
     root = Path(repo_root).resolve()
     bundle = root / "outputs" / "precompute" / trade_date
@@ -45,14 +146,6 @@ def build_daily_portfolio_audit(*, repo_root: Path, trade_date: str) -> dict[str
     ownership_path = root / "outputs" / "ledger" / "paper" / "ownership_latest.json"
     valuation_path = root / "outputs" / "ledger" / "paper" / "valuation_latest.json"
     reporting_path = root / "outputs" / "portfolio_history" / "reporting_snapshot.json"
-    plan_candidates = sorted(
-        (root / "outputs" / "paper_lane" / "plans").rglob(
-            f"exact_execution_plan*{trade_date}*.json"
-        )
-    )
-    if not plan_candidates:
-        fallback = root / "outputs" / "paper_lane" / "plans" / f"exact_execution_plan_{trade_date}.json"
-        plan_candidates = [fallback] if fallback.is_file() else []
     required = [
         package_path,
         allocation_path,
@@ -64,17 +157,18 @@ def build_daily_portfolio_audit(*, repo_root: Path, trade_date: str) -> dict[str
         reporting_path,
     ]
     missing = [str(path) for path in required if not path.is_file()]
-    if missing or not plan_candidates:
+    if missing:
         raise DailyPortfolioAuditError(
             "daily audit source is missing: "
-            + ",".join(missing + ([] if plan_candidates else ["exact_execution_plan"]))
+            + ",".join(missing)
         )
-    plan_path = max(plan_candidates, key=lambda path: path.stat().st_mtime_ns)
     package = _read(package_path)
     allocation = _read(allocation_path)
     session = _read(session_path)
     decisions = _read(decisions_path)
-    plan = _read(plan_path)
+    plan, plan_sources, canonical_handoff, _ = _resolve_exact_plan(
+        root=root, trade_date=trade_date
+    )
     execution = _read(execution_path)
     ownership = _read(ownership_path)
     valuation = _read(valuation_path)
@@ -111,7 +205,27 @@ def build_daily_portfolio_audit(*, repo_root: Path, trade_date: str) -> dict[str
     for name, source_hash in required_source_hashes.items():
         if source_hash not in observed_hashes:
             failures.append(f"exact_plan_missing_{name}_hash")
-    if plan.get("run_id") != execution.get("run_id"):
+    execution_result_path: Path | None = None
+    if canonical_handoff:
+        execution_result_path = _require_relative_source(
+            root=root,
+            relative=Path(str(execution.get("run_root") or ""))
+            / "execution_results.json",
+            boundary=root / "outputs" / "paper_lane" / "runs",
+            label="execution_result",
+        )
+        execution_result = _read(execution_result_path)
+        if execution_result.get("run_id") != execution.get("run_id"):
+            failures.append("execution_result_run_mismatch")
+        if execution_result.get("plan_id_received") != plan.get("plan_id"):
+            failures.append("exact_plan_execution_plan_id_mismatch")
+        if execution_result.get("plan_hash_received") != declared_plan_hash:
+            failures.append("exact_plan_execution_plan_hash_mismatch")
+        if execution_result.get("plan_hash_validated") is not True:
+            failures.append("exact_plan_execution_hash_not_validated")
+        if execution_result.get("authorization_validated") is not True:
+            failures.append("exact_plan_execution_authority_not_validated")
+    elif plan.get("run_id") != execution.get("run_id"):
         failures.append("exact_plan_execution_run_mismatch")
     exact_orders = [*(plan.get("sell_orders") or []), *(plan.get("buy_orders") or [])]
     for order in exact_orders:
@@ -146,12 +260,14 @@ def build_daily_portfolio_audit(*, repo_root: Path, trade_date: str) -> dict[str
         "sleeve_decisions": decisions_path,
         "portfolio_allocation": allocation_path,
         "paper_target_package": package_path,
-        "exact_execution_plan": plan_path,
         "execution_pointer": execution_path,
         "ownership": ownership_path,
         "valuation": valuation_path,
         "reporting_snapshot": reporting_path,
     }
+    sources.update(plan_sources)
+    if execution_result_path is not None:
+        sources["execution_result"] = execution_result_path
     result = {
         "schema_version": AUDIT_SCHEMA,
         "status": "PASS",
