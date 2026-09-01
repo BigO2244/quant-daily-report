@@ -66,6 +66,7 @@ def test_dashboard_deploy_uses_canonical_vm_alias():
     script = Path("scripts/deploy_dashboard_vm.sh").read_text(encoding="utf-8")
 
     assert 'REMOTE_HOST="${REMOTE_HOST:-caerus-vm}"' in script
+    assert '"${repo_root}/scripts/dashboard_refresh_condition.sh"' in script
 
 
 def _condition_result(weekday: int, hhmm: str) -> int:
