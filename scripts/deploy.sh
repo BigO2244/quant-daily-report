@@ -114,6 +114,8 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         Tests/test_lyra_live_portfolio.py \
         Tests/test_cron_command_validation.py \
         Tests/test_trading_integrity_certification.py \
+        Tests/test_dashboard_execution_integrity_assets.py \
+        Tests/test_vm_maintenance_windows.py \
         -q
     python3 scripts/build_operating_truth.py \
         --repo-root "${VALIDATION_WORKTREE}" \
