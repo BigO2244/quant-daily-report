@@ -477,6 +477,19 @@ Resolution:
 - Daily precompute, execution, confirmation, shadow lane, and weekly review.
 - Broker-authoritative dashboard refreshes and VM-hosted operational surfaces.
 
+### VM resource and maintenance windows
+
+- The dashboard refresh runs every five minutes after the prior run completes.
+  Its production service is limited to 120 seconds, 320 MB, 64 tasks, and low
+  CPU/I/O priority so a stalled broker read cannot crowd out trading or GolfBot.
+- Ubuntu package metadata refresh is pinned to 01:15 ET plus at most 15 minutes
+  of jitter. Unattended upgrades are pinned to 02:15 ET plus at most 15 minutes
+  of jitter. Both remain enabled, but neither may drift into the 06:45–10:00
+  trading runway or the 18:30–21:00 post-close chain.
+- Install or repair the tracked package-maintenance overrides on the VM with
+  `scripts/install_vm_maintenance_windows.sh`, then verify the next activations
+  with `systemctl list-timers apt-daily.timer apt-daily-upgrade.timer`.
+
 ### When to Use GitHub Actions
 
 - Manual dispatch-only recovery or diagnostics when explicitly selected.
