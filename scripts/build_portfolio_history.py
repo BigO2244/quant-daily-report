@@ -910,13 +910,20 @@ def build_portfolio_history(
         )
 
     # FR-066 §3: SPY-relative and beta-adjusted scoreboard columns (additive).
+    # These observations are governance advisories, not failures of the
+    # current causal reporting chain.  Keep them distinct from integrity
+    # warnings so a historical append-only conflict cannot falsely downgrade
+    # a fresh, reconciled broker snapshot.
+    reporting_advisories: list[str] = []
     benchmark_by_date, benchmark_source = _read_benchmark_series(root)
     _augment_benchmark(nav_rows, benchmark_by_date)
     scoreboard = _derived_scoreboard(nav_rows)
     if not benchmark_by_date:
-        nav_warnings.append("No SPY benchmark close history available; benchmark/beta columns are null.")
+        reporting_advisories.append(
+            "No SPY benchmark close history available; benchmark/beta columns are null."
+        )
     if restatement_candidates:
-        nav_warnings.append(
+        reporting_advisories.append(
             f"{len(restatement_candidates)} candidate NAV row(s) disagree with the immutable canonical "
             "series beyond 1 bp; append-only guard kept the canonical values. "
             "Log explicit restatements in outputs/portfolio_history/restatements.json if a correction is intended."
@@ -987,7 +994,7 @@ def build_portfolio_history(
             "nav_source": nav_source or "",
             "benchmark_source": benchmark_source or "",
         },
-        "warnings": tx_warnings + pos_warnings + nav_warnings,
+        "warnings": tx_warnings + pos_warnings + nav_warnings + reporting_advisories,
     }
     summary_path = out_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1022,6 +1029,7 @@ def build_portfolio_history(
             if path.is_file()
         },
         "warnings": tx_warnings + pos_warnings + nav_warnings,
+        "advisories": reporting_advisories,
     }
     reporting_snapshot["content_hash"] = hashlib.sha256(
         json.dumps(
