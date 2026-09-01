@@ -1,4 +1,6 @@
 from pathlib import Path
+import os
+import subprocess
 
 
 def test_dashboard_terminal_health_mounts_exist():
@@ -48,6 +50,8 @@ def test_dashboard_refresh_service_is_resource_bounded_and_low_priority():
     )
 
     assert "Type=oneshot" in service
+    assert "ExecCondition=" in service
+    assert "scripts/dashboard_refresh_condition.sh" in service
     assert "--require-live-broker" in service
     assert "TimeoutStartSec=120s" in service
     assert "TimeoutStopSec=15s" in service
@@ -62,3 +66,41 @@ def test_dashboard_deploy_uses_canonical_vm_alias():
     script = Path("scripts/deploy_dashboard_vm.sh").read_text(encoding="utf-8")
 
     assert 'REMOTE_HOST="${REMOTE_HOST:-caerus-vm}"' in script
+
+
+def _condition_result(weekday: int, hhmm: str) -> int:
+    env = os.environ.copy()
+    env["CAERUS_CLOCK_WEEKDAY"] = str(weekday)
+    env["CAERUS_CLOCK_HHMM"] = hhmm
+    return subprocess.run(
+        ["bash", "scripts/dashboard_refresh_condition.sh"],
+        check=False,
+        env=env,
+    ).returncode
+
+
+def test_dashboard_refresh_skips_production_windows():
+    assert _condition_result(2, "0645") == 1
+    assert _condition_result(1, "0800") == 1
+    assert _condition_result(2, "0935") == 1
+    assert _condition_result(2, "1830") == 1
+    assert _condition_result(2, "1945") == 1
+    assert _condition_result(2, "2100") == 1
+
+
+def test_dashboard_refresh_runs_outside_production_windows():
+    assert _condition_result(2, "0630") == 0
+    assert _condition_result(2, "0730") == 0
+    assert _condition_result(2, "1015") == 0
+    assert _condition_result(2, "2030") == 0
+    assert _condition_result(2, "2115") == 0
+    assert _condition_result(7, "0935") == 0
+
+
+def test_dashboard_refresh_timer_uses_fifteen_minute_cadence():
+    timer = Path("deploy/caerus-dashboard-refresh.timer").read_text(
+        encoding="utf-8"
+    )
+
+    assert "OnBootSec=2min" in timer
+    assert "OnUnitActiveSec=15min" in timer

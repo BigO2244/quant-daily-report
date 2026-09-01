@@ -479,9 +479,11 @@ Resolution:
 
 ### VM resource and maintenance windows
 
-- The dashboard refresh runs every five minutes after the prior run completes.
+- The dashboard refresh runs every 15 minutes after the prior run completes.
   Its production service is limited to 120 seconds, 320 MB, 64 tasks, and low
   CPU/I/O priority so a stalled broker read cannot crowd out trading or GolfBot.
+  A tracked `ExecCondition` skips refreshes during the security-master,
+  precompute, execution/confirmation, Monday review, and post-close windows.
 - Ubuntu package metadata refresh is pinned to 01:15 ET plus at most 15 minutes
   of jitter. Unattended upgrades are pinned to 02:15 ET plus at most 15 minutes
   of jitter. Both remain enabled, but neither may drift into the 06:45–10:00
