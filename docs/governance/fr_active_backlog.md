@@ -272,7 +272,8 @@ procedures are proven.
   also stop on 2026-05-20. Intended-vs-actual-vs-SPY drag therefore cannot be
   computed through the requested date. Evidence: `outputs/perf/live_overlay_nav_series.csv`
   is produced by `scripts/refresh_quant_dashboard.py::refresh_live_performance_artifacts()`
-  from the Alpaca account portfolio-history API on a 5-minute systemd timer
+  from the Alpaca account portfolio-history API. It historically ran on a
+  5-minute systemd timer
   (`deploy/caerus-dashboard-refresh.{service,timer}`). The legacy runtime
   GitHub Actions that previously maintained live broker artifacts were
   deprecated/archived under
@@ -332,13 +333,19 @@ procedures are proven.
   current broker/run artifacts when live-overlay coverage alone is stale, so
   current-date attribution no longer stops at 2026-04-08/2026-05-20 when
   current run evidence exists.
+- **Current September 1 state:** The producer remains deployed, but its
+  non-capital cadence is now 15 minutes. Its service is bounded to 120 seconds,
+  320 MB, 64 tasks, and low CPU/I/O priority and skips security-master,
+  precompute, execution/confirmation, weekly-review, and post-close windows.
+  A production smoke completed successfully after a separate slow run proved
+  the timeout releases resources.
 
 ## FR-059 Broker Telemetry Failure Detection
 
 - **FR number:** FR-059
 - **Title:** Broker Telemetry Failure Detection
 - **Date started:** 2026-06-04
-- **Status:** `IN_PROGRESS`
+- **Status:** `DEPLOYED_OBSERVING`
 - **Problem statement:** `scripts/refresh_quant_dashboard.py` runs the live Alpaca
   broker refresh inside a try/except and, unless `--require-live-broker` is set,
   logs a warning and exits 0 on failure. The systemd service
@@ -367,6 +374,10 @@ procedures are proven.
   stdout result; `--require-live-broker` added to
   `deploy/caerus-dashboard-refresh.service` (requires `sudo cp` +
   `systemctl daemon-reload` on the VM to install).
+- **Current September 1 state:** `--require-live-broker` is deployed. The
+  service emits structured live status, fails non-zero when the broker refresh
+  is unavailable, and is protected by the resource, timeout, cadence, and
+  critical-window controls recorded under FR-058.
 - **Validation plan:** Unit tests for failure classification and stale-artifact
   evaluation; a `main()`-level test that a failing live-broker step under
   `--require-live-broker` returns non-zero and emits `live_broker_required_failed`,
