@@ -1248,6 +1248,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Send the Shadow CIO model scorecard email.")
     parser.add_argument("--repo-root", default=str(_REPO_ROOT), help="Repository root containing outputs/")
     parser.add_argument("--dry-run", action="store_true", help="Print the email instead of sending it")
+    parser.add_argument(
+        "--best-effort-send",
+        action="store_true",
+        help=(
+            "Return success when only the external email transport fails. "
+            "Report construction and operating-truth gates remain strict."
+        ),
+    )
     args = parser.parse_args(argv)
 
     repo_root = Path(args.repo_root).resolve()
@@ -1260,7 +1268,17 @@ def main(argv: list[str] | None = None) -> int:
     _load_dotenv(repo_root)
     from core.quant_report import send_email
 
-    send_email(subject=report.subject, body_text=report.body)
+    try:
+        send_email(subject=report.subject, body_text=report.body)
+    except Exception as exc:
+        if not args.best_effort_send:
+            raise
+        print(
+            "[SHADOW_CIO_REPORT][WARN] best-effort email transport failed; "
+            f"operating artifacts remain authoritative: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 0
     print(f"[SHADOW_CIO_REPORT][OK] sent: {report.subject}")
     return 0
 

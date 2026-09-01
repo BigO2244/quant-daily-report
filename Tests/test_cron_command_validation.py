@@ -68,3 +68,16 @@ def test_canonical_crontab_preserves_exactly_one_lyra_live_schedule() -> None:
     assert text.count(WEEKLY_MARKER) == 1
     assert WEEKLY_LINE in text
     assert render(text, install=True).count(WEEKLY_MARKER) == 1
+
+
+def test_operating_truth_stays_strict_while_cio_email_is_best_effort() -> None:
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "scripts/crontab.txt").read_text(encoding="utf-8")
+    line = next(
+        item
+        for item in text.splitlines()
+        if "python3 scripts/build_operating_truth.py" in item
+    )
+
+    assert "build_operating_truth.py" in line
+    assert "--strict && python3 -m scripts.send_shadow_cio_report --best-effort-send" in line
