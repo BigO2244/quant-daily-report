@@ -96,8 +96,7 @@ Or trigger the workflow and watch the "Alpaca smoke test" and "Diag Alpaca auth"
 
 | Time (ET) | Scheduler | Phase | Key Steps |
 |---|---|---|---|
-| 1:00 AM | VM cron | Overnight agents | `scripts/cron_overnight.sh` writes overnight signals. |
-| 6:30 AM | VM cron | Research digest | `scripts/cron_research.sh` writes research digest. |
+| 6:30 AM | Mac Studio launchd | Advisory research digest | `com.caerus.quant-research` writes to `~/.caerus/research-runtime/outputs/`; it has no canonical precompute consumer. |
 | 7:00 AM | VM cron | Precompute | `scripts/cron_precompute.sh` evaluates all sleeves, seals one Orion Decision target, quarantines the legacy research frame, and then writes non-blocking shadow artifacts. |
 | 9:35 AM | VM cron | Execution | `scripts/cron_execute.sh` validates the sealed target, self-heals if needed, applies fresh Risk/broker state, and creates exact orders from the same Decision hash. |
 | 10:00 AM | VM cron | Confirmation | `scripts/cron_confirm.sh` sends confirmation/reporting email. |

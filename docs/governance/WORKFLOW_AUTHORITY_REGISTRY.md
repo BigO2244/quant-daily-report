@@ -49,9 +49,11 @@ execution and confirmation, independently governed Lyra Live execution,
 post-close Shadow hydration/reporting, broker ledgers, portfolio audit, and the
 weekly model review.
 
-The 06:30 research digest is advisory and has no active canonical-precompute
-consumer. There is no deployed 01:00 overnight-agent job. Historical designs or
-reports must not be represented as current runtime behavior.
+The 06:30 research digest is advisory, runs on the Mac Studio under launchd
+label `com.caerus.quant-research`, and has no active canonical-precompute
+consumer. It is intentionally absent from the production VM crontab. There is
+no deployed 01:00 overnight-agent job. Historical designs or reports must not
+be represented as current runtime behavior.
 
 ## Conflict policy
 

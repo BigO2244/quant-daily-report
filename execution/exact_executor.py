@@ -1382,7 +1382,8 @@ def _execute_exact_plan_locked(
     try:
         max_age = float(max_age_raw)
         created = dt.datetime.fromisoformat(plan.created_at.replace("Z", "+00:00"))
-        age = (dt.datetime.now(dt.timezone.utc) - created.astimezone(dt.timezone.utc)).total_seconds()
+        current = _execution_clock(now_et).astimezone(dt.timezone.utc)
+        age = (current - created.astimezone(dt.timezone.utc)).total_seconds()
     except (TypeError, ValueError) as exc:
         raise AuthorityContractError("invalid exact-plan freshness policy") from exc
     if max_age <= 0 or age < -60.0:
