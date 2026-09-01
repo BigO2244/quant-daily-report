@@ -81,3 +81,16 @@ def test_operating_truth_stays_strict_while_cio_email_is_best_effort() -> None:
 
     assert "build_operating_truth.py" in line
     assert "--strict && python3 -m scripts.send_shadow_cio_report --best-effort-send" in line
+
+
+def test_portfolio_history_uses_unconditional_escalation_wrapper() -> None:
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "scripts/crontab.txt").read_text(encoding="utf-8")
+    line = next(
+        item
+        for item in text.splitlines()
+        if "scripts/run_portfolio_history_close.py" in item
+    )
+
+    assert "--send-escalation" in line
+    assert "build_daily_portfolio_audit.py" not in line

@@ -53,7 +53,7 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # escalation step always runs (even if the build fails) so silence is never a
 # valid state. Installed on the VM 2026-06-10 after owner approval; output is
 # captured in logs/portfolio_history.cron.log.
-45 19 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && ( python3 scripts/build_portfolio_history.py --trade-date $(TZ=America/New_York date +\%F) --require-causal-valuation && python3 scripts/build_daily_portfolio_audit.py --trade-date $(TZ=America/New_York date +\%F) && python3 -m core.portfolio_history_escalation --trade-date $(TZ=America/New_York date +\%F) --send ) >> logs/portfolio_history.cron.log 2>&1
+45 19 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 scripts/run_portfolio_history_close.py --repo-root $HOME/quant-daily-report --trade-date $(TZ=America/New_York date +\%F) --send-escalation >> logs/portfolio_history.cron.log 2>&1
 
 # Weekly Model Review (Monday 8:00 AM ET)
 0 8 * * 1 $HOME/quant-daily-report/scripts/cron_weekly_review.sh >> $HOME/quant-daily-report/logs/weekly_review.log 2>&1

@@ -91,6 +91,7 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         scripts/certify_execution_readiness.py \
         scripts/build_portfolio_history.py scripts/build_causal_paper_ledger.py \
         scripts/build_daily_portfolio_audit.py \
+        scripts/run_portfolio_history_close.py \
         scripts/build_operating_truth.py scripts/run_lyra_live_portfolio.py \
         scripts/manage_lyra_live_cron.py scripts/certify_trading_integrity.py
     python3 -m pytest \
@@ -107,6 +108,7 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         Tests/test_portfolio_operating_model.py \
         Tests/test_causal_ownership_ledger.py \
         Tests/test_daily_portfolio_audit.py \
+        Tests/test_portfolio_history_close.py \
         Tests/test_sleeve_control_plane.py \
         Tests/test_shadow_daily_wrapper.py \
         Tests/test_caerus_daily_health_check.py \
