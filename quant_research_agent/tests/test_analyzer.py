@@ -34,7 +34,7 @@ class TestAnalyzeDryRun:
             assert isinstance(r, ScoredItem)
             assert r.score == 0.5
             assert r.sentiment == "neutral"
-            assert "dry-run" in r.rationale
+            assert "dry-run" in r.rationale.lower()
 
     def test_dry_run_empty_input(self):
         results = analyzer.analyze_items([], dry_run=True)

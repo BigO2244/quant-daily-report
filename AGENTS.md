@@ -207,27 +207,27 @@ duplicate it as a GitHub Action or production VM cron job.
 
 ## Scheduled Automation — Full Pipeline
 
-The following production operations run on the VM. Install with
-`crontab scripts/crontab.txt`.
+The following production operations run on the VM unless the scheduler column
+states otherwise. Install the VM entries with `crontab scripts/crontab.txt`.
 
-| Time (ET) | Phase | Script | Output |
-|---|---|---|---|
-| 6:30 AM | Advisory research digest | `scripts/cron_research.sh` | `quant_research_agent/outputs/digest_YYYY-MM-DD.json`; non-capital and not consumed by canonical precompute |
-| 7:00 AM | 1 — Precompute | `scripts/cron_precompute.sh` | Immutable session + full sleeve decisions + one account allocation |
-| 9:35 AM | 2 — Order execution | `scripts/cron_execute.sh` | Exact Alpaca PAPER equity orders; options disabled |
-| 10:00 AM | 3 — Confirmation + email | `scripts/cron_confirm.sh` | Email report |
-| 6:30 PM | Post-close price hydration | `python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts --strict` | `outputs/price_hydration/YYYY-MM-DD/status.json` + refreshed Shadow scorecard artifacts |
-| 7:15 PM | Broker-truth ledger | `scripts/cron_broker_ledger.sh` | Broker fills/positions plus causal ownership and single-as-of valuation |
-| 7:45 PM | Canonical portfolio history and audit | strict history + `scripts/build_daily_portfolio_audit.py` | Same-as-of reporting snapshot and `outputs/audit/<date>/portfolio_audit.json` |
-| 9:00 PM | Shadow CIO report | `python3 -m scripts.send_shadow_cio_report` | Daily Shadow scorecard/reporting email |
-| Monday 8 AM | Weekly model review | `scripts/cron_weekly_review.sh` | Review artifacts |
+| Time (ET) | Scheduler | Phase | Script | Output |
+|---|---|---|---|---|
+| 6:30 AM | Mac Studio launchd | Advisory research digest | `com.caerus.quant-research` | `~/.caerus/research-runtime/outputs/digest_YYYY-MM-DD.json`; non-capital and not consumed by canonical precompute |
+| 7:00 AM | Production VM cron | 1 — Precompute | `scripts/cron_precompute.sh` | Immutable session + full sleeve decisions + one account allocation |
+| 9:35 AM | Production VM cron | 2 — Order execution | `scripts/cron_execute.sh` | Exact Alpaca PAPER equity orders; options disabled |
+| 10:00 AM | Production VM cron | 3 — Confirmation + email | `scripts/cron_confirm.sh` | Email report |
+| 6:30 PM | Production VM cron | Post-close price hydration | `python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts --strict` | `outputs/price_hydration/YYYY-MM-DD/status.json` + refreshed Shadow scorecard artifacts |
+| 7:15 PM | Production VM cron | Broker-truth ledger | `scripts/cron_broker_ledger.sh` | Broker fills/positions plus causal ownership and single-as-of valuation |
+| 7:45 PM | Production VM cron | Canonical portfolio history and audit | strict history + `scripts/build_daily_portfolio_audit.py` | Same-as-of reporting snapshot and `outputs/audit/<date>/portfolio_audit.json` |
+| 9:00 PM | Production VM cron | Shadow CIO report | `python3 -m scripts.send_shadow_cio_report` | Daily Shadow scorecard/reporting email |
+| Monday 8 AM | Production VM cron | Weekly model review | `scripts/cron_weekly_review.sh` | Review artifacts |
 
 **Data flow**: inputs → immutable session → complete sleeve decision batch →
 configured account allocation → independent Risk → exact execution → broker
 reconciliation → causal ownership → valuation → daily audit/reporting. The
 post-precompute shadow refresh is research-only and cannot mutate the seal.
 
-There is no deployed 1:00 AM overnight-agent job. The 6:30 AM digest is an
+There is no deployed 1:00 AM overnight-agent job. The 6:30 AM Mac digest is an
 advisory research artifact and has no active consumer in canonical precompute;
 its success or failure cannot change the session, sleeve decisions, allocation,
 or execution plan.
@@ -544,7 +544,7 @@ Four independent layers prevent position and regime whipsaw:
 | `config/options_execution_policy.json` | Options execution gates — `allow_live_submission` flag |
 | `brokers/alpaca_broker.py` | Alpaca broker — equity + options order submission |
 | `scripts/crontab.txt` | Full cron schedule — install with `crontab scripts/crontab.txt` |
-| `scripts/cron_research.sh` | Advisory Claude research digest at 6:30 AM ET; no canonical precompute consumer |
+| `scripts/cron_research.sh` | Legacy/manual advisory digest wrapper; scheduled execution moved off the VM to Mac Studio launchd label `com.caerus.quant-research` |
 | `scripts/cron_precompute.sh` | Phase 1 — 7:00 AM ET precompute |
 | `scripts/cron_execute.sh` | Phase 2 — 9:35 AM ET order execution |
 | `scripts/cron_confirm.sh` | Phase 3 — 10:00 AM ET confirmation + email |
