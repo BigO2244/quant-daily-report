@@ -40,3 +40,25 @@ def test_deploy_script_builds_dashboard_aliases_from_canonical_payload():
     assert "js_alias.write_text('window.DASHBOARD_V1 = '" in script
     assert '"${repo_root}/web/dashboard/dashboard-data.json"' not in script
     assert '"${repo_root}/web/dashboard/dashboard-data.js"' not in script
+
+
+def test_dashboard_refresh_service_is_resource_bounded_and_low_priority():
+    service = Path("deploy/caerus-dashboard-refresh.service").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Type=oneshot" in service
+    assert "--require-live-broker" in service
+    assert "TimeoutStartSec=120s" in service
+    assert "TimeoutStopSec=15s" in service
+    assert "KillMode=control-group" in service
+    assert "Nice=10" in service
+    assert "IOSchedulingClass=idle" in service
+    assert "MemoryMax=320M" in service
+    assert "TasksMax=64" in service
+
+
+def test_dashboard_deploy_uses_canonical_vm_alias():
+    script = Path("scripts/deploy_dashboard_vm.sh").read_text(encoding="utf-8")
+
+    assert 'REMOTE_HOST="${REMOTE_HOST:-caerus-vm}"' in script
