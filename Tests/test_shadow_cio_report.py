@@ -3,7 +3,11 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+import scripts.send_shadow_cio_report as shadow_cio_report
 from scripts.send_shadow_cio_report import _render_operating_capital_state, build_report
 
 
@@ -566,3 +570,46 @@ def test_shadow_cio_report_suppresses_windows_and_rankings_when_nav_chain_resets
     assert "=== CANONICAL PROMOTION READINESS (RESEARCH ONLY) ===" not in report.body
     assert "PROMOTE_CANDIDATE" not in report.body
     assert "Publication withheld. No CIO performance conclusions were generated." in report.body
+
+
+def test_shadow_cio_main_best_effort_send_is_nonfatal_only_for_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        shadow_cio_report,
+        "build_report",
+        lambda _root: SimpleNamespace(subject="subject", body="body"),
+    )
+    monkeypatch.setattr(shadow_cio_report, "_load_dotenv", lambda _root: None)
+
+    def _reject(**_kwargs) -> None:
+        raise RuntimeError("smtp rejected")
+
+    monkeypatch.setattr("core.quant_report.send_email", _reject)
+
+    assert (
+        shadow_cio_report.main(
+            ["--repo-root", str(tmp_path), "--best-effort-send"]
+        )
+        == 0
+    )
+    assert "[SHADOW_CIO_REPORT][WARN]" in capsys.readouterr().err
+
+
+def test_shadow_cio_main_default_send_remains_fail_loud(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        shadow_cio_report,
+        "build_report",
+        lambda _root: SimpleNamespace(subject="subject", body="body"),
+    )
+    monkeypatch.setattr(shadow_cio_report, "_load_dotenv", lambda _root: None)
+
+    def _reject(**_kwargs) -> None:
+        raise RuntimeError("smtp rejected")
+
+    monkeypatch.setattr("core.quant_report.send_email", _reject)
+
+    with pytest.raises(RuntimeError, match="smtp rejected"):
+        shadow_cio_report.main(["--repo-root", str(tmp_path)])

@@ -38,8 +38,8 @@ PATH=/usr/local/bin:/usr/bin:/bin
 # Phase 3: Confirmation + Email
 0 10 * * 1-5 $HOME/quant-daily-report/scripts/cron_confirm.sh >> $HOME/quant-daily-report/logs/cron_confirm.log 2>&1
 
-# Shadow CIO model scorecard email
-0 21 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 scripts/build_operating_truth.py --repo-root $HOME/quant-daily-report --home $HOME --output-dir outputs/operating_state/current --strict && python3 -m scripts.send_shadow_cio_report >> logs/shadow_cio_report.log 2>&1
+# Strict operating truth followed by a non-capital, best-effort CIO email.
+0 21 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 scripts/build_operating_truth.py --repo-root $HOME/quant-daily-report --home $HOME --output-dir outputs/operating_state/current --strict && python3 -m scripts.send_shadow_cio_report --best-effort-send >> logs/shadow_cio_report.log 2>&1
 
 # Post-close artifact-only price cache hydration for shadow/reporting reads
 30 18 * * 1-5 cd $HOME/quant-daily-report && source scripts/runtime_env.sh && activate_runtime_venv $HOME/quant-daily-report && python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts --strict >> logs/price_hydration.cron.log 2>&1
