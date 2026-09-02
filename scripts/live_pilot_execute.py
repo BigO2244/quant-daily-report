@@ -5923,6 +5923,21 @@ def recover_exact_run(run_root: Path) -> dict[str, Any]:
         "precompute_execution_authority": False,
         "recovery_source_run_root": str(run_root),
     }
+    # Recovery must preserve the original target and Decision lineage used by
+    # post-trade target-attainment reporting.  These fields are evidence only;
+    # the executor remains bound exclusively to the immutable exact plan and
+    # stable client order IDs above.
+    for key in (
+        "approved_execution_package",
+        "decision_source_artifact",
+        "target_attainment_policy",
+        "target_attainment_tolerance",
+    ):
+        value = payload.get(key)
+        if isinstance(value, Mapping):
+            handoff[key] = dict(value)
+        elif value is not None:
+            handoff[key] = value
     return run_live_pilot(
         plan=handoff,
         run_id=recovery_id,

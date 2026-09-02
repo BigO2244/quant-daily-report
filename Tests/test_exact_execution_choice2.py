@@ -18,6 +18,7 @@ from authority.exact_plan import build_exact_execution_plan, exact_execution_pla
 from core.failure_semantics import TerminalOutcome
 from core.orchestrator_state import load_orchestrator_state
 import execution.exact_executor as exact_executor_module
+import scripts.live_pilot_execute as live_pilot_module
 from execution.exact_executor import execute_exact_plan as _execute_exact_plan
 from scripts.live_pilot_execute import run_live_pilot as _run_live_pilot
 from core.regime_state_store import (
@@ -1188,6 +1189,73 @@ def test_completed_wal_recovery_after_close_is_lookup_only_and_reconciles(
     recovered_ids = [row["client_order_id"] for row in recovered.orders_submitted]
     assert len(recovered_ids) == len(set(recovered_ids)) == len(plan.orders)
     assert all(row["recovered_by_client_order_id"] for row in recovered.orders_submitted)
+
+
+def test_exact_run_recovery_preserves_original_target_lineage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    run_root = tmp_path / "outputs" / "paper_lane" / "runs" / "original-run"
+    run_root.mkdir(parents=True)
+    exact = _plan()
+    approved_package = {
+        "content_hash": "approved-package-hash",
+        "approved_cash_weight": 0.05,
+        "approved_target_rows": [
+            {"symbol": "AAPL", "target_weight": 0.95}
+        ],
+        "constraints": {
+            "target_attainment_policy": {
+                "schema_version": "caerus.target_attainment_policy.v1",
+                "account_scope": "PAPER",
+                "share_mode": "FRACTIONAL_SHARES",
+                "target_cash_weight": 0.05,
+                "minimum_cash_weight": 0.025,
+                "fixed_drift_tolerance": 0.02,
+                "nearest_feasible_required": False,
+                "comparison_epoch_policy": "FIRST_CLEAN_POST_FIX_PAPER_RUN",
+                "strict_green_propagation": True,
+                "owner_approved_at": "2026-08-31",
+            }
+        },
+    }
+    decision_source = {
+        "path": "outputs/precompute/2026-08-12/paper_target_package.json",
+        "content_hash": "decision-source-hash",
+    }
+    payload = {
+        "execution_source": "exact_execution_plan_v3",
+        "exact_execution_plan": exact.to_dict(),
+        "approved_execution_package": approved_package,
+        "decision_source_artifact": decision_source,
+        "target_attainment_policy": approved_package["constraints"][
+            "target_attainment_policy"
+        ],
+        "target_attainment_tolerance": 0.02,
+    }
+    (run_root / "execution_payload.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run_live_pilot(**kwargs):
+        captured.update(kwargs)
+        return {"terminal_status": "SUBMITTED"}
+
+    monkeypatch.setattr(live_pilot_module, "run_live_pilot", fake_run_live_pilot)
+
+    result = live_pilot_module.recover_exact_run(run_root)
+
+    assert result["terminal_status"] == "SUBMITTED"
+    recovered_handoff = captured["plan"]
+    assert recovered_handoff["exact_execution_plan_hash"] == exact.content_hash
+    assert recovered_handoff["approved_execution_package"] == approved_package
+    assert recovered_handoff["decision_source_artifact"] == decision_source
+    assert recovered_handoff["target_attainment_policy"] == (
+        approved_package["constraints"]["target_attainment_policy"]
+    )
+    assert recovered_handoff["target_attainment_tolerance"] == 0.02
 
 
 def test_immediate_order_id_only_response_refreshes_by_canonical_broker_id(
