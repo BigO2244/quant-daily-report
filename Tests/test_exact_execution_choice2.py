@@ -1197,7 +1197,7 @@ def test_exact_run_recovery_preserves_original_target_lineage(
 ):
     run_root = tmp_path / "outputs" / "paper_lane" / "runs" / "original-run"
     run_root.mkdir(parents=True)
-    exact = _plan()
+    exact = _fractional_addition_plan()
     approved_package = {
         "content_hash": "approved-package-hash",
         "approved_cash_weight": 0.05,
@@ -1250,6 +1250,7 @@ def test_exact_run_recovery_preserves_original_target_lineage(
     assert result["terminal_status"] == "SUBMITTED"
     recovered_handoff = captured["plan"]
     assert recovered_handoff["exact_execution_plan_hash"] == exact.content_hash
+    assert recovered_handoff["allow_fractional"] is True
     assert recovered_handoff["approved_execution_package"] == approved_package
     assert recovered_handoff["decision_source_artifact"] == decision_source
     assert recovered_handoff["target_attainment_policy"] == (

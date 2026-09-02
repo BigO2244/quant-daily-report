@@ -5921,6 +5921,7 @@ def recover_exact_run(run_root: Path) -> dict[str, Any]:
         "exact_execution_authority_run_id": exact.run_id,
         "execution_authority": "exact_execution_plan_only",
         "precompute_execution_authority": False,
+        "allow_fractional": exact.constraints.get("allow_fractional") is True,
         "recovery_source_run_root": str(run_root),
     }
     # Recovery must preserve the original target and Decision lineage used by
