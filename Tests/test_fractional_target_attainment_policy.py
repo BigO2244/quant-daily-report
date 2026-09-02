@@ -21,6 +21,7 @@ from execution.core import (
     live_pilot_execution_config,
 )
 from scripts.live_pilot_execute import _core_rows_from_frame
+from scripts.authorize_exact_execution_plan import _expected_state
 
 
 POLICY = {
@@ -150,6 +151,25 @@ def test_fractional_order_quantity_is_sealed_to_six_decimals() -> None:
     assert rows[0]["shares"] == 0.123457
     assert rows[0]["qty"] == 0.123457
     assert rows[0]["notional"] == pytest.approx(12.3457)
+
+
+def test_fractional_expected_state_uses_broker_quantity_precision() -> None:
+    positions, cash = _expected_state(
+        positions=[{"symbol": "LRCX", "quantity": 6.657142}],
+        cash=516.82,
+        orders=[
+            {
+                "symbol": "LRCX",
+                "side": "BUY",
+                "quantity": 0.158,
+                "expected_price": 288.415,
+                "notional": 46.02382,
+            }
+        ],
+    )
+
+    assert positions == [{"symbol": "LRCX", "quantity": 6.815142}]
+    assert cash == pytest.approx(470.79618)
 
 
 def test_august_31_orion_snapshot_produces_four_fractional_rebalance_orders() -> None:

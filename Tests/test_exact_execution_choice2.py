@@ -804,6 +804,160 @@ def test_exact_executor_reconciles_market_order_cash_at_actual_fill_prices(
     assert result.final_cash != pytest.approx(plan.expected_posttrade_cash)
 
 
+def _fractional_addition_plan(*, canonical_expected: bool = False):
+    return build_exact_execution_plan(
+        run_id="fractional-authority-run",
+        as_of="2026-08-12T09:35:00-04:00",
+        created_at="2026-08-12T09:35:01-04:00",
+        orchestrator_version="choice2.fractional-reconciliation-test",
+        source_precompute_ids=["precompute:2026-08-12:fractional"],
+        source_artifact_hashes={"precompute": "f" * 64},
+        market_state_id="market:2026-08-12:fractional",
+        market_state={"session": "OPEN"},
+        regime_state=_committed_regime_state(),
+        sleeve_allocations=[
+            {
+                "sleeve_id": "caerus_orion",
+                "weight": 1.0,
+                "capital_eligible": True,
+            }
+        ],
+        portfolio_nav=2500.0,
+        starting_positions=[{"symbol": "LRCX", "quantity": 6.657142}],
+        starting_cash=516.82,
+        account_id_hash=hashlib.sha256(b"paper-account").hexdigest(),
+        risk_state={"status": "PASS"},
+        sell_orders=[],
+        buy_orders=[
+            {
+                "symbol": "LRCX",
+                "side": "BUY",
+                "quantity": 0.158,
+                "order_type": "limit",
+                "time_in_force": "day",
+                "extended_hours": False,
+                "expected_price": 288.415,
+                "limit_price": 291.29,
+                "cap_enforcement_price": 291.29,
+                "notional": 46.02382,
+            }
+        ],
+        # Preserve the historical binary-float tail from the September 2
+        # incident to prove old immutable plans remain recoverable.
+        expected_posttrade_positions=[
+            {
+                "symbol": "LRCX",
+                "quantity": 6.815142 if canonical_expected else 6.657142 + 0.158,
+            }
+        ],
+        expected_posttrade_cash=470.79618,
+        constraints={
+            "allow_fractional": True,
+            "cash_reconciliation_tolerance_usd": 1.0,
+            "max_orders": 2,
+            "capital_cap_usd": 2500.0,
+            "max_adverse_fill_slippage_bps": 100.0,
+            "new_order_execution_style": "protective_day_limit",
+        },
+        authorization_state={
+            "status": "AUTHORIZED",
+            "authority": "CAERUS_ORCHESTRATOR",
+            "authorized_at": "2026-08-12T09:35:01-04:00",
+            "authorization_reason": "ORION_PAPER_EXACT_ORDERS_AUTHORIZED",
+        },
+    )
+
+
+def test_fractional_exact_plan_accepts_canonical_six_decimal_expected_state():
+    plan = _fractional_addition_plan(canonical_expected=True)
+
+    assert plan.expected_posttrade_positions[0]["quantity"] == 6.815142
+
+
+class FractionalAggregatePaperBroker(TrackingPaperBroker):
+    def __init__(self, *, reported_quantity: str = "6.815142") -> None:
+        super().__init__()
+        self.cash = 516.82
+        self.positions = [
+            {"symbol": "LRCX", "qty": "6.657142", "market_value": "1919.05"}
+        ]
+        self.reported_quantity = reported_quantity
+
+    def submit_limit_order(self, **kwargs):
+        self.limit_submissions.append(copy.deepcopy(kwargs))
+        self.submit_calls += 1
+        quantity = float(kwargs["qty"])
+        fill_price = 288.34
+        client_id = str(kwargs["client_order_id"])
+        self.cash -= quantity * fill_price
+        self.positions[0]["qty"] = self.reported_quantity
+        row = {
+            "id": f"broker-{self.submit_calls}",
+            "client_order_id": client_id,
+            "symbol": "LRCX",
+            "side": "BUY",
+            "qty": str(quantity),
+            "status": "filled",
+            "filled_qty": str(quantity),
+            "filled_avg_price": str(fill_price),
+        }
+        self.orders[client_id] = row
+        return copy.deepcopy(row)
+
+
+def test_fractional_binary_tail_reconciles_and_recovers_without_resubmission(
+    tmp_path: Path,
+):
+    broker = FractionalAggregatePaperBroker()
+    plan = _fractional_addition_plan()
+
+    first = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="fractional-binary-tail",
+        dry_run=False,
+    )
+
+    assert plan.expected_posttrade_positions[0]["quantity"] == 6.815142000000001
+    assert first.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert first.reconciliation_status == "CLEAN"
+    assert broker.submit_calls == 1
+
+    recovered = execute_exact_plan(
+        plan_payload=plan.to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="fractional-binary-tail-recovery",
+        dry_run=False,
+    )
+
+    assert recovered.terminal_outcome is TerminalOutcome.RECONCILED_SUCCESS
+    assert recovered.reconciliation_status == "CLEAN"
+    assert broker.submit_calls == 1
+
+
+def test_fractional_reconciliation_rejects_real_submicro_precision_drift(
+    tmp_path: Path,
+):
+    broker = FractionalAggregatePaperBroker(reported_quantity="6.8151424")
+
+    result = execute_exact_plan(
+        plan_payload=_fractional_addition_plan().to_dict(),
+        broker=broker,
+        env=_execution_env(tmp_path),
+        wal_root=tmp_path / "wal",
+        attempt_id="fractional-real-drift",
+        dry_run=False,
+    )
+
+    assert result.terminal_outcome is TerminalOutcome.SYSTEM_FAILURE
+    assert result.status == "FAILED_RECONCILIATION"
+    assert result.reason_code == "exact_posttrade_state_mismatch"
+
+
 class AdverseFillPaperBroker(TrackingPaperBroker):
     def __init__(self, *, sell_price: float = 100.0, buy_price: float = 50.0):
         super().__init__()

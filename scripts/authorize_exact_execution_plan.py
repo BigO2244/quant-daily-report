@@ -857,6 +857,13 @@ def _expected_state(
     cash: float,
     orders: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], float]:
+    # PAPER fractional orders are sealed to six decimal places before they
+    # reach this boundary.  Keep the derived position state in that same
+    # broker-action unit so ordinary binary-float addition cannot publish a
+    # quantity such as 6.815142000000001 for a broker position of 6.815142.
+    # This is canonicalization, not a reconciliation tolerance: quantities
+    # outside the governed six-decimal order precision are rejected later.
+    quantity_precision = 6
     quantity_by_symbol = {str(row["symbol"]): float(row["quantity"]) for row in positions}
     expected_cash = float(cash)
     for order in orders:
@@ -865,10 +872,16 @@ def _expected_state(
         price = float(order.get("expected_price", order.get("price", order.get("limit_price"))) or 0.0)
         notional = float(order.get("notional") or quantity * price)
         if str(order["side"]).upper() == "SELL":
-            quantity_by_symbol[symbol] = max(0.0, quantity_by_symbol.get(symbol, 0.0) - quantity)
+            quantity_by_symbol[symbol] = round(
+                max(0.0, quantity_by_symbol.get(symbol, 0.0) - quantity),
+                quantity_precision,
+            )
             expected_cash += notional
         else:
-            quantity_by_symbol[symbol] = quantity_by_symbol.get(symbol, 0.0) + quantity
+            quantity_by_symbol[symbol] = round(
+                quantity_by_symbol.get(symbol, 0.0) + quantity,
+                quantity_precision,
+            )
             expected_cash -= notional
     expected_positions = [
         {"symbol": symbol, "quantity": quantity}

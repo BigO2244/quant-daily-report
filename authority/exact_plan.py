@@ -26,6 +26,8 @@ _SAFE_SLEEVE = re.compile(r"^[a-z][a-z0-9_\-]{1,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ORDER_TYPES = {"market", "limit"}
 _TIME_IN_FORCE = {"day", "gtc", "opg", "cls", "ioc", "fok"}
+_FRACTIONAL_QUANTITY_DECIMALS = 6
+_FRACTIONAL_QUANTITY_RESIDUAL_TOLERANCE = 1e-12
 _BROKER_OWNED_ORDER_FIELDS = {
     "id", "status", "filled_qty", "filled_quantity", "filled_avg_price",
     "fill_price", "average_price", "submitted_at", "filled_at", "canceled_at",
@@ -87,6 +89,16 @@ def _finite(value: Any, label: str, *, minimum: float | None = None) -> float:
     if not math.isfinite(result) or (minimum is not None and result < minimum):
         raise AuthorityContractError(f"{label} is outside the allowed range")
     return result
+
+
+def _canonical_fractional_quantity(value: Any, label: str) -> float:
+    quantity = _finite(value, label, minimum=0.0)
+    canonical = round(quantity, _FRACTIONAL_QUANTITY_DECIMALS)
+    if abs(quantity - canonical) > _FRACTIONAL_QUANTITY_RESIDUAL_TOLERANCE:
+        raise AuthorityContractError(
+            f"{label} exceeds governed six-decimal fractional precision"
+        )
+    return canonical
 
 
 def _as_plain(value: Any) -> Any:
@@ -755,6 +767,7 @@ def build_exact_execution_plan(
     mechanically_expected = {
         str(row["symbol"]): float(row["quantity"]) for row in starting
     }
+    fractional_quantities = constraint_values.get("allow_fractional") is True
     mechanical_cash = cash
     for row in sells:
         symbol = str(row["symbol"])
@@ -767,6 +780,13 @@ def build_exact_execution_plan(
         symbol = str(row["symbol"])
         mechanically_expected[symbol] = mechanically_expected.get(symbol, 0.0) + float(row["quantity"])
         mechanical_cash -= float(row["notional"])
+    if fractional_quantities:
+        mechanically_expected = {
+            symbol: _canonical_fractional_quantity(
+                quantity, f"mechanically_expected.{symbol}.quantity"
+            )
+            for symbol, quantity in mechanically_expected.items()
+        }
     mechanically_expected = {
         symbol: quantity
         for symbol, quantity in mechanically_expected.items()
@@ -775,6 +795,13 @@ def build_exact_execution_plan(
     supplied_expected = {
         str(row["symbol"]): float(row["quantity"]) for row in expected
     }
+    if fractional_quantities:
+        supplied_expected = {
+            symbol: _canonical_fractional_quantity(
+                quantity, f"expected_posttrade_positions.{symbol}.quantity"
+            )
+            for symbol, quantity in supplied_expected.items()
+        }
     if mechanically_expected != supplied_expected:
         raise AuthorityContractError("expected_posttrade_positions are not derived from exact orders")
     if abs(mechanical_cash - expected_cash) > 1e-6:

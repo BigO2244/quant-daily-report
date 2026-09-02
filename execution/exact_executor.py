@@ -58,6 +58,8 @@ from core.submission_wal import (
 _PLAN_CLAIM_SCHEMA_VERSION = "caerus.exact_execution_plan_claim.v1"
 _WAL_BASE_CLAIM_SCHEMA_VERSION = "caerus.submission_wal_base_claim.v1"
 _ACCOUNT_AUTHORITY_ROOT_ENV = "CAERUS_EXACT_ACCOUNT_AUTHORITY_ROOT"
+_FRACTIONAL_QUANTITY_DECIMALS = 6
+_FRACTIONAL_QUANTITY_RESIDUAL_TOLERANCE = 1e-12
 _DEFAULT_ACCOUNT_AUTHORITY_ROOT = (
     Path(__file__).resolve().parents[1]
     / "outputs"
@@ -594,6 +596,36 @@ def _positions(raw: Any) -> tuple[dict[str, Any], ...]:
         if quantity > 1e-12:
             rows.append({"symbol": symbol, "quantity": quantity})
     return tuple(sorted(rows, key=lambda row: str(row["symbol"])))
+
+
+def _fractional_position_state_hash(
+    rows: Sequence[Mapping[str, Any]],
+) -> str | None:
+    """Hash positions in the governed six-decimal fractional-share unit.
+
+    Plan arithmetic and broker serialization may represent the same six-decimal
+    quantity with different binary-float tails.  Canonicalize only residuals
+    small enough to be representation noise; a genuinely over-precision
+    quantity remains a fail-closed mismatch.
+    """
+
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        quantity = _finite(row.get("quantity", row.get("qty", row.get("shares"))))
+        if quantity is None or quantity < 0:
+            return None
+        canonical = round(quantity, _FRACTIONAL_QUANTITY_DECIMALS)
+        if abs(quantity - canonical) > _FRACTIONAL_QUANTITY_RESIDUAL_TOLERANCE:
+            return None
+        normalized.append(
+            {
+                "symbol": str(row.get("symbol") or row.get("ticker") or "")
+                .strip()
+                .upper(),
+                "quantity": canonical,
+            }
+        )
+    return compute_starting_state_hash(normalized, 0.0)
 
 
 def _snapshot(broker: Any) -> tuple[tuple[dict[str, Any], ...], float, Mapping[str, Any]]:
@@ -2771,10 +2803,16 @@ def _execute_exact_plan_locked(
             reconciliation="FAILED_RECONCILIATION",
             failure_class=FailureClass.BROKER_FAILURE,
         )
-    expected_positions_hash = compute_starting_state_hash(
-        plan.expected_posttrade_positions, 0.0
-    )
-    actual_positions_hash = compute_starting_state_hash(final_positions, 0.0)
+    if plan.constraints.get("allow_fractional") is True:
+        expected_positions_hash = _fractional_position_state_hash(
+            plan.expected_posttrade_positions
+        )
+        actual_positions_hash = _fractional_position_state_hash(final_positions)
+    else:
+        expected_positions_hash = compute_starting_state_hash(
+            plan.expected_posttrade_positions, 0.0
+        )
+        actual_positions_hash = compute_starting_state_hash(final_positions, 0.0)
     # Market orders are authorized and sealed at a fresh reference price, but
     # broker cash settles at the actual fill price.  Reconcile cash from the
     # terminal fill evidence rather than treating favorable/adverse slippage as
