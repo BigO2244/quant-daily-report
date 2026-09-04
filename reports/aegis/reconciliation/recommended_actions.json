@@ -1,0 +1,111 @@
+[
+  {
+    "category": "EXACT_DUPLICATE",
+    "entity_id": "task_3c5972a944aeeeb8cbc7",
+    "evidence": {
+      "normalized_name": "backtest protocol"
+    },
+    "explanation": "Canonical names match exactly",
+    "id": "recon_17570372cffde032de81",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
+    "related_entity_id": "task_894e0060d525d26eaefb",
+    "status": "PENDING_APPROVAL"
+  },
+  {
+    "category": "EXACT_DUPLICATE",
+    "entity_id": "task_060c4ae22db270e052eb",
+    "evidence": {
+      "normalized_name": "engineering implementation"
+    },
+    "explanation": "Canonical names match exactly",
+    "id": "recon_14636643c83ea21cd96e",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
+    "related_entity_id": "task_4c0d32d8fcb2fa89f137",
+    "status": "PENDING_APPROVAL"
+  },
+  {
+    "category": "EXACT_DUPLICATE",
+    "entity_id": "task_5ec50905fef924bd3047",
+    "evidence": {
+      "normalized_name": "independent verification"
+    },
+    "explanation": "Canonical names match exactly",
+    "id": "recon_424e67965fdcf3d6f385",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
+    "related_entity_id": "task_cfeee5687125b91ddba5",
+    "status": "PENDING_APPROVAL"
+  },
+  {
+    "category": "EXACT_DUPLICATE",
+    "entity_id": "task_98430b0e80261f01c5ce",
+    "evidence": {
+      "normalized_name": "modeling plan"
+    },
+    "explanation": "Canonical names match exactly",
+    "id": "recon_f36e718ef7a37c463b80",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
+    "related_entity_id": "task_9a5a5b5c7e622a36fbdb",
+    "status": "PENDING_APPROVAL"
+  },
+  {
+    "category": "EXACT_DUPLICATE",
+    "entity_id": "task_2322bf2fd48f6605da3c",
+    "evidence": {
+      "normalized_name": "operations handoff"
+    },
+    "explanation": "Canonical names match exactly",
+    "id": "recon_83d64a096cd73a58301a",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
+    "related_entity_id": "task_d592c9aafd0d786da2cd",
+    "status": "PENDING_APPROVAL"
+  },
+  {
+    "category": "EXACT_DUPLICATE",
+    "entity_id": "task_9a1520126bd209a570e6",
+    "evidence": {
+      "normalized_name": "pit and data validation"
+    },
+    "explanation": "Canonical names match exactly",
+    "id": "recon_10689dfd53bdf8d92b48",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
+    "related_entity_id": "task_dddcaae2dbadb9cb2e49",
+    "status": "PENDING_APPROVAL"
+  },
+  {
+    "category": "EXACT_DUPLICATE",
+    "entity_id": "task_560f527d0d2c82fbd763",
+    "evidence": {
+      "normalized_name": "portfolio and risk analysis"
+    },
+    "explanation": "Canonical names match exactly",
+    "id": "recon_0807f7082d4f6bb2a4e5",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
+    "related_entity_id": "task_9229f87e54ceb80a561a",
+    "status": "PENDING_APPROVAL"
+  },
+  {
+    "category": "EXACT_DUPLICATE",
+    "entity_id": "task_5f8703009a0d04b07b5e",
+    "evidence": {
+      "normalized_name": "research brief"
+    },
+    "explanation": "Canonical names match exactly",
+    "id": "recon_e4001a7cc89844cb51df",
+    "recommended_action": "Review and explicitly approve merge or retain as distinct",
+    "related_entity_id": "task_87c496cf5fd9de9621ee",
+    "status": "PENDING_APPROVAL"
+  },
+  {
+    "category": "PROBABLE_DUPLICATE",
+    "entity_id": "entity_9a348f0e3295a1ffa07a",
+    "evidence": {
+      "jaccard": 0.75,
+      "threshold": 0.75
+    },
+    "explanation": "Token similarity exceeded deterministic threshold",
+    "id": "recon_16c0fe641fda33e0dcc7",
+    "recommended_action": "Review only; no automatic merge",
+    "related_entity_id": "task_9a1520126bd209a570e6",
+    "status": "PENDING_APPROVAL"
+  }
+]

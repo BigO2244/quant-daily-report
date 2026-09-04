@@ -1,0 +1,156 @@
+[
+  {
+    "family": "Current Caerus decomposition",
+    "hypothesis_id": "HYP-2026-001",
+    "id": "entity_af8bda8491d5acf7d718",
+    "next_action": "Certified research-only Caerus component decision tape",
+    "priority": "1",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "family": "Earnings revisions / PEAD",
+    "hypothesis_id": "HYP-2026-002",
+    "id": "entity_c4f4c58330479efd8410",
+    "next_action": "Licensed analyst-level PIT history and original earnings-event semantics",
+    "priority": "2",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "family": "Insider-conviction clusters",
+    "hypothesis_id": "HYP-2026-003",
+    "id": "entity_69e4a93ab6f6eab78362",
+    "next_action": "Rerun its frozen gate against the rebuilt fail-closed original-XML tape",
+    "priority": "3",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_DATA_READY_GATE_PENDING"
+  },
+  {
+    "family": "Options-information lead",
+    "hypothesis_id": "HYP-2026-004",
+    "id": "entity_8e9eb38c39046bd4ef7f",
+    "next_action": "Exchange-grade trade/NBBO/OCC history; forward proxy remains non-equivalent",
+    "priority": "4",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "family": "Supply-chain shock diffusion",
+    "hypothesis_id": "HYP-2026-005",
+    "id": "entity_ea0ad08247377b57b157",
+    "next_action": "Licensed PIT analyst history and effective-dated universal relationship graph",
+    "priority": "5",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "family": "Residual momentum",
+    "hypothesis_id": "HYP-2026-006",
+    "id": "entity_83705a0bcb10b1aafda9",
+    "next_action": "Frozen validation was negative; review EXP-2026-0006 park verdict",
+    "priority": "6",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_EVALUATED_REVIEW"
+  },
+  {
+    "family": "Stock-specific return seasonality",
+    "hypothesis_id": "HYP-2026-007",
+    "id": "entity_0dcc3d2e3b36ac1fe3ab",
+    "next_action": "Frozen validation was negative; review EXP-2026-0007 park verdict",
+    "priority": "7",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_EVALUATED_REVIEW"
+  },
+  {
+    "family": "Short-horizon reversal",
+    "hypothesis_id": "HYP-2026-008",
+    "id": "entity_6d12ab25bb0b4c069104",
+    "next_action": "Frozen validation and cost gates failed; review EXP-2026-0008 park verdict",
+    "priority": "8",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_EVALUATED_REVIEW"
+  },
+  {
+    "family": "Cross-asset trend",
+    "hypothesis_id": "HYP-2026-009",
+    "id": "entity_ee17af802cabf4f42a0b",
+    "next_action": "Certified PIT cross-asset proxy history",
+    "priority": "9",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "family": "Executive/managerial tone surprise",
+    "hypothesis_id": "HYP-2026-010",
+    "id": "entity_e2de5b9063fc0072ae06",
+    "next_action": "PIT earnings-event semantics and historical timestamped transcript history",
+    "priority": "10",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "family": "Net payout and share issuance",
+    "hypothesis_id": "HYP-2026-011",
+    "id": "entity_cbfba7370de684407b55",
+    "next_action": "Materialize certified filing-time net-payout features",
+    "priority": "11",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "family": "Asset growth / investment",
+    "hypothesis_id": "HYP-2026-012",
+    "id": "entity_2c353bee66396251a835",
+    "next_action": "Materialize certified filing-time asset-growth features",
+    "priority": "12",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "family": "Defense procurement-intent events",
+    "hypothesis_id": null,
+    "id": "entity_be041bc90545e0ed5dca",
+    "next_action": "Timestamped SAM opportunity archive/API availability, official-announcement lineage, issuer/ticker mapping, and a frozen event contract; awards alone are confirmation, not the lead signal",
+    "priority": "\u2014",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "DISCUSS_SOURCE_READINESS"
+  },
+  {
+    "family": "AI power/grid commitment events",
+    "hypothesis_id": null,
+    "id": "entity_403da725bfcc352bd1ae",
+    "next_action": "Project-to-issuer exposure map, official publication timestamps from utility/ISO/PUC/FERC sources, event de-duplication, and a frozen event contract; current-vintage EIA controls are context only",
+    "priority": "\u2014",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "source_reported_as_of": "2026-07-24",
+    "status": "DISCUSS_SOURCE_READINESS"
+  }
+]

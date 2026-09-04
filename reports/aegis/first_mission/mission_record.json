@@ -1,0 +1,578 @@
+{
+  "approval_state": "PENDING",
+  "artifacts": [
+    {
+      "id": "artifact_008b36dcb7c910b58bb6",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/first_mission/blocker_report.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "task_id": null
+    },
+    {
+      "id": "artifact_12f80f0626c33fae1675",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/alpha_lab/portfolio.json",
+      "sha256": "9842d4a4e0408cde2338e012426480412745f41a2a96c54b9a9c7b3e1db1c04e",
+      "task_id": null
+    },
+    {
+      "id": "artifact_1ca5c1dfbc6c0be07aed",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/import/unresolved_state_items.json",
+      "sha256": "39fb1ca4d1d5f43f4ec08743b7b0090d08eb3628c7143e0e614e64c15217615c",
+      "task_id": null
+    },
+    {
+      "id": "artifact_265f941bcf83405d4f3f",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/reconciliation/orphaned_records.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "task_id": null
+    },
+    {
+      "id": "artifact_274a5d4b92e438bd1a6b",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/briefs/latest.md",
+      "sha256": "e3768c9dbe54d98496062116b45d1396f386bb0d27b516a9f980b038c3ec6a8e",
+      "task_id": null
+    },
+    {
+      "id": "artifact_27fba53efb7fcce91248",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/first_mission/artifact_manifest.json",
+      "sha256": "51fcbbc7d4bfb0060c77483b2830f32a979cdc76fbacdefa8ee261019f487b1f",
+      "task_id": null
+    },
+    {
+      "id": "artifact_282cd0483a0d1820d7bb",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/reconciliation/state_conflicts.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "task_id": null
+    },
+    {
+      "id": "artifact_35b1b0811bfe6fab405c",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/reconciliation/exact_duplicates.json",
+      "sha256": "4f7f2ee9c34f31fc28ccc56d06ad98d804a1a763ea038f00a88e501b5eef548d",
+      "task_id": null
+    },
+    {
+      "id": "artifact_35c15c1f8301145704b5",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/alpha_lab/decisions.json",
+      "sha256": "95a834f1ccfc50435ebbb73bff701cd13118dc0af4575246119f8798be5d34b8",
+      "task_id": null
+    },
+    {
+      "id": "artifact_376063b53114d41db9da",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/first_mission/decision_queue.json",
+      "sha256": "a32fe08ee5bbe8ce270cc99ad007fe4828a42c05267265668314c797d126d581",
+      "task_id": null
+    },
+    {
+      "id": "artifact_3a7d8cad0402c85c0d1a",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/mission_control.html",
+      "sha256": "6d7fdce3c146687a45d73ea99d18721f70f6c9711fb60beae27bf4a5cb0b4cd4",
+      "task_id": null
+    },
+    {
+      "id": "artifact_405f0f527c2e42957eb5",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/reconciliation/recommended_actions.json",
+      "sha256": "66ce4838263091e326ff735d003832c5e4416ede115eab18776230a73247153b",
+      "task_id": null
+    },
+    {
+      "id": "artifact_455f56575fa4b7050e6d",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/first_mission/mission_record.json",
+      "sha256": "eb7cc771594a9f4fde2fe3401dafcde413aa6049dd4e1eb7e5e971a496d158eb",
+      "task_id": null
+    },
+    {
+      "id": "artifact_4ba27d07118ff336c4c6",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/import/current_state_import_summary.md",
+      "sha256": "c0edc74ff1d39d9a3f782347182cb59442ef4cfeba453f02464e849ea71be799",
+      "task_id": null
+    },
+    {
+      "id": "artifact_4ea16ae0609c20ae073c",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/first_mission/boundary_attestation.json",
+      "sha256": "3d0b4d856893d60d64e2bd3c6e5cbd7cc1f820b6a60de4cf64de9971040624e5",
+      "task_id": null
+    },
+    {
+      "id": "artifact_64edcf92fdefee253db4",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/aeg_002_pr167_readiness_review.md",
+      "sha256": "108635f10b2e0c4bba34bc21a1a36a8c15c37679a2540a789da452f5a286d256",
+      "task_id": null
+    },
+    {
+      "id": "artifact_692a88cebed2f2f4795f",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/alpha_lab/blockers.json",
+      "sha256": "087daa6ceb0e8168c306aa570fb18dffdcec60e70b72d552e504f9157f66620a",
+      "task_id": null
+    },
+    {
+      "id": "artifact_6f815fbaf537b299d1bd",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/first_mission/mission_record.json",
+      "sha256": "0472b4808a6d467ed99d44ab91931297f61b207936f0dacd94ed13e04b7f035c",
+      "task_id": null
+    },
+    {
+      "id": "artifact_7654373cd58a782f1a93",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/briefs/latest.json",
+      "sha256": "95b95e18aafdd6c1770deeeebf6326e59d2b5b50b2658bf2922be1868c5854bb",
+      "task_id": null
+    },
+    {
+      "id": "artifact_78147cc4e37bc36dc445",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/reconciliation/reconciliation_summary.md",
+      "sha256": "da960e992615a96db29cb7c2e5a0a756bfa6fbcf1cc0f7926cdad41f8c9b915f",
+      "task_id": null
+    },
+    {
+      "id": "artifact_7b69ae145b5ac26c9971",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/aeg_002_validation_summary.md",
+      "sha256": "36218d7334afed0679f70d35ce449f5fee92baf6e8be020eb36137ddf2704219",
+      "task_id": null
+    },
+    {
+      "id": "artifact_8c2f9d95f3ee27d12f72",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/briefs/2026-08-03.md",
+      "sha256": "e3768c9dbe54d98496062116b45d1396f386bb0d27b516a9f980b038c3ec6a8e",
+      "task_id": null
+    },
+    {
+      "id": "artifact_8e8a88d07baf1df26d1a",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/briefs/2026-08-03.json",
+      "sha256": "95b95e18aafdd6c1770deeeebf6326e59d2b5b50b2658bf2922be1868c5854bb",
+      "task_id": null
+    },
+    {
+      "id": "artifact_99913fbd1746e54cd457",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/alpha_lab/summary.md",
+      "sha256": "89b455cf0185bcb950e073cd72ca3a41bcee8e11ee32845cf90cfc7b022c9cc6",
+      "task_id": null
+    },
+    {
+      "id": "artifact_9cc38445657665909793",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/reconciliation/probable_duplicates.json",
+      "sha256": "9428af942d2d1994f2b21dd8ec376335e96176dc000efd0f86de23776b8201b1",
+      "task_id": null
+    },
+    {
+      "id": "artifact_b22a83ac92c6ff041a83",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/briefs/2026-08-02.md",
+      "sha256": "c1c83851b863fc340358eeed11925fef0fb810fa6903289c41e46966a2a1321c",
+      "task_id": null
+    },
+    {
+      "id": "artifact_b3f9053f7780fbf6f5a8",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/import/source_provenance.json",
+      "sha256": "f46f6242a6222963aa5a9407f01ffa8593b31a0c2f525d259d5129b5f3f78e97",
+      "task_id": null
+    },
+    {
+      "id": "artifact_b630f2b55e09d8e3a2af",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/import/legacy_work_migration_report.md",
+      "sha256": "54b6914af08221b077d49a748dd17c70a087370b227f14dc1f82fabea23a3e17",
+      "task_id": null
+    },
+    {
+      "id": "artifact_be24a68f75b51968c137",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/alpha_lab/mission_record.json",
+      "sha256": "f86e6bb1bd0716c57abc117b399fa2cff6990b30f65922eec4cb2d30d1428820",
+      "task_id": null
+    },
+    {
+      "id": "artifact_c0b1b26e96d664d1e73f",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/first_mission/artifact_manifest.json",
+      "sha256": "716f769394c15d7e25bd70e9f564c794a4600c53a99334428090e16e00184e62",
+      "task_id": null
+    },
+    {
+      "id": "artifact_c8cf240c9f4071b60f14",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/import/current_state_import_summary.md",
+      "sha256": "6d43c83bb824bbd506df662454c392e50b1c413b11d8bcc1b0b9fd0f6ca6a24e",
+      "task_id": null
+    },
+    {
+      "id": "artifact_cd05996dd9460e51aa30",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/aeg_002_boundary_attestation.json",
+      "sha256": "5c20023f41cf9c641accbd83748b30b6625402ff8fb9c22b7430a7469a885c66",
+      "task_id": null
+    },
+    {
+      "id": "artifact_d68e89b76ea9b48d6fd2",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/briefs/2026-08-02.json",
+      "sha256": "4695403dd271a269b74aad02201d5da48a58e64ab6530b11e88ed21cc6b34a22",
+      "task_id": null
+    },
+    {
+      "id": "artifact_e33e8165c760ccb76760",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/import/current_state_import_manifest.json",
+      "sha256": "f7b11a01eb0574440dc101ac69e5694f6dfdc51be9fc86d57b439fa84f2e0f49",
+      "task_id": null
+    },
+    {
+      "id": "artifact_e75da264dfaba59a25d3",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/import/current_state_import_manifest.json",
+      "sha256": "f437090c4a707d51a449ceae4d9cdb5388763190ec9e2d8f6bac3c2acff209eb",
+      "task_id": null
+    },
+    {
+      "id": "artifact_f197a380f8b90c6b53de",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/alpha_lab/source_provenance.json",
+      "sha256": "69344aa94b11bfd7eaa837f809ab52ac8f43e546cb5ecaa5796d3cb1964ba00c",
+      "task_id": null
+    },
+    {
+      "id": "artifact_f32e0ac5814b7529ff8f",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/first_mission/relationship_graph.json",
+      "sha256": "7f25de4f488c896082f864db77521aa1621dacbc421ad7ea4c444d186370b07d",
+      "task_id": null
+    },
+    {
+      "id": "artifact_fc61535341e791bbaf42",
+      "metadata": {
+        "source": "local_manifest"
+      },
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "path": "reports/aegis/mission_control.html",
+      "sha256": "05a5dbc79fb7c380daffd5557aa1acc509048966d99664a7731dced443e4752d",
+      "task_id": null
+    }
+  ],
+  "created_at": "2026-08-03T17:41:35+00:00",
+  "decisions": [],
+  "edges": [
+    {
+      "child_task_id": "task_9229f87e54ceb80a561a",
+      "parent_task_id": "task_3c5972a944aeeeb8cbc7"
+    },
+    {
+      "child_task_id": "task_5ec50905fef924bd3047",
+      "parent_task_id": "task_4c0d32d8fcb2fa89f137"
+    },
+    {
+      "child_task_id": "task_d592c9aafd0d786da2cd",
+      "parent_task_id": "task_5ec50905fef924bd3047"
+    },
+    {
+      "child_task_id": "task_98430b0e80261f01c5ce",
+      "parent_task_id": "task_87c496cf5fd9de9621ee"
+    },
+    {
+      "child_task_id": "task_4c0d32d8fcb2fa89f137",
+      "parent_task_id": "task_9229f87e54ceb80a561a"
+    },
+    {
+      "child_task_id": "task_9a1520126bd209a570e6",
+      "parent_task_id": "task_98430b0e80261f01c5ce"
+    },
+    {
+      "child_task_id": "task_3c5972a944aeeeb8cbc7",
+      "parent_task_id": "task_9a1520126bd209a570e6"
+    }
+  ],
+  "id": "mission_32751b57af1889a0ea85",
+  "metadata": {
+    "as_of": "2026-08-03T18:10:00+00:00",
+    "next_action": "Review the five open executive decisions",
+    "origin": "NATIVE",
+    "owner_capability": "mission_planning",
+    "source_record_id": "AEG-002"
+  },
+  "next_action": "Review the five open executive decisions",
+  "objective": "Consolidate all active Alpha Lab, Atlas, sleeve research, data-collection, risk-validation, engineering, governance, and dashboard work into Aegis; identify duplicates, dependencies, blockers, unresolved states, and the next five decisions requiring Brett\u2019s attention.",
+  "origin": "NATIVE",
+  "owner_capability": "mission_planning",
+  "source_record_id": "AEG-002",
+  "state": "APPROVAL_REQUIRED",
+  "tasks": [
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "research",
+      "id": "task_87c496cf5fd9de9621ee",
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "ordinal": 1,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Research brief"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "modeling",
+      "id": "task_98430b0e80261f01c5ce",
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "ordinal": 2,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Modeling plan"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "pit_validation",
+      "id": "task_9a1520126bd209a570e6",
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "ordinal": 3,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "PIT and data validation"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "backtesting",
+      "id": "task_3c5972a944aeeeb8cbc7",
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "ordinal": 4,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Backtest protocol"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "portfolio_risk_analysis",
+      "id": "task_9229f87e54ceb80a561a",
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "ordinal": 5,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Portfolio and risk analysis"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "engineering",
+      "id": "task_4c0d32d8fcb2fa89f137",
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "ordinal": 6,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Engineering implementation"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "verification_review",
+      "id": "task_5ec50905fef924bd3047",
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "ordinal": 7,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Independent verification"
+    },
+    {
+      "approval_state": "NOT_REQUIRED",
+      "capability": "operations",
+      "id": "task_d592c9aafd0d786da2cd",
+      "mission_id": "mission_32751b57af1889a0ea85",
+      "ordinal": 8,
+      "output_contract": {
+        "required": [
+          "summary",
+          "provenance",
+          "validation"
+        ],
+        "schema_version": "aegis-output-v1"
+      },
+      "runner_class": "PacketOnlyRunnerAdapter",
+      "state": "DRAFT",
+      "title": "Operations handoff"
+    }
+  ],
+  "updated_at": "2026-08-03T17:41:35+00:00"
+}

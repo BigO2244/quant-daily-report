@@ -1,0 +1,1085 @@
+{
+  "as_of": "2026-08-03T18:10:00+00:00",
+  "imports": [
+    {
+      "dry_run": false,
+      "entities": [
+        "entity_6736f8bcd01ba04fdbe4",
+        "entity_baf6e22e13461fb9bbe9",
+        "entity_3402ee5f784e7d0ae691",
+        "entity_8cb4b12a665b298c7e00",
+        "entity_aa2fcc888155adc66b6c",
+        "entity_1e35a39510378d5b11b3",
+        "entity_821235a826607ea650b0",
+        "entity_b60d86781bb2a5ba074d",
+        "entity_6191c957ea4cdc9c2769",
+        "entity_9a348f0e3295a1ffa07a",
+        "entity_1e627174cf42d830f823",
+        "entity_d8cc76b519fdb6ec005b",
+        "entity_abedd8471dff09757c32",
+        "entity_a70a58469de4ede7a624",
+        "entity_bfc7b12d6b57545d655e",
+        "entity_e64fbc19ac653b2ebb62",
+        "entity_e4290dbe506427044d13",
+        "entity_0f3d21680336c9239671",
+        "entity_3ce0633195d0782760d8",
+        "entity_df663ae3ff41eba43597",
+        "entity_745709ae881ea958b98e",
+        "entity_2759237efd5fb6fe45dc",
+        "entity_37bc911d73a7448d54de",
+        "entity_0cb9b7b4cbd55d73ea95",
+        "entity_09dad6f99a2ed0093307",
+        "entity_08ccbb316df04a896864",
+        "entity_08ee4477afead2b486c8",
+        "entity_b3a9f139e808d8ce6f12",
+        "entity_1db16ac9c03b0e0f6f90",
+        "entity_e60627d9ab2dcc29b114",
+        "entity_6ee2048945be67f6bedd",
+        "entity_7bcb2b71cafa2305607a",
+        "entity_c9055e44dcecf89fbc08",
+        "entity_df32193eca3f6565abba",
+        "entity_2b2dd5efadb1329104f2",
+        "entity_1c95422c1499bbb6d19f",
+        "entity_cd4c590e288d4ac56c45",
+        "entity_803568e0e510f4f99f56",
+        "entity_2106a0498109b8ea98d4",
+        "entity_1a6bbaf131832db899ba",
+        "entity_5ea5c8c1e6b83e79d7f8",
+        "entity_6e1d04afbcc3f8d132e3",
+        "entity_dad508193d4a500678b1",
+        "entity_36792a314b84de234b3d",
+        "entity_1b14e4e64fda5761e637",
+        "entity_955b17eb24ff84ea2016",
+        "entity_5afadbfe545af083da3c",
+        "entity_54201f0f09d958ddee27",
+        "entity_33e511231c9ae60584d4",
+        "entity_dfde33340a3c5975ec60",
+        "entity_8d507e96986b84cdd28e",
+        "entity_b9256567a76cc7f0db34",
+        "entity_16242492e57b1649cd00",
+        "entity_c64d61d0eb8f831dce12",
+        "entity_65e12e9bf013c1e587e8",
+        "entity_173e9bef71db99709a16",
+        "entity_66bcd0fa20444f09b520",
+        "entity_0c7ed6e1defb06d1ad42",
+        "entity_f6b3feae6eab9831255f",
+        "entity_97c4178e7482b3adee19",
+        "entity_97853041355657cfd7cf",
+        "entity_aa125722a22cd634394f",
+        "entity_bf142a32ad580e444a57",
+        "entity_56c4f550c13218c52e88",
+        "entity_b6f19de9fb630e22f938",
+        "entity_bc712893ecc5cfab1a09",
+        "entity_8a3d48db906fb390bbb1",
+        "entity_ba1ac4e49905dbfa0ce6",
+        "entity_cbd267d6ec08d0c5bbbc",
+        "entity_fed2c80f3917cf7be66d",
+        "entity_70d69b6643749b279e8a",
+        "entity_bb810af0213c8e202162",
+        "entity_515ee83ad74a9b8d6938",
+        "entity_d84115c132c726071ee1",
+        "entity_29578a67b17f8310d90e",
+        "entity_f0852ccc47bbdb14e83d",
+        "entity_7ea32a2e0f121c8674a6",
+        "entity_9a4c5900a06ad8b23cdc",
+        "entity_b4e027460e9c200f3f6c",
+        "entity_c09b27ece2bd98c4dc0a",
+        "entity_cdbef9e13757eabe5eea",
+        "entity_b32fec8fb55be74e0264",
+        "entity_9ca862eb29dc2d7142be",
+        "entity_edf6ffba0a247908cb83",
+        "entity_0bf671c5c155fdf729e6",
+        "entity_8aea0884a197780733e1",
+        "entity_c19b83938876b66408d5",
+        "entity_a29eb064efbae54b51b0",
+        "entity_8816f4ac85f67606f064",
+        "entity_71445c88c98b9d663a88",
+        "entity_c9d19469dc2736fb8bb8",
+        "entity_b6a892f501707661effb"
+      ],
+      "provenance": [
+        {
+          "entity_id": "entity_3402ee5f784e7d0ae691",
+          "evidence_paths": [
+            "aiops",
+            "core"
+          ]
+        },
+        {
+          "entity_id": "entity_8cb4b12a665b298c7e00",
+          "evidence_paths": [
+            "research/alpha_lab_v1",
+            "research/alpha_lab_v2"
+          ]
+        },
+        {
+          "entity_id": "entity_aa2fcc888155adc66b6c",
+          "evidence_paths": []
+        },
+        {
+          "entity_id": "entity_1e35a39510378d5b11b3",
+          "evidence_paths": [
+            "config/research/strategy_registry.json"
+          ]
+        },
+        {
+          "entity_id": "entity_821235a826607ea650b0",
+          "evidence_paths": [
+            "config/research/strategy_registry.json"
+          ]
+        },
+        {
+          "entity_id": "entity_b60d86781bb2a5ba074d",
+          "evidence_paths": [
+            "config/research/strategy_registry.json"
+          ]
+        },
+        {
+          "entity_id": "entity_6191c957ea4cdc9c2769",
+          "evidence_paths": [
+            "config/research/strategy_registry.json"
+          ]
+        },
+        {
+          "entity_id": "entity_9a348f0e3295a1ffa07a",
+          "evidence_paths": [
+            "data/pit_universe",
+            "research/pit_universe.py"
+          ]
+        },
+        {
+          "entity_id": "entity_1e627174cf42d830f823",
+          "evidence_paths": [
+            "docs/governance"
+          ]
+        },
+        {
+          "entity_id": "entity_d8cc76b519fdb6ec005b",
+          "evidence_paths": [
+            "execution"
+          ]
+        },
+        {
+          "entity_id": "entity_abedd8471dff09757c32",
+          "evidence_paths": [
+            "web/dashboard",
+            "docs/quant_dashboard.md"
+          ]
+        },
+        {
+          "entity_id": "entity_a70a58469de4ede7a624",
+          "source": "config/research/strategy_registry.json",
+          "source_record_id": "caerus_polaris"
+        },
+        {
+          "entity_id": "entity_bfc7b12d6b57545d655e",
+          "source": "config/research/strategy_registry.json",
+          "source_record_id": "caerus_polaris_alpha"
+        },
+        {
+          "entity_id": "entity_e64fbc19ac653b2ebb62",
+          "source": "config/research/strategy_registry.json",
+          "source_record_id": "caerus_orion"
+        },
+        {
+          "entity_id": "entity_e4290dbe506427044d13",
+          "source": "config/research/strategy_registry.json",
+          "source_record_id": "caerus_orion_alpha"
+        },
+        {
+          "entity_id": "entity_0f3d21680336c9239671",
+          "source": "config/research/strategy_registry.json",
+          "source_record_id": "caerus_lyra"
+        },
+        {
+          "entity_id": "entity_3ce0633195d0782760d8",
+          "source": "config/research/strategy_registry.json",
+          "source_record_id": "caerus_phoenix"
+        },
+        {
+          "entity_id": "entity_df663ae3ff41eba43597",
+          "source": "config/research/strategy_registry.json",
+          "source_record_id": "caerus_cygnus"
+        },
+        {
+          "entity_id": "entity_745709ae881ea958b98e",
+          "source": "config/research/strategy_registry.json",
+          "source_record_id": "caerus_cassiopeia"
+        },
+        {
+          "entity_id": "entity_2759237efd5fb6fe45dc",
+          "source": "config/research/strategy_registry.json",
+          "source_record_id": "caerus_argo"
+        },
+        {
+          "entity_id": "entity_37bc911d73a7448d54de",
+          "source": "config/research/strategy_registry.json",
+          "source_record_id": "spy_benchmark"
+        },
+        {
+          "entity_id": "entity_0cb9b7b4cbd55d73ea95",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-021"
+        },
+        {
+          "entity_id": "entity_09dad6f99a2ed0093307",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-029"
+        },
+        {
+          "entity_id": "entity_08ccbb316df04a896864",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-032"
+        },
+        {
+          "entity_id": "entity_08ee4477afead2b486c8",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-033"
+        },
+        {
+          "entity_id": "entity_b3a9f139e808d8ce6f12",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-034"
+        },
+        {
+          "entity_id": "entity_1db16ac9c03b0e0f6f90",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-035"
+        },
+        {
+          "entity_id": "entity_e60627d9ab2dcc29b114",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-036"
+        },
+        {
+          "entity_id": "entity_6ee2048945be67f6bedd",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-036a"
+        },
+        {
+          "entity_id": "entity_7bcb2b71cafa2305607a",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-036b"
+        },
+        {
+          "entity_id": "entity_c9055e44dcecf89fbc08",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-036c"
+        },
+        {
+          "entity_id": "entity_df32193eca3f6565abba",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-036d"
+        },
+        {
+          "entity_id": "entity_2b2dd5efadb1329104f2",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-050"
+        },
+        {
+          "entity_id": "entity_1c95422c1499bbb6d19f",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-051"
+        },
+        {
+          "entity_id": "entity_cd4c590e288d4ac56c45",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-052"
+        },
+        {
+          "entity_id": "entity_803568e0e510f4f99f56",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-053"
+        },
+        {
+          "entity_id": "entity_2106a0498109b8ea98d4",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-054"
+        },
+        {
+          "entity_id": "entity_1a6bbaf131832db899ba",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-055"
+        },
+        {
+          "entity_id": "entity_5ea5c8c1e6b83e79d7f8",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-056"
+        },
+        {
+          "entity_id": "entity_6e1d04afbcc3f8d132e3",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-057"
+        },
+        {
+          "entity_id": "entity_dad508193d4a500678b1",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-058"
+        },
+        {
+          "entity_id": "entity_36792a314b84de234b3d",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-059"
+        },
+        {
+          "entity_id": "entity_1b14e4e64fda5761e637",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-060"
+        },
+        {
+          "entity_id": "entity_955b17eb24ff84ea2016",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-061"
+        },
+        {
+          "entity_id": "entity_5afadbfe545af083da3c",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-062"
+        },
+        {
+          "entity_id": "entity_54201f0f09d958ddee27",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-063"
+        },
+        {
+          "entity_id": "entity_33e511231c9ae60584d4",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-064"
+        },
+        {
+          "entity_id": "entity_dfde33340a3c5975ec60",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-065"
+        },
+        {
+          "entity_id": "entity_8d507e96986b84cdd28e",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-066"
+        },
+        {
+          "entity_id": "entity_b9256567a76cc7f0db34",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-067"
+        },
+        {
+          "entity_id": "entity_16242492e57b1649cd00",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-068"
+        },
+        {
+          "entity_id": "entity_c64d61d0eb8f831dce12",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-069"
+        },
+        {
+          "entity_id": "entity_65e12e9bf013c1e587e8",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-070"
+        },
+        {
+          "entity_id": "entity_173e9bef71db99709a16",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-071"
+        },
+        {
+          "entity_id": "entity_66bcd0fa20444f09b520",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-072"
+        },
+        {
+          "entity_id": "entity_0c7ed6e1defb06d1ad42",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-073"
+        },
+        {
+          "entity_id": "entity_f6b3feae6eab9831255f",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-074"
+        },
+        {
+          "entity_id": "entity_97c4178e7482b3adee19",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-085"
+        },
+        {
+          "entity_id": "entity_97853041355657cfd7cf",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-086"
+        },
+        {
+          "entity_id": "entity_aa125722a22cd634394f",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-004 feedback-loop rolling index"
+        },
+        {
+          "entity_id": "entity_bf142a32ad580e444a57",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-006 required vs optional artifact health"
+        },
+        {
+          "entity_id": "entity_56c4f550c13218c52e88",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-008 git/VM deployment governance"
+        },
+        {
+          "entity_id": "entity_b6f19de9fb630e22f938",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-009 GitHub Actions SHA pinning"
+        },
+        {
+          "entity_id": "entity_bc712893ecc5cfab1a09",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-011 workflow permission minimization"
+        },
+        {
+          "entity_id": "entity_8a3d48db906fb390bbb1",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-013 dependency monitoring governance"
+        },
+        {
+          "entity_id": "entity_ba1ac4e49905dbfa0ce6",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-015 artifact registry and ownership matrix"
+        },
+        {
+          "entity_id": "entity_cbd267d6ec08d0c5bbbc",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-017 operational health aggregator"
+        },
+        {
+          "entity_id": "entity_fed2c80f3917cf7be66d",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-018 latest publication freshness manifest"
+        },
+        {
+          "entity_id": "entity_70d69b6643749b279e8a",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-019 runtime artifact retention and backup policy"
+        },
+        {
+          "entity_id": "entity_bb810af0213c8e202162",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-020 read-only validation isolation"
+        },
+        {
+          "entity_id": "entity_515ee83ad74a9b8d6938",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-023 documentation and generated artifact separation"
+        },
+        {
+          "entity_id": "entity_d84115c132c726071ee1",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-024 NAV surface registry and performance provenance enforcement"
+        },
+        {
+          "entity_id": "entity_29578a67b17f8310d90e",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-025 immutable daily shadow holdings and weights history"
+        },
+        {
+          "entity_id": "entity_f0852ccc47bbdb14e83d",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-026 exposure intelligence and concentration risk observability"
+        },
+        {
+          "entity_id": "entity_7ea32a2e0f121c8674a6",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-027 regime decomposition and fragility reporting"
+        },
+        {
+          "entity_id": "entity_9a4c5900a06ad8b23cdc",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-030 daily research interpretation packet v1"
+        },
+        {
+          "entity_id": "entity_b4e027460e9c200f3f6c",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-001 shadow wrapper decomposition"
+        },
+        {
+          "entity_id": "entity_c09b27ece2bd98c4dc0a",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-005 self-heal recovery integrity"
+        },
+        {
+          "entity_id": "entity_cdbef9e13757eabe5eea",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-012 CI cache namespace isolation"
+        },
+        {
+          "entity_id": "entity_b32fec8fb55be74e0264",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-014 shadow learning reliability"
+        },
+        {
+          "entity_id": "entity_9ca862eb29dc2d7142be",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-002 price cache coverage sidecar"
+        },
+        {
+          "entity_id": "entity_edf6ffba0a247908cb83",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-016 semantic precompute contract validation"
+        },
+        {
+          "entity_id": "entity_0bf671c5c155fdf729e6",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-028 Phase C promotion readiness surfaces"
+        },
+        {
+          "entity_id": "entity_8aea0884a197780733e1",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-031 execution integrity contract"
+        },
+        {
+          "entity_id": "entity_c19b83938876b66408d5",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-037 Tier 3 promotion governance surfaces"
+        },
+        {
+          "entity_id": "entity_a29eb064efbae54b51b0",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-038 governance blocker audit + diagnostic surfaces"
+        },
+        {
+          "entity_id": "entity_8816f4ac85f67606f064",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-003 managed ticker exceptions"
+        },
+        {
+          "entity_id": "entity_71445c88c98b9d663a88",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-007 parquet scaling review"
+        },
+        {
+          "entity_id": "entity_c9d19469dc2736fb8bb8",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-010 deterministic dependency governance"
+        },
+        {
+          "entity_id": "entity_b6a892f501707661effb",
+          "source": "docs/governance/fr_registry.md",
+          "source_record_id": "FR-022 dependency hash enforcement"
+        }
+      ],
+      "records_changed": 0,
+      "records_seen": 92,
+      "snapshot_id": "snapshot_6e33414bde87bad123ff",
+      "source_id": "source_87cce58ac787c53a1c7d",
+      "unresolved": [
+        {
+          "entity_id": "entity_aa2fcc888155adc66b6c",
+          "name": "Atlas",
+          "reason": "No current repository evidence found at configured evidence paths",
+          "review_required": true
+        }
+      ]
+    },
+    {
+      "dry_run": false,
+      "entities": [
+        "entity_7fe5dfe4a7c2d8895a34",
+        "entity_d0f0cb8e9c471a64540d",
+        "entity_a6091cfabb418c4eda41",
+        "entity_b965f722871a985c6890",
+        "entity_5dd65ea65f1a87c3b031",
+        "entity_0f67aff195be2ac96639",
+        "entity_3bed4ebda93bad55e893",
+        "entity_8f7e254ef797904c0af6",
+        "entity_d41cc8d6818dbb62da4e",
+        "entity_f8ea3a521ea71c1017df",
+        "entity_2423e216bb115332e9b7",
+        "entity_6958bbdbff3bead54e39",
+        "entity_485f25486c4b7c9c2463"
+      ],
+      "provenance": [
+        {
+          "entity_id": "entity_7fe5dfe4a7c2d8895a34",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/issues/158"
+        },
+        {
+          "entity_id": "entity_d0f0cb8e9c471a64540d",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/issues/166"
+        },
+        {
+          "entity_id": "entity_a6091cfabb418c4eda41",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/119"
+        },
+        {
+          "entity_id": "entity_b965f722871a985c6890",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/124"
+        },
+        {
+          "entity_id": "entity_5dd65ea65f1a87c3b031",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/128"
+        },
+        {
+          "entity_id": "entity_0f67aff195be2ac96639",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/137"
+        },
+        {
+          "entity_id": "entity_3bed4ebda93bad55e893",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/139"
+        },
+        {
+          "entity_id": "entity_8f7e254ef797904c0af6",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/140"
+        },
+        {
+          "entity_id": "entity_d41cc8d6818dbb62da4e",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/141"
+        },
+        {
+          "entity_id": "entity_f8ea3a521ea71c1017df",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_2423e216bb115332e9b7",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/161"
+        },
+        {
+          "entity_id": "entity_6958bbdbff3bead54e39",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/162"
+        },
+        {
+          "entity_id": "entity_485f25486c4b7c9c2463",
+          "fields": [
+            "assignees",
+            "base_branch",
+            "branch",
+            "commit",
+            "created_at",
+            "draft",
+            "external_id",
+            "labels",
+            "record_type",
+            "repository",
+            "updated_at"
+          ],
+          "source_id": "source_9eae8e1958258ec66dce",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/168"
+        }
+      ],
+      "records_changed": 0,
+      "records_seen": 13,
+      "snapshot_id": "snapshot_9d39065a3774199293e5",
+      "source_id": "source_9eae8e1958258ec66dce",
+      "unresolved": []
+    },
+    {
+      "dry_run": false,
+      "entities": [
+        "entity_8cb4b12a665b298c7e00",
+        "entity_f8ea3a521ea71c1017df",
+        "entity_af8bda8491d5acf7d718",
+        "entity_d8b8430007fa59e99479",
+        "entity_c4f4c58330479efd8410",
+        "entity_6432dab06a6e89133ee0",
+        "entity_69e4a93ab6f6eab78362",
+        "entity_8e9eb38c39046bd4ef7f",
+        "entity_54ff4600a886a2a9079d",
+        "entity_ea0ad08247377b57b157",
+        "entity_448f99d545a84bba8bb4",
+        "entity_83705a0bcb10b1aafda9",
+        "entity_0dcc3d2e3b36ac1fe3ab",
+        "entity_6d12ab25bb0b4c069104",
+        "entity_ee17af802cabf4f42a0b",
+        "entity_922123d00efcb9dbaf98",
+        "entity_e2de5b9063fc0072ae06",
+        "entity_ec37ca4a5280d3f58b81",
+        "entity_cbfba7370de684407b55",
+        "entity_27caa60a7fbe48cf54e1",
+        "entity_2c353bee66396251a835",
+        "entity_6de60b550949374ae477",
+        "entity_be041bc90545e0ed5dca",
+        "entity_403da725bfcc352bd1ae",
+        "entity_ec788e26131c70c81bed",
+        "entity_5e6a0fc145cea0571b02",
+        "entity_eb4a54add939308f7455",
+        "entity_dbde6e97473b6c261f12",
+        "entity_f3aafca9198816fd6555",
+        "entity_2570285fa4e0ba63556d",
+        "entity_d40fd29c29c30338b1b8",
+        "entity_9fadec8a9a318848bade",
+        "entity_e8ee54d6897791a6aa01",
+        "entity_ff1d8f8fa70fd11e45c1",
+        "entity_a7e3e5757d9991d4a526",
+        "entity_f0c0820c909c76f504e2",
+        "entity_bcd5a9d20bff7d6a8556",
+        "entity_638ee73cdc31361e0897"
+      ],
+      "provenance": [
+        {
+          "entity_id": "entity_af8bda8491d5acf7d718",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Current Caerus decomposition",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_c4f4c58330479efd8410",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Earnings revisions / PEAD",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_69e4a93ab6f6eab78362",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Insider-conviction clusters",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_8e9eb38c39046bd4ef7f",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Options-information lead",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_ea0ad08247377b57b157",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Supply-chain shock diffusion",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_83705a0bcb10b1aafda9",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Residual momentum",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_0dcc3d2e3b36ac1fe3ab",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Stock-specific return seasonality",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_6d12ab25bb0b4c069104",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Short-horizon reversal",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_ee17af802cabf4f42a0b",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Cross-asset trend",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_e2de5b9063fc0072ae06",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Executive/managerial tone surprise",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_cbfba7370de684407b55",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Net payout and share issuance",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_2c353bee66396251a835",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Asset growth / investment",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_be041bc90545e0ed5dca",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "Defense procurement-intent events",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_403da725bfcc352bd1ae",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+          "source_row_key": "AI power/grid commitment events",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_ec788e26131c70c81bed",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0001",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_5e6a0fc145cea0571b02",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0002",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_eb4a54add939308f7455",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0003",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_dbde6e97473b6c261f12",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0004",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_f3aafca9198816fd6555",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0005",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_2570285fa4e0ba63556d",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0006",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_d40fd29c29c30338b1b8",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0007",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_9fadec8a9a318848bade",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0008",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_e8ee54d6897791a6aa01",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0009",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_ff1d8f8fa70fd11e45c1",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0010",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_a7e3e5757d9991d4a526",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0011",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_f0c0820c909c76f504e2",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0012",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_bcd5a9d20bff7d6a8556",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/EXPERIMENT_LEDGER.md",
+          "source_row_key": "EXP-2026-0013",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        },
+        {
+          "entity_id": "entity_638ee73cdc31361e0897",
+          "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+          "source_path": "projects/alpha_lab/DECISION_LOG.md",
+          "source_row_key": "2026-07-14:Alpha Lab project",
+          "source_url": "https://github.com/BigO2244/quant-daily-report/pull/160"
+        }
+      ],
+      "records_changed": 0,
+      "records_seen": 38,
+      "snapshot_id": "snapshot_e75e5490abf5a575e0bb",
+      "source_id": "source_34b14975f5610e4289c0",
+      "unresolved": []
+    }
+  ],
+  "schema_version": "aegis-import-manifest-v1"
+}

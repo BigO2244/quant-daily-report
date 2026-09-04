@@ -1,0 +1,74 @@
+[
+  {
+    "blocker": "Certified research-only Caerus component decision tape",
+    "blocker_id": "entity_d8b8430007fa59e99479",
+    "family": "Current Caerus decomposition",
+    "mission_id": "entity_af8bda8491d5acf7d718",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "blocker": "Licensed analyst-level PIT history and original earnings-event semantics",
+    "blocker_id": "entity_6432dab06a6e89133ee0",
+    "family": "Earnings revisions / PEAD",
+    "mission_id": "entity_c4f4c58330479efd8410",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "blocker": "Exchange-grade trade/NBBO/OCC history; forward proxy remains non-equivalent",
+    "blocker_id": "entity_54ff4600a886a2a9079d",
+    "family": "Options-information lead",
+    "mission_id": "entity_8e9eb38c39046bd4ef7f",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "blocker": "Licensed PIT analyst history and effective-dated universal relationship graph",
+    "blocker_id": "entity_448f99d545a84bba8bb4",
+    "family": "Supply-chain shock diffusion",
+    "mission_id": "entity_ea0ad08247377b57b157",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "blocker": "Certified PIT cross-asset proxy history",
+    "blocker_id": "entity_922123d00efcb9dbaf98",
+    "family": "Cross-asset trend",
+    "mission_id": "entity_ee17af802cabf4f42a0b",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "blocker": "PIT earnings-event semantics and historical timestamped transcript history",
+    "blocker_id": "entity_ec37ca4a5280d3f58b81",
+    "family": "Executive/managerial tone surprise",
+    "mission_id": "entity_e2de5b9063fc0072ae06",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "blocker": "Materialize certified filing-time net-payout features",
+    "blocker_id": "entity_27caa60a7fbe48cf54e1",
+    "family": "Net payout and share issuance",
+    "mission_id": "entity_cbfba7370de684407b55",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "status": "FROZEN_BLOCKED_DATA"
+  },
+  {
+    "blocker": "Materialize certified filing-time asset-growth features",
+    "blocker_id": "entity_6de60b550949374ae477",
+    "family": "Asset growth / investment",
+    "mission_id": "entity_2c353bee66396251a835",
+    "source": "projects/alpha_lab/STRATEGY_BACKLOG.md",
+    "source_commit": "2b4f6c99216a2764d3692735f0e3f783ce7dca0a",
+    "status": "FROZEN_BLOCKED_DATA"
+  }
+]
