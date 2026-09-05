@@ -1,5 +1,8 @@
 # FR Active Backlog
 
+> **Operating evidence override — reviewed 2026-09-05.** [Current maintenance and research plan](../../../atlas/docs/operations/caerus_data_first_rebuild_plan_20260902.md) governs priorities. Lyra's new submissions were paused September 2; existing positions and Shadow were preserved. Orion retains PAPER authority but September 3 failed reconciliation and September 4 blocked before submission; email escalation failed with SMTP 535. Reconciled account balances do not prove recovery or sleeve-only performance. Maintain fail-closed controls; no tuning, order, deployment or risk change is authorized by cleanup. Broader research is paused; MES is the sole candidate and has zero economic observations. Older active-state and priority prose below cannot override these dated receipts. This local documentation update does not change deployed runtime.
+
+
 ## Purpose
 
 This document is the operator-readable roadmap for active Caerus Friday
