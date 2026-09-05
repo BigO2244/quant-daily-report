@@ -385,25 +385,19 @@ def _rebuild_exact(payload: dict, **overrides):
 
 def _write_orion_sleeve_authority(tmp_path: Path) -> tuple[str, str]:
     from core.sleeve_control_plane import dispatch_all_sleeves, load_sleeve_control_registry
+    from paper.trading_calendar import prev_trading_day
+    from Tests.test_orion_downstream_freshness import _lineaged_source
 
     trade_date = "2026-08-12"
-    source = tmp_path / "outputs" / "shadow_candidates" / trade_date / "caerus_orion.json"
-    source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_text(
-        json.dumps(
-            {
-                "trade_date": trade_date,
-                "effective_trade_date": trade_date,
-                "strategy_slug": "caerus_orion",
-                "source_variant": "choice2-test",
-                "decision_eligible": True,
-                "target_weights": {"AAPL": 1.0},
-            },
-            sort_keys=True,
+    # Capital authority is derived from causal source lineage, including the
+    # previous session. Do not force eligibility on a generated envelope.
+    for date in (prev_trading_day(trade_date), trade_date):
+        source = tmp_path / "outputs" / "shadow_candidates" / date / "caerus_orion.json"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(
+            json.dumps(_lineaged_source(date, salt=f"choice2-{date}", weights={"AAPL": 1.0}),
+                       sort_keys=True) + "\n", encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
     registry = load_sleeve_control_registry()
     path = tmp_path / "sleeve_evaluations.json"
     payload = dispatch_all_sleeves(
@@ -3155,6 +3149,7 @@ def test_stale_exact_plan_fails_closed_before_submission(tmp_path: Path):
         wal_root=tmp_path / "wal",
         attempt_id="stale-plan",
         dry_run=False,
+        now_et=TEST_NOW_ET + dt.timedelta(seconds=61),
     )
     assert result.status == "BLOCKED"
     assert result.reason_code == "stale_or_future_exact_execution_plan"
@@ -3194,6 +3189,7 @@ def test_missing_or_invalid_freshness_never_executes_old_plan(tmp_path: Path, fr
         result = execute_exact_plan(
             plan_payload=_plan().to_dict(), broker=broker, env=env,
             wal_root=tmp_path / "wal", attempt_id="bad-freshness", dry_run=False,
+            now_et=TEST_NOW_ET + dt.timedelta(seconds=901),
         )
         assert result.status == "BLOCKED"
     assert broker.submit_calls == 0
@@ -4614,7 +4610,7 @@ def test_closed_session_material_drift_is_sealed_but_never_submittable(
         dry_run=False,
         # Prove the immutable closed-session authority blocks submission even
         # independently of the executor's own wall-clock market-hours guard.
-        now_et=TEST_NOW_ET,
+        now_et=dt.datetime(2026, 8, 12, 16, 15, tzinfo=ZoneInfo("America/New_York")),
     )
 
     assert outcome.status == "BLOCKED"
@@ -4928,16 +4924,11 @@ def test_executor_revalidates_quote_freshness_before_each_new_order(
     )
     authorized = _finalize_direct_authorization(regime_state_root, authorized)
     exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
-    clocks = iter(
-        [
-            dt.datetime(2026, 8, 12, 9, 35, 2, tzinfo=ZoneInfo("America/New_York")),
-            dt.datetime(2026, 8, 12, 9, 35, 2, tzinfo=ZoneInfo("America/New_York")),
-            dt.datetime(2026, 8, 12, 9, 38, 0, tzinfo=ZoneInfo("America/New_York")),
-        ]
-    )
+    # Advance when the first order has actually been submitted, independently
+    # of how many safety checks read the clock before that boundary.
     monkeypatch.setattr(
         "execution.exact_executor._execution_clock",
-        lambda _now_et: next(clocks),
+        lambda _now_et: TEST_NOW_ET + dt.timedelta(seconds=178 if broker.submit_calls else 0),
     )
     monkeypatch.setattr(
         "execution.exact_executor._exact_market_is_open",

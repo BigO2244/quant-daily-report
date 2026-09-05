@@ -213,6 +213,43 @@ def _broker_observation(repo_root: Path, lane: Mapping[str, Any]) -> dict[str, A
     }
 
 
+def _paper_execution_observation(repo_root: Path) -> dict[str, Any]:
+    """Read the newest dated PAPER workflow, including missing/broken pointers.
+
+    Account reconciliation cannot stand in for execution outcome. Never fall
+    back to an older successful pointer when the newest workflow is incomplete.
+    This is an observation only; it does not grant retry or trading authority.
+    """
+    candidates = []
+    for path in (repo_root / 'outputs/workflow').glob('*'):
+        if not path.is_dir() or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', path.name):
+            continue
+        try:
+            dt.date.fromisoformat(path.name)
+        except ValueError:
+            continue
+        candidates.append(path)
+    if not candidates:
+        return {'status': 'UNOBSERVED'}
+    session = max(candidates, key=lambda p: p.name)
+    path = session / 'execution.json'
+    result = {'status': 'UNOBSERVED', 'trade_date': session.name,
+              'path': str(path.relative_to(repo_root))}
+    if not path.is_file():
+        return result
+    result['sha256'] = file_hash(path)
+    payload = _read_json(path)
+    if (payload is None or payload.get('trade_date') != session.name
+            or str(payload.get('mode', '')).lower() != 'paper'
+            or payload.get('stage') != 'execution'):
+        result['status'] = 'INVALID'
+        return result
+    result.update(status=str(payload.get('status') or 'UNKNOWN').upper(),
+                  reason_code=payload.get('substatus') or payload.get('status_message'),
+                  run_id=payload.get('run_id'), created_at=payload.get('created_at'))
+    return result
+
+
 def scan_narrative_conflicts(repo_root: Path, registry: Mapping[str, Any]) -> list[str]:
     conflicts: list[str] = []
     for surface in registry.get("narrative_surfaces") or []:
@@ -266,7 +303,11 @@ def compile_operating_truth(
             gate_status = "DISABLED" if any(gates.get(k) == v for k, v in disabled.items()) else "UNPROVED"
         else:
             gate_status = "NOT_APPLICABLE"
-        execution = _result_observation(home, lane)
+        execution = (
+            _paper_execution_observation(root)
+            if lane['lane_id'] == 'orion_paper'
+            else _result_observation(home, lane)
+        )
         broker = _broker_observation(root, lane)
         declared = str(lane.get("declared_state"))
         if declared == "DISABLED" and gate_status in {"DISABLED", "UNPROVED"}:
@@ -275,6 +316,11 @@ def compile_operating_truth(
             status = "UNKNOWN"
         elif schedule_status != "INSTALLED" or gate_status == "UNPROVED":
             status = "DEGRADED"
+        elif lane['lane_id'] == 'orion_paper' and (
+            execution.get('status') not in {'SUCCESS', 'NO_ACTION'}
+            or execution.get('reason_code') == 'dry_run_only'
+        ):
+            status = "ACTIVE_WITH_EXCEPTION"
         elif execution.get("status") == "BLOCKED":
             status = "ACTIVE_WITH_EXCEPTION"
         elif broker.get("status") in {"DEGRADED", "UNOBSERVED"}:

@@ -136,6 +136,10 @@ def _seed(tmp_path: Path) -> tuple[Path, Path, str]:
         )
     _write(home / ".caerus/lyra.env", "LYRA_ENABLED=1\nSECRET=do-not-read\n")
     _write(home / ".caerus/legacy.env", "LEGACY_KILL=1\n")
+    _write(root / 'outputs/workflow/2026-08-28/execution.json', {
+        'stage': 'execution', 'trade_date': '2026-08-28', 'mode': 'paper',
+        'status': 'success', 'run_id': 'paper-test',
+    })
     completed = {
         "execution_session": "2026-08-20",
         "status": "COMPLETE",
@@ -159,6 +163,56 @@ def test_lane_registry_is_hash_bound(tmp_path: Path) -> None:
         assert "content hash" in str(exc)
     else:
         raise AssertionError("mutated registry passed")
+
+
+def test_paper_failure_overrides_reconciled_account(tmp_path: Path) -> None:
+    root, home, cron = _seed(tmp_path)
+    for status in ('failed_blocked', 'failed_reconciliation', 'failed_integrity',
+                   'failed_incomplete', 'failed_unknown', 'running'):
+        _write(root / 'outputs/workflow/2026-08-29/execution.json', {
+            'stage': 'execution', 'trade_date': '2026-08-29', 'mode': 'paper',
+            'status': status, 'substatus': 'incident-reason', 'run_id': 'failed-run',
+        })
+        result = compile_operating_truth(repo_root=root, home=home, crontab_text=cron,
+                                         observed_at='2026-08-29T14:00:00+00:00')
+        lanes = {r['lane_id']: r for r in result['lanes']}
+        paper = lanes['orion_paper']
+        assert paper['broker_truth']['status'] == 'PASS'
+        assert paper['operating_status'] == 'ACTIVE_WITH_EXCEPTION'
+        assert paper['latest_execution']['status'] == status.upper()
+        assert paper['latest_execution']['reason_code'] == 'incident-reason'
+        assert paper['latest_execution']['sha256']
+        assert lanes['lyra_live']['operating_status'] == 'ACTIVE'
+
+
+def test_newest_paper_workflow_cannot_fall_back_to_prior_success(tmp_path: Path) -> None:
+    root, home, cron = _seed(tmp_path)
+    path = root / 'outputs/workflow/2026-08-29/execution.json'
+    path.parent.mkdir(parents=True)
+    for payload in (None, '{broken', {'stage': 'execution', 'mode': 'paper',
+                                   'trade_date': '2026-08-28', 'status': 'success'},
+                    {'stage': 'execution', 'mode': 'live',
+                     'trade_date': '2026-08-29', 'status': 'success'}):
+        if payload is not None:
+            _write(path, payload)
+        result = compile_operating_truth(repo_root=root, home=home, crontab_text=cron,
+                                         observed_at='2026-08-29T14:00:00+00:00')
+        paper = next(r for r in result['lanes'] if r['lane_id'] == 'orion_paper')
+        assert paper['operating_status'] == 'ACTIVE_WITH_EXCEPTION'
+        assert paper['latest_execution']['trade_date'] == '2026-08-29'
+        assert paper['latest_execution']['status'] in {'UNOBSERVED', 'INVALID'}
+
+
+def test_paper_dry_run_does_not_claim_successful_execution(tmp_path: Path) -> None:
+    root, home, cron = _seed(tmp_path)
+    _write(root / 'outputs/workflow/2026-08-29/execution.json', {
+        'stage': 'execution', 'mode': 'paper', 'trade_date': '2026-08-29',
+        'status': 'no_action', 'substatus': 'dry_run_only',
+    })
+    result = compile_operating_truth(repo_root=root, home=home, crontab_text=cron,
+                                     observed_at='2026-08-29T14:00:00+00:00')
+    paper = next(r for r in result['lanes'] if r['lane_id'] == 'orion_paper')
+    assert paper['operating_status'] == 'ACTIVE_WITH_EXCEPTION'
 
 
 def test_three_concurrent_lanes_and_disabled_legacy_are_distinct(tmp_path: Path) -> None:
