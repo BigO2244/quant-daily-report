@@ -50,6 +50,11 @@ BRANCH="$(git branch --show-current)"
 STATUS="$(git status --porcelain --untracked-files=all)"
 CURRENT_SHA="$(git rev-parse HEAD)"
 TARGET_SHA="$(git rev-parse --verify 'origin/main^{commit}')"
+EXPECTED_SHA="${1:-}"
+if [[ -n "${EXPECTED_SHA}" && "${TARGET_SHA}" != "${EXPECTED_SHA}" ]]; then
+    echo "FATAL: origin/main does not match the reviewed expected SHA" >&2
+    exit 3
+fi
 if [[ "${BRANCH}" != "main" ]]; then
     echo "FATAL: deployment requires branch main; found ${BRANCH:-DETACHED}" >&2
     exit 3

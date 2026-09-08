@@ -215,7 +215,7 @@ def _deploy_integration_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], s
 def test_deploy_script_publishes_only_validated_target(tmp_path: Path) -> None:
     prod, env, _initial, target = _deploy_integration_fixture(tmp_path)
     proc = subprocess.run(
-        ["bash", "scripts/deploy.sh"], cwd=prod, env=env, capture_output=True, text=True
+        ["bash", "scripts/deploy.sh", target], cwd=prod, env=env, capture_output=True, text=True
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _git(prod, "rev-parse", "HEAD") == target
@@ -224,6 +224,22 @@ def test_deploy_script_publishes_only_validated_target(tmp_path: Path) -> None:
     assert marker["deployed_sha"] == target
     assert marker["validated_sha"] == target
     assert marker["target_sha"] == target
+
+
+def test_deploy_rejects_changed_candidate_before_publication(tmp_path: Path) -> None:
+    prod, env, initial, _target = _deploy_integration_fixture(tmp_path)
+    marker = prod / "outputs" / "deploy_state.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("prior-marker\n", encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", "scripts/deploy.sh", initial], cwd=prod, env=env,
+        capture_output=True, text=True,
+    )
+    assert proc.returncode == 3
+    assert "reviewed expected SHA" in proc.stderr
+    assert _git(prod, "rev-parse", "HEAD") == initial
+    assert marker.read_text(encoding="utf-8") == "prior-marker\n"
+    assert "validate pinned candidate" not in proc.stdout
 
 
 def test_deploy_validation_failure_preserves_head_and_prior_marker(tmp_path: Path) -> None:
