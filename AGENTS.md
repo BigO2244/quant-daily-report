@@ -1,5 +1,8 @@
 # AGENTS.md
 
+> **Aquila owner decision — 2026-09-08.** Brett authorized activation of Caerus Aquila in the existing Alpaca PAPER account at 50%. This revision configures an experimental TOP10_EQUAL monthly sleeve: 50% Aquila,45% Orion,5% cash at formation; Aquila shares remain fixed between formations. Orion retains the account risk-history identity. Deployment receipts determine runtime activation, and the existing emergency cooldown still controls buying. This authorization does not establish alpha or change Lyra Live. See `docs/governance/AQUILA_PAPER.md` for the contract.
+
+
 > **Operating evidence override — reviewed 2026-09-05.** [Current maintenance and research plan](../atlas/docs/operations/caerus_data_first_rebuild_plan_20260902.md) governs priorities. Lyra's new submissions were paused September 2; existing positions and Shadow were preserved. Orion retains PAPER authority but September 3 failed reconciliation and September 4 blocked before submission; email escalation failed with SMTP 535. Reconciled account balances do not prove recovery or sleeve-only performance. Maintain fail-closed controls; no tuning, order, deployment or risk change is authorized by cleanup. Broader research is paused; MES is the sole candidate and has zero economic observations. Older active-state and priority prose below cannot override these dated receipts. This local documentation update does not change deployed runtime.
 
 
@@ -99,7 +102,7 @@ Benchmark:
 Execution:
 - Precompute admits one immutable session, produces one terminal decision for
   every registered non-frozen sleeve, and allocates configured capital sleeves
-  exactly once; Orion currently has 100% of the sleeve risk budget
+  exactly once; Aquila and Orion share the risk budget 10/19 and 9/19, respectively
 - The legacy daily allocator is research evidence only and is quarantined below
   the dated precompute bundle; it cannot publish canonical PAPER signals/trades
 - The 09:35 builder reuses the sealed session, decisions, allocation, Evidence,
@@ -108,7 +111,7 @@ Execution:
 - Broker fills preserve exact-order and sleeve-decision provenance through the
   causal ownership ledger, valuation, and read-only daily audit
 - Lyra Live is active, funded, recurring, and separately governed.
-- Orion is the active PAPER capital sleeve.
+- Orion is the primary PAPER capital sleeve; Aquila is the experimental monthly PAPER sleeve.
 - The legacy FR-104/generic Live lanes remain disabled; Orion's PAPER promotion
   does not arm either legacy lane or modify Lyra Live authority.
 
@@ -295,7 +298,7 @@ Legacy planner targets are quarantined research evidence.
 ### Current Strategy State
 
 - **PAPER portfolio**: registry allocator, currently with Orion as the sole
-  capital sleeve and 100% of sleeve risk budget
+  primary capital sleeve; Aquila shares the account under its monthly contract
 - **LIVE portfolio**: owner-scoped Lyra weekly portfolio, independently funded
   and scheduled Tuesday at 09:35 ET
 - **Historical research control**: Caerus Polaris

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from Tests.fixtures.orion_registry import orion_registry
+
 import json
 from pathlib import Path
 
@@ -32,7 +34,7 @@ from Tests.test_live_pilot_build_plan_from_precompute import (
         "breadth_washout",
     ],
 )
-def test_real_builder_authorizer_executor_chain_needs_no_fixture_authority_injection(
+def test_real_builder_authorizer_executor_chain_needs_no_fixture_authority_injection(orion_registry,
     tmp_path: Path,
     composite_regime: str,
 ) -> None:

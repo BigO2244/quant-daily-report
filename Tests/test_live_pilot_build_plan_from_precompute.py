@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from Tests.fixtures.orion_registry import orion_registry
+
 import json
 import hashlib
 from pathlib import Path
@@ -288,7 +290,7 @@ def _write_sleeve_evaluations(payload_path: Path, tmp_path: Path) -> Path:
     return path
 
 
-def test_paper_lane_uses_exact_governed_orion_snapshot(tmp_path: Path) -> None:
+def test_paper_lane_uses_exact_governed_orion_snapshot(orion_registry, tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path,
         signals=[{"ticker": "JNJ", "target_weight": 1.0, "sleeve": "sleeve_quality"}],
@@ -341,7 +343,7 @@ def test_paper_lane_uses_exact_governed_orion_snapshot(tmp_path: Path) -> None:
     ) == pytest.approx(0.95)
 
 
-def test_paper_lane_uses_immediately_previous_trading_session_snapshot(
+def test_paper_lane_uses_immediately_previous_trading_session_snapshot(orion_registry,
     tmp_path: Path,
 ) -> None:
     trade_date = "2026-08-10"  # Monday
@@ -379,7 +381,7 @@ def test_paper_lane_uses_immediately_previous_trading_session_snapshot(
     assert identity["shadow_baseline_source_trade_date"] == "2026-08-07"
 
 
-def test_paper_lane_skips_current_preclose_reporting_snapshot(
+def test_paper_lane_skips_current_preclose_reporting_snapshot(orion_registry,
     tmp_path: Path,
 ) -> None:
     trade_date = "2026-08-11"
@@ -443,7 +445,7 @@ def test_paper_lane_skips_current_preclose_reporting_snapshot(
         ),
     ],
 )
-def test_paper_lane_fails_closed_on_invalid_governed_market_state(
+def test_paper_lane_fails_closed_on_invalid_governed_market_state(orion_registry,
     tmp_path: Path,
     snapshot_mutation: dict[str, object] | None,
     error_fragment: str,
@@ -472,7 +474,7 @@ def test_paper_lane_fails_closed_on_invalid_governed_market_state(
     assert error_fragment in plan["block_diagnostics"]["error"]
 
 
-def test_paper_market_state_identity_is_idempotent_and_source_sensitive(
+def test_paper_market_state_identity_is_idempotent_and_source_sensitive(orion_registry,
     tmp_path: Path,
 ) -> None:
     trade_date = "2026-08-11"
@@ -513,7 +515,7 @@ def test_paper_market_state_identity_is_idempotent_and_source_sensitive(
     assert "file_hash_mismatch:daily_snapshot" in changed["block_diagnostics"]["error"]
 
 
-def test_paper_market_state_rejects_missing_precompute_run_lineage(
+def test_paper_market_state_rejects_missing_precompute_run_lineage(orion_registry,
     tmp_path: Path,
 ) -> None:
     payload_path = _bundle(tmp_path, signals=[], trade_date="2026-08-11")
@@ -534,7 +536,7 @@ def test_paper_market_state_rejects_missing_precompute_run_lineage(
     assert "stable run_id lineage" in plan["block_diagnostics"]["error"]
 
 
-def test_paper_lane_rejects_provisional_previous_session_snapshot(
+def test_paper_lane_rejects_provisional_previous_session_snapshot(orion_registry,
     tmp_path: Path,
 ) -> None:
     trade_date = "2026-08-11"
@@ -569,7 +571,7 @@ def test_paper_lane_rejects_provisional_previous_session_snapshot(
     assert "unsealed_precompute_contract" in plan["block_diagnostics"]["error"]
 
 
-def test_paper_lane_rejects_snapshot_older_than_previous_trading_session(
+def test_paper_lane_rejects_snapshot_older_than_previous_trading_session(orion_registry,
     tmp_path: Path,
 ) -> None:
     trade_date = "2026-08-10"  # Monday; Friday is the only permitted prior session.
@@ -590,7 +592,7 @@ def test_paper_lane_rejects_snapshot_older_than_previous_trading_session(
     assert "unsealed_precompute_contract" in plan["block_diagnostics"]["error"]
 
 
-def test_paper_lane_previous_session_rule_skips_exchange_holiday(
+def test_paper_lane_previous_session_rule_skips_exchange_holiday(orion_registry,
     tmp_path: Path,
 ) -> None:
     trade_date = "2026-09-08"  # Tuesday after Labor Day.
@@ -614,7 +616,7 @@ def test_paper_lane_previous_session_rule_skips_exchange_holiday(
     assert plan["decision_source_artifact"]["source_trading_session_lag"] == 1
 
 
-def test_full_target_all_names_emitted_and_priced(tmp_path: Path) -> None:
+def test_full_target_all_names_emitted_and_priced(orion_registry, tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path,
         signals=[
@@ -656,7 +658,7 @@ def test_full_target_all_names_emitted_and_priced(tmp_path: Path) -> None:
     assert by_symbol["MSFT"]["price_source"] == "yfinance_open"
 
 
-def test_live_lane_blocks_orion_label_when_targets_are_growth_engine(
+def test_live_lane_blocks_orion_label_when_targets_are_growth_engine(orion_registry,
     tmp_path: Path,
 ) -> None:
     payload_path = _bundle(
@@ -689,7 +691,7 @@ def test_live_lane_blocks_orion_label_when_targets_are_growth_engine(
     assert validation["reason_code"] == "live_pilot_approved_strategy_target_mismatch"
 
 
-def test_paper_recovery_policy_is_rejected_as_downstream_target_substitution(
+def test_paper_recovery_policy_is_rejected_as_downstream_target_substitution(orion_registry,
     tmp_path: Path,
 ) -> None:
     identity = {
@@ -773,7 +775,7 @@ def test_paper_recovery_policy_is_rejected_as_downstream_target_substitution(
     assert live_plan["reason_code"] == "paper_recovery_policy_wrong_lane"
 
 
-def test_sleeve_is_stamped_approved_with_provenance(tmp_path: Path) -> None:
+def test_sleeve_is_stamped_approved_with_provenance(orion_registry, tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path,
         signals=[{"ticker": "SPG", "target_weight": 0.5, "sleeve": "sleeve_trend"}],
@@ -784,7 +786,7 @@ def test_sleeve_is_stamped_approved_with_provenance(tmp_path: Path) -> None:
     assert row["source_signal_sleeve"] == "sleeve_trend"
 
 
-def test_cash_target_weight_is_top_level_and_carried(tmp_path: Path) -> None:
+def test_cash_target_weight_is_top_level_and_carried(orion_registry, tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path,
         signals=[
@@ -799,7 +801,7 @@ def test_cash_target_weight_is_top_level_and_carried(tmp_path: Path) -> None:
     assert "cash_target_weight" in plan
 
 
-def test_unpriced_target_blocks_fail_closed(tmp_path: Path) -> None:
+def test_unpriced_target_blocks_fail_closed(orion_registry, tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path,
         signals=[
@@ -815,7 +817,7 @@ def test_unpriced_target_blocks_fail_closed(tmp_path: Path) -> None:
     assert plan["target_portfolio"] == []
 
 
-def test_unknown_layer_metadata_blocks_live(tmp_path: Path) -> None:
+def test_unknown_layer_metadata_blocks_live(orion_registry, tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path,
         signals=[{"ticker": "AAPL", "target_weight": 0.95, "sleeve": "mystery_sleeve"}],
@@ -829,7 +831,7 @@ def test_unknown_layer_metadata_blocks_live(tmp_path: Path) -> None:
     }
 
 
-def test_paper_and_live_share_identical_targets_and_explicit_cash(tmp_path: Path) -> None:
+def test_paper_and_live_share_identical_targets_and_explicit_cash(orion_registry, tmp_path: Path) -> None:
     signals = [
         {"ticker": "AAPL", "target_weight": 0.25, "sleeve": "sleeve_quality"},
         {"ticker": "MSFT", "target_weight": 0.20, "sleeve": "sleeve_trend"},
@@ -862,7 +864,7 @@ def test_paper_and_live_share_identical_targets_and_explicit_cash(tmp_path: Path
     assert sum(live_weights.values()) + float(plan["cash_target_weight"]) == pytest.approx(1.0)
 
 
-def test_missing_signals_source_blocks(tmp_path: Path) -> None:
+def test_missing_signals_source_blocks(orion_registry, tmp_path: Path) -> None:
     trade_date = "2026-06-22"
     bundle = tmp_path / "outputs" / "precompute" / trade_date
     bundle.mkdir(parents=True, exist_ok=True)
@@ -873,7 +875,7 @@ def test_missing_signals_source_blocks(tmp_path: Path) -> None:
     assert plan["reason_code"] == "live_pilot_signals_source_missing"
 
 
-def test_nonpositive_cap_and_max_orders_rejected(tmp_path: Path) -> None:
+def test_nonpositive_cap_and_max_orders_rejected(orion_registry, tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path, signals=[{"ticker": "AAPL", "target_weight": 1.0, "sleeve": "sleeve_quality"}]
     )
@@ -883,7 +885,7 @@ def test_nonpositive_cap_and_max_orders_rejected(tmp_path: Path) -> None:
         _build(tmp_path, payload_path, prices={"AAPL": 100.0}, max_orders=0)
 
 
-def test_max_orders_above_one_is_accepted(tmp_path: Path) -> None:
+def test_max_orders_above_one_is_accepted(orion_registry, tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path,
         signals=[
@@ -898,7 +900,7 @@ def test_max_orders_above_one_is_accepted(tmp_path: Path) -> None:
     assert len(plan["target_portfolio"]) == 2
 
 
-def test_plan_files_written_and_executor_consumable_shape(tmp_path: Path) -> None:
+def test_plan_files_written_and_executor_consumable_shape(orion_registry, tmp_path: Path) -> None:
     payload_path = _bundle(
         tmp_path, signals=[{"ticker": "AAPL", "target_weight": 1.0, "sleeve": "sleeve_quality"}]
     )

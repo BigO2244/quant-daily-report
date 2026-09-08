@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from Tests.fixtures.orion_registry import orion_registry, orion_registry_payload, orion_manifest_payload
+
 import copy
 import datetime as dt
 import json
@@ -112,7 +114,7 @@ def _runtime_fixture(root: Path, trade_date: str = "2026-08-12") -> dict:
 
 
 def _copy_registry(tmp_path: Path) -> tuple[dict, Path]:
-    payload = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    payload = orion_registry_payload()
     path = tmp_path / "config" / "research" / "strategy_registry.json"
     _write_json(path, payload)
     return payload, path
@@ -125,22 +127,22 @@ def _by_id(payload: dict) -> dict[str, dict]:
 def test_canonical_registry_maps_every_named_and_functional_sleeve() -> None:
     registry = load_sleeve_control_registry()
 
-    assert len(registry.definitions) == 15
+    assert len(registry.definitions) == 16
     assert registry.functional_allocation_keys() == FUNCTIONAL_KEYS
-    assert [item.sleeve_id for item in registry.definitions if item.capital_eligible] == [
-        "caerus_orion"
+    assert sorted(item.sleeve_id for item in registry.definitions if item.capital_eligible) == [
+        "caerus_aquila", "caerus_orion"
     ]
-    assert [item.sleeve_id for item in registry.definitions if item.execution_eligible] == [
-        "caerus_orion"
+    assert sorted(item.sleeve_id for item in registry.definitions if item.execution_eligible) == [
+        "caerus_aquila", "caerus_orion"
     ]
     assert all(
         item.evaluation_only
         for item in registry.definitions
-        if item.sleeve_id != "caerus_orion"
+        if item.sleeve_id not in {"caerus_aquila", "caerus_orion"}
     )
 
 
-def test_dispatcher_emits_terminal_envelope_for_every_non_frozen_sleeve(
+def test_dispatcher_emits_terminal_envelope_for_every_non_frozen_sleeve(orion_registry,
     tmp_path: Path,
 ) -> None:
     snapshot = _runtime_fixture(tmp_path)
@@ -178,7 +180,7 @@ def test_dispatcher_emits_terminal_envelope_for_every_non_frozen_sleeve(
     assert envelopes["caerus_orion"]["universe"]["member_count"] == 2
 
 
-def test_prospective_freeze_metadata_does_not_change_orion_economics_or_decision_hash(
+def test_prospective_freeze_metadata_does_not_change_orion_economics_or_decision_hash(orion_registry,
     tmp_path: Path,
 ) -> None:
     payload, registry_path = _copy_registry(tmp_path)
@@ -255,7 +257,7 @@ def test_prospective_freeze_metadata_does_not_change_orion_economics_or_decision
     assert baseline_decision["content_hash"] == prospective_decision["content_hash"]
 
 
-def test_shadow_benchmark_stale_cache_is_explicitly_unavailable(tmp_path: Path) -> None:
+def test_shadow_benchmark_stale_cache_is_explicitly_unavailable(orion_registry, tmp_path: Path) -> None:
     snapshot = _runtime_fixture(tmp_path)
     performance_path = (
         tmp_path
@@ -280,7 +282,7 @@ def test_shadow_benchmark_stale_cache_is_explicitly_unavailable(tmp_path: Path) 
     assert "PRICE_CACHE_STALE" in benchmark["reason_codes"]
 
 
-def test_shadow_source_cannot_fall_back_beyond_prior_trading_day(tmp_path: Path) -> None:
+def test_shadow_source_cannot_fall_back_beyond_prior_trading_day(orion_registry, tmp_path: Path) -> None:
     snapshot = _runtime_fixture(tmp_path)
     current = (
         tmp_path
@@ -305,7 +307,7 @@ def test_shadow_source_cannot_fall_back_beyond_prior_trading_day(tmp_path: Path)
     assert "SOURCE_DEPENDENCY_BLOCKED" in lyra["reason_codes"]
 
 
-def test_missing_runner_is_visible_as_blocked_envelope(tmp_path: Path) -> None:
+def test_missing_runner_is_visible_as_blocked_envelope(orion_registry, tmp_path: Path) -> None:
     payload, path = _copy_registry(tmp_path)
     payload["sleeve_control_plane"]["strategy_overrides"]["caerus_phoenix"][
         "runner"
@@ -328,7 +330,7 @@ def test_missing_runner_is_visible_as_blocked_envelope(tmp_path: Path) -> None:
     assert result["summary"]["envelope_count"] == result["summary"]["expected_count"]
 
 
-def test_paper_authority_uses_prior_decision_eligible_snapshot_when_current_is_pending(
+def test_paper_authority_uses_prior_decision_eligible_snapshot_when_current_is_pending(orion_registry,
     tmp_path: Path,
 ) -> None:
     snapshot = _runtime_fixture(tmp_path)
@@ -369,7 +371,7 @@ def test_paper_authority_uses_prior_decision_eligible_snapshot_when_current_is_p
     )
 
 
-def test_frozen_sleeve_is_explicitly_excluded_with_reason(tmp_path: Path) -> None:
+def test_frozen_sleeve_is_explicitly_excluded_with_reason(orion_registry, tmp_path: Path) -> None:
     payload, path = _copy_registry(tmp_path)
     phoenix = payload["sleeve_control_plane"]["strategy_overrides"]["caerus_phoenix"]
     phoenix["frozen"] = True
@@ -395,7 +397,7 @@ def test_frozen_sleeve_is_explicitly_excluded_with_reason(tmp_path: Path) -> Non
     ]
 
 
-def test_unregistered_nonzero_allocatable_sleeve_fails_closed(tmp_path: Path) -> None:
+def test_unregistered_nonzero_allocatable_sleeve_fails_closed(orion_registry, tmp_path: Path) -> None:
     snapshot = _runtime_fixture(tmp_path)
     snapshot["sleeve_allocations"]["rogue_sleeve"] = 0.1
 
@@ -411,7 +413,7 @@ def test_unregistered_nonzero_allocatable_sleeve_fails_closed(tmp_path: Path) ->
         )
 
 
-def test_no_opportunity_is_distinct_from_failed_evaluation(tmp_path: Path) -> None:
+def test_no_opportunity_is_distinct_from_failed_evaluation(orion_registry, tmp_path: Path) -> None:
     snapshot = _runtime_fixture(tmp_path)
     snapshot["sleeve_allocations"].pop("sleeve_quality")
 
@@ -428,9 +430,9 @@ def test_no_opportunity_is_distinct_from_failed_evaluation(tmp_path: Path) -> No
     assert "RUNNER_EXCEPTION" in envelopes["sleeve_quality"]["reason_codes"]
 
 
-def test_registry_manifest_parity_corruption_fails_closed(tmp_path: Path) -> None:
+def test_registry_manifest_parity_corruption_fails_closed(orion_registry, tmp_path: Path) -> None:
     _, registry_path = _copy_registry(tmp_path)
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    manifest = orion_manifest_payload()
     polaris = next(
         item for item in manifest["sleeves"] if item["strategy_id"] == "caerus_polaris"
     )
@@ -446,7 +448,7 @@ def test_registry_manifest_parity_corruption_fails_closed(tmp_path: Path) -> Non
         )
 
 
-def test_partially_configured_second_capital_sleeve_is_registry_corruption(tmp_path: Path) -> None:
+def test_partially_configured_second_capital_sleeve_is_registry_corruption(orion_registry, tmp_path: Path) -> None:
     payload, path = _copy_registry(tmp_path)
     lyra = payload["sleeve_control_plane"]["strategy_overrides"]["caerus_lyra"]
     lyra["capital_eligible"] = True
@@ -456,7 +458,7 @@ def test_partially_configured_second_capital_sleeve_is_registry_corruption(tmp_p
         SleeveControlRegistry.from_path(path, enforce_manifest_parity=False)
 
 
-def test_governed_multi_sleeve_capital_configuration_needs_no_code_change(
+def test_governed_multi_sleeve_capital_configuration_needs_no_code_change(orion_registry,
     tmp_path: Path,
 ) -> None:
     payload, path = _copy_registry(tmp_path)
@@ -486,3 +488,22 @@ def test_governed_multi_sleeve_capital_configuration_needs_no_code_change(
     assert {
         item.sleeve_id for item in registry.definitions if item.capital_eligible
     } == {"caerus_orion", "caerus_lyra"}
+
+
+def test_aquila_control_plane_accepts_fresh_hold_and_rejects_prior_daily_source(orion_registry, tmp_path):
+    from types import SimpleNamespace
+    from core.aquila_monthly import build_aquila_source, AquilaContractError
+    from core.sleeve_control_plane import _run_shadow_snapshot
+    from Tests.test_aquila_monthly import hold_inputs
+
+    source = build_aquila_source(**hold_inputs())
+    path = tmp_path / "aquila_2026-09-08.json"
+    _write_json(path, source)
+    definition = SimpleNamespace(sleeve_id="caerus_aquila", source_artifact="aquila_{trade_date}.json", capital_eligible=True)
+    result = _run_shadow_snapshot(definition, "2026-09-08", {}, tmp_path)
+    assert result.status == "OK"
+    assert result.opportunity["decision_eligible"] is True
+    assert result.opportunity["effective_trade_date"] == "2026-09-08"
+    # Existing generic runner can discover a prior source, but Aquila rejects it.
+    with pytest.raises(AquilaContractError, match="freshness"):
+        _run_shadow_snapshot(definition, "2026-09-09", {}, tmp_path)

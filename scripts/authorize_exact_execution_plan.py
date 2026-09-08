@@ -74,6 +74,154 @@ _BROKER_AUTHORITATIVE_PRICE_BASES = {
 MAX_ADVERSE_FILL_SLIPPAGE_BPS = 100.0
 
 
+class PaperRiskVeto(RuntimeError):
+    """A governed risk hold, with enough evidence to explain its release rule."""
+
+    def __init__(self, event: RegimeAuthorityEvent):
+        super().__init__("emergency regime risk response vetoes new buy exposure")
+        self.details = {
+            "effective_state": event.effective_state,
+            "reason_code": event.reason_code,
+            "acute_risk": event.acute_risk,
+            "observations_in_state": event.bars_in_effective_state,
+            "minimum_dwell_observations": event.minimum_dwell_bars,
+            "confirmation_observations": event.consecutive_observations,
+            "required_confirmation_observations": event.confirmation_bars,
+            "confidence": event.confidence,
+            "required_confidence": event.confidence_threshold,
+            "event_hash": event.content_hash,
+            "release_rule": "Additional qualifying source observations; retries do not advance the cooldown",
+        }
+
+
+def _paper_regime_owner(control_registry: Any, capital_ids: list[str]) -> str:
+    """Keep account risk history when another capital sleeve is admitted."""
+    owner = str(control_registry.paper_capital_authority or "").strip()
+    if owner not in capital_ids:
+        raise RuntimeError("governed PAPER risk owner is not capital eligible")
+    return owner
+
+
+def _apply_aquila_quantity_authority(
+    *, request: Any, allocation: Mapping[str, Any] | None,
+    prices: Mapping[str, float], account_hash: str,
+    broker_positions: list[dict[str, Any]], repo_root: Path,
+) -> tuple[Any, dict[str, Any]]:
+    """Revalue held shares without making a daily allocation decision for them."""
+    contracts = (allocation or {}).get("quantity_contracts") or {}
+    if not contracts:
+        return request, {}
+    if set(contracts) != {"caerus_aquila"}:
+        raise RuntimeError("unsupported quantity-authority sleeve")
+    from core.aquila_monthly import validate_quantity_contract
+
+    contract = contracts["caerus_aquila"]
+    validate_quantity_contract(contract, trade_date=str(allocation.get("trade_date")))
+    ownership_path = Path(contract["ownership_snapshot_path"])
+    if not ownership_path.is_absolute():
+        ownership_path = repo_root / ownership_path
+    if _hash_file(ownership_path) != contract["ownership_snapshot_sha256"]:
+        raise RuntimeError("Aquila ownership snapshot file changed")
+    book = json.loads(ownership_path.read_text())
+    body = dict(book)
+    digest = body.pop("content_hash", None)
+    if digest != _canonical_hash(body) or digest != contract["ownership_snapshot_hash"]:
+        raise RuntimeError("Aquila ownership snapshot content changed")
+    if book.get("account_id_hash") != account_hash or not book.get("opening_contract_hash"):
+        raise RuntimeError("Aquila requires reconciled prospective account ownership")
+    if (book.get("reconciliation") or {}).get("status") != "PASS":
+        raise RuntimeError("Aquila ownership is unreconciled")
+    current: dict[str, dict[str, float]] = {}
+    for row in book.get("positions") or []:
+        symbol, owner = str(row["symbol"]), str(row["sleeve_id"])
+        quantity = _finite_float(row.get("quantity"))
+        if owner not in {"caerus_aquila", "caerus_orion"} or quantity is None or quantity < 0:
+            raise RuntimeError("Aquila opening book contains ungoverned ownership")
+        if owner in current.setdefault(symbol, {}):
+            raise RuntimeError("duplicate sleeve ownership row")
+        current[symbol][owner] = quantity
+    actual = {row["symbol"]: float(row["quantity"]) for row in broker_positions}
+    for symbol in set(actual) | set(current):
+        if abs(actual.get(symbol, 0) - sum(current.get(symbol, {}).values())) > 1e-6:
+            raise RuntimeError("fresh broker positions differ from Aquila ownership snapshot")
+    original = {str(row["ticker"]): float(row["target_weight"]) for _, row in request.targets.iterrows()}
+    allocation_weights = {str(row["symbol"]): float(row["target_weight"]) for row in allocation["targets"]}
+    if set(original) != set(allocation_weights) or any(
+        abs(original[s] - allocation_weights[s]) > 1e-9 for s in original
+    ):
+        raise RuntimeError("risk-adjusted Aquila quantities require a separately reconciled intervention")
+    nav = float(request.total_equity)
+    fixed = contract["sizing_mode"] == "FIXED_QUANTITY"
+    aq_quantities = {str(s): float(q) for s, q in contract["target_quantities"].items()}
+    if fixed:
+        for symbol in set(current) | set(aq_quantities):
+            if abs(current.get(symbol, {}).get("caerus_aquila", 0) - aq_quantities.get(symbol, 0)) > 1e-6:
+                raise RuntimeError("Aquila held quantities differ from current ownership")
+        aq_weight = sum(q * float(prices[s]) for s, q in aq_quantities.items()) / nav
+    else:
+        aq_weight = .5
+    residual = 1.0 - float(request.target_cash_weight) - aq_weight
+    if residual < 0:
+        raise RuntimeError("held Aquila exposure exceeds the available risk budget")
+    desired: dict[str, dict[str, float]] = {}
+    weights: dict[str, float] = {}
+    for row in allocation["targets"]:
+        symbol = str(row["symbol"])
+        price = _finite_float(prices.get(symbol))
+        if price is None or price <= 0:
+            raise RuntimeError("missing authoritative Aquila sizing price")
+        owners = desired.setdefault(symbol, {})
+        for contribution in row["sleeve_contributions"]:
+            owner = str(contribution["sleeve_id"])
+            if owner == "caerus_aquila":
+                quantity = aq_quantities[symbol] if fixed else nav * .05 / price
+                if fixed and abs(quantity - round(quantity, 6)) > 1e-12:
+                    raise RuntimeError("held Aquila shares exceed governed fractional precision")
+            elif owner == "caerus_orion":
+                quantity = nav * residual * float(contribution["sleeve_internal_weight"]) / price
+            else:
+                raise RuntimeError("unsupported Aquila co-owner")
+            owners[owner] = round(quantity, 6)
+        weights[symbol] = sum(owners.values()) * price / nav
+    demands = {}
+    for symbol in set(current) | set(desired):
+        delta = {owner: round(desired.get(symbol, {}).get(owner, 0) - current.get(symbol, {}).get(owner, 0), 6)
+                 for owner in {"caerus_aquila", "caerus_orion"}}
+        if any(q > 1e-6 for q in delta.values()) and any(q < -1e-6 for q in delta.values()):
+            raise RuntimeError("opposing sleeve demands require a receipt-bound internal ownership transfer")
+        demands[symbol] = delta
+    targets = request.targets.copy()
+    targets["target_weight"] = targets["ticker"].map(weights)
+    return dataclasses.replace(request, targets=targets), {
+        "schema_version": "caerus.aquila_authorized_quantities.v1",
+        "quantity_contract": contract,
+        "ownership_snapshot_sha256": contract["ownership_snapshot_sha256"],
+        "desired_quantities": desired,
+        "signed_sleeve_demands": demands,
+        "aquila_account_weight_at_decision": aq_weight,
+        "orion_account_weight_at_decision": residual,
+    }
+
+
+def _bind_quantity_demand_owners(rows: list[dict[str, Any]], evidence: Mapping[str, Any], allocation: Mapping[str, Any]) -> None:
+    if not evidence:
+        return
+    decisions = {r["sleeve_id"]: r for r in allocation["sleeve_allocations"]}
+    for row in rows:
+        symbol = str(row["symbol"])
+        direction = 1 if str(row["side"]).upper() == "BUY" else -1
+        demand = {owner: direction * quantity for owner, quantity in evidence["signed_sleeve_demands"].get(symbol, {}).items()
+                  if direction * quantity > 1e-6}
+        total = sum(demand.values())
+        if total <= 0 or float(row.get("quantity", row.get("shares", row.get("qty", 0)))) > total + 1e-6:
+            raise RuntimeError("exact order exceeds governed sleeve quantity demand")
+        row["sleeve_contributions"] = [
+            {"sleeve_id": owner, "allocation_fraction": quantity / total,
+             "decision_id": decisions[owner]["decision_id"], "decision_hash": decisions[owner]["decision_hash"]}
+            for owner, quantity in sorted(demand.items())
+        ]
+
+
 def _protective_day_limit_orders(
     rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -1353,6 +1501,73 @@ def authorize_exact_execution_plan(
         price_basis=price_basis,
         required_symbols=decision_symbols,
     )
+    quantity_repo_root = (
+        operating_lineage_paths["portfolio_allocation"][0].resolve().parents[3]
+        if "portfolio_allocation" in operating_lineage_paths else REPO_ROOT
+    )
+    risk_controls = governed_outer_controls
+    observed_regime, regime_confidence, acute_risk, market_state_id = (
+        _governed_regime_inputs(
+            plan=plan,
+            risk_controls=risk_controls,
+            risk_package_id=_risk.package_id,
+        )
+    )
+    # The broker snapshot intentionally exposes only the deterministic account
+    # hash; that stable identity is sufficient to isolate persistent authority
+    # without writing the raw broker account identifier to disk.
+    broker_account_id_hash = str(
+        (account or {}).get("account_id_hash") or ""
+    ).strip().lower()
+    if not broker_account_id_hash:
+        raise RuntimeError("fresh PAPER broker account identity is unavailable")
+    resolved_regime_state_root = regime_state_root or _regime_state_root(
+        plan_path=plan_path,
+        env=env,
+    )
+    regime_inputs = {
+        "account_scope": "PAPER",
+        "account_id": broker_account_id_hash,
+        "sleeve_id": _paper_regime_owner(control_registry, capital_ids),
+        "authorization_run_id": run_id,
+        "trade_date": str(plan.get("trade_date") or ""),
+        "recorded_at": effective_authorized_at,
+        "observed_state": observed_regime,
+        "confidence": regime_confidence,
+        "acute_risk": acute_risk,
+        "risk_package_id": _risk.package_id,
+        "risk_package_hash": _risk.content_hash,
+        "market_state_id": market_state_id,
+    }
+    prepared_regime = prepare_regime_authority(
+        resolved_regime_state_root,
+        **regime_inputs,
+    )
+    # Acute risk is durable immediately, before any possible buy authority.
+    # Normal observations remain prepared until main() publishes the immutable
+    # exact handoff and commits them before exposing its workflow pointer.
+    immediate_risk_authority = (
+        acute_risk or prepared_regime.event.to_decision().risk_veto_buys
+    )
+    regime_record = (
+        persist_regime_authority(resolved_regime_state_root, **regime_inputs)
+        if immediate_risk_authority
+        else prepared_regime
+    )
+    regime_decision = regime_record.event.to_decision()
+
+    request, quantity_authority = _apply_aquila_quantity_authority(
+        request=request, allocation=portfolio_allocation_payload,
+        prices=decision_prices,
+        account_hash=str((account or {}).get("account_id_hash") or ""),
+        broker_positions=_quantity_positions(snapshot), repo_root=quantity_repo_root,
+    )
+    if quantity_authority:
+        quantity_authority = {
+            **quantity_authority,
+            "approved_execution_package_hash": request.approved_execution_package["content_hash"],
+        }
+        request = dataclasses.replace(request, quantity_authority=quantity_authority)
     market_state_evidence = dict(market_state_evidence)
     market_state_evidence.pop("content_hash", None)
     market_state_evidence.update(
@@ -1457,6 +1672,12 @@ def authorize_exact_execution_plan(
     # its proof is sealed. PAPER affordability is checked explicitly below using
     # settled cash plus only this plan's sell proceeds and protective limit marks.
     exact_trade_frame = raw if governed_whole_share_target else executable
+    if quantity_authority:
+        from paper.paper_broker import _normalize_and_filter_executable_trades
+        # Preserve governed share intent while retaining the execution filter.
+        # Prove affordability below against only these limit-priced sells;
+        # the executor still waits for confirmed proceeds before any buys.
+        exact_trade_frame, filter_stats = _normalize_and_filter_executable_trades(raw, config.paper_config)
     if governed_whole_share_target:
         capital_budget = {
             **dict(capital_budget),
@@ -1470,6 +1691,7 @@ def authorize_exact_execution_plan(
     exact_rows = _protective_day_limit_orders(
         _core_rows_from_frame(exact_trade_frame, plan=plan)
     )
+    _bind_quantity_demand_owners(exact_rows, quantity_authority, portfolio_allocation_payload or {})
     for row in exact_rows:
         if plan.get("session_id"):
             row["session_id"] = str(plan["session_id"])
@@ -1481,8 +1703,8 @@ def authorize_exact_execution_plan(
     buys = [dict(row) for row in exact_rows if str(row.get("side")).upper() == "BUY"]
     if len(sells) + len(buys) != len(exact_rows):
         raise RuntimeError("exact planning produced unsupported order sides")
-    if governed_whole_share_target:
-        policy = whole_share_proof.get("policy")
+    if governed_whole_share_target or quantity_authority:
+        policy = whole_share_proof.get("policy") if governed_whole_share_target else governed_target_attainment_policy
         if not isinstance(policy, Mapping):
             raise RuntimeError("whole-share proof omits governed cash policy")
         minimum_cash_weight = _finite_float(policy.get("minimum_cash_weight"))
@@ -1501,6 +1723,8 @@ def authorize_exact_execution_plan(
             raise RuntimeError(
                 "governed whole-share buys exceed settled cash plus current-plan sells"
             )
+        if quantity_authority and buy_notional > paper_execution_spendable_cash * float(config.capital.buy_buffer_pct) + 0.01:
+            raise RuntimeError("Aquila buys exceed buffered settled cash plus current-plan limit sell proceeds")
         if buy_notional > float(cap) + 0.01:
             raise RuntimeError("governed whole-share buys exceed dynamic capital cap")
         capital_budget = {
@@ -1514,58 +1738,8 @@ def authorize_exact_execution_plan(
             "capital_constraint_triggered": False,
         }
 
-    risk_controls = governed_outer_controls
-    observed_regime, regime_confidence, acute_risk, market_state_id = (
-        _governed_regime_inputs(
-            plan=plan,
-            risk_controls=risk_controls,
-            risk_package_id=_risk.package_id,
-        )
-    )
-    # The broker snapshot intentionally exposes only the deterministic account
-    # hash; that stable identity is sufficient to isolate persistent authority
-    # without writing the raw broker account identifier to disk.
-    broker_account_id_hash = str(
-        (account or {}).get("account_id_hash") or ""
-    ).strip().lower()
-    if not broker_account_id_hash:
-        raise RuntimeError("fresh PAPER broker account identity is unavailable")
-    resolved_regime_state_root = regime_state_root or _regime_state_root(
-        plan_path=plan_path,
-        env=env,
-    )
-    regime_inputs = {
-        "account_scope": "PAPER",
-        "account_id": broker_account_id_hash,
-        "sleeve_id": expected_approved_sleeve,
-        "authorization_run_id": run_id,
-        "trade_date": str(plan.get("trade_date") or ""),
-        "recorded_at": effective_authorized_at,
-        "observed_state": observed_regime,
-        "confidence": regime_confidence,
-        "acute_risk": acute_risk,
-        "risk_package_id": _risk.package_id,
-        "risk_package_hash": _risk.content_hash,
-        "market_state_id": market_state_id,
-    }
-    prepared_regime = prepare_regime_authority(
-        resolved_regime_state_root,
-        **regime_inputs,
-    )
-    # Acute risk is durable immediately, before any possible buy authority.
-    # Normal observations remain prepared until main() publishes the immutable
-    # exact handoff and commits them before exposing its workflow pointer.
-    immediate_risk_authority = (
-        acute_risk or prepared_regime.event.to_decision().risk_veto_buys
-    )
-    regime_record = (
-        persist_regime_authority(resolved_regime_state_root, **regime_inputs)
-        if immediate_risk_authority
-        else prepared_regime
-    )
-    regime_decision = regime_record.event.to_decision()
     if regime_decision.risk_veto_buys and buys:
-        raise RuntimeError("emergency regime risk response vetoes new buy exposure")
+        raise PaperRiskVeto(regime_record.event)
 
     starting_positions = _quantity_positions(snapshot)
     expected_positions, expected_cash = _expected_state(
@@ -1768,6 +1942,8 @@ def authorize_exact_execution_plan(
         expected_posttrade_positions=expected_positions,
         expected_posttrade_cash=expected_cash,
         constraints={
+            "paper_regime_owner": _paper_regime_owner(control_registry, capital_ids),
+            **({"aquila_quantity_authority": quantity_authority} if quantity_authority else {}),
             "max_orders": max_orders,
             "capital_cap_usd": float(cap),
             "capital_cap_source": cap_source,
@@ -1994,12 +2170,15 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "status": "BLOCKED",
                     "reason_code": (
-                        "paper_exact_plan_authorization_transient_failed"
+                        "paper_regime_risk_hold"
+                        if isinstance(exc, PaperRiskVeto)
+                        else "paper_exact_plan_authorization_transient_failed"
                         if transient
                         else "paper_exact_plan_authorization_nonretryable_failed"
                     ),
                     "error": str(exc)[:1000],
                     "orders_submitted": 0,
+                    **({"risk_hold": exc.details} if isinstance(exc, PaperRiskVeto) else {}),
                 },
                 sort_keys=True,
             )

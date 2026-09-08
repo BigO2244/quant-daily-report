@@ -569,7 +569,8 @@ def build_exact_execution_plan(
     if validate_current_allocator:
         from core.sleeve_control_plane import load_sleeve_control_registry
 
-        allocation_policy = load_sleeve_control_registry().paper_allocation_policy
+        control_registry = load_sleeve_control_registry()
+        allocation_policy = control_registry.paper_allocation_policy
         governed_eligible = tuple(
             sorted(
                 str(value).strip().lower()
@@ -591,6 +592,14 @@ def build_exact_execution_plan(
         raise AuthorityContractError(
             "exact PAPER strategy identity differs from the governed allocator"
         )
+    # Account risk history has a stable owner across capital-sleeve additions.
+    # Bind it into the signed plan and check current governance at authorization.
+    risk_owner = str(constraints.get("paper_regime_owner") or normalized_strategy_id).strip()
+    if "paper_regime_owner" in constraints:
+        if risk_owner not in plan_eligible:
+            raise AuthorityContractError("exact PAPER regime owner is not capital eligible")
+        if validate_current_allocator and risk_owner != control_registry.paper_capital_authority:
+            raise AuthorityContractError("exact PAPER regime owner differs from governed authority")
     starting = _position_rows(starting_positions, "starting_positions")
     expected = _position_rows(expected_posttrade_positions, "expected_posttrade_positions")
     cash = _finite(starting_cash, "starting_cash", minimum=0.0)
@@ -978,7 +987,7 @@ def exact_execution_plan_from_dict(
         if (
             event.account_scope != rebuilt.account_scope
             or event.account_id != rebuilt.account_id_hash
-            or event.sleeve_id != rebuilt.strategy_id
+            or event.sleeve_id != str(rebuilt.constraints.get("paper_regime_owner") or rebuilt.strategy_id)
             or event.trade_date != rebuilt.trade_date
         ):
             raise AuthorityContractError(

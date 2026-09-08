@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from Tests.fixtures.orion_registry import orion_registry
+
 import datetime as dt
 import json
 from pathlib import Path
@@ -19,7 +21,7 @@ from zoneinfo import ZoneInfo
 ET = ZoneInfo("America/New_York")
 
 
-def test_write_and_load_precompute_bundle(tmp_path: Path, monkeypatch) -> None:
+def test_write_and_load_precompute_bundle(orion_registry, tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     trade_date = "2026-03-17"
     contract_path = write_precompute_bundle(
@@ -90,7 +92,7 @@ def test_validate_precompute_contract_missing() -> None:
     assert reason == REASON_PRECOMPUTE_MISSING
 
 
-def test_nonfinite_execution_trade_writes_strict_json_and_invalid_contract(
+def test_nonfinite_execution_trade_writes_strict_json_and_invalid_contract(orion_registry,
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -211,3 +213,24 @@ def test_timing_classification_degraded_late() -> None:
         first_submit_et=dt.datetime(2026, 3, 17, 9, 40, tzinfo=ET),
     )
     assert timing["timing_status"] == "degraded_late"
+
+
+def test_aquila_producer_runs_before_sleeve_dispatch(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import core.sleeve_control_plane as control
+    import scripts.build_aquila_daily_source as producer
+    import pytest
+
+    monkeypatch.chdir(tmp_path)
+    events = []
+    registry = SimpleNamespace(definitions=[SimpleNamespace(sleeve_id="caerus_aquila", capital_eligible=True)],
+                               validate_allocations_registered=lambda snapshot: None)
+    monkeypatch.setattr(control, "load_sleeve_control_registry", lambda: registry)
+    monkeypatch.setattr(producer, "build_daily_source", lambda **kwargs: events.append("producer"))
+    def dispatch(**kwargs):
+        events.append("dispatch")
+        raise RuntimeError("end fixture")
+    monkeypatch.setattr(control, "write_all_sleeve_evaluation", dispatch)
+    with pytest.raises(RuntimeError, match="end fixture"):
+        write_precompute_bundle(trade_date="2026-09-08", run_id="test", mode="PAPER", daily_snapshot={}, signals_payload={}, execution_payload={})
+    assert events == ["producer", "dispatch"]

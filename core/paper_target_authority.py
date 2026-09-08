@@ -306,6 +306,15 @@ def seal_paper_target_bundle(
             raise PaperTargetAuthorityError(
                 f"capital sleeve source date mismatch: {sleeve_id}"
             )
+        if sleeve_id == "caerus_aquila":
+            from core.aquila_monthly import validate_quantity_contract
+            quantity_contract = source_payload.get("quantity_contract") or {}
+            validate_quantity_contract(quantity_contract, trade_date=trade_date)
+            ownership_path = _resolve_repo_path(repo_root, quantity_contract["ownership_snapshot_path"])
+            if not ownership_path.is_file() or _file_hash(ownership_path) != quantity_contract["ownership_snapshot_sha256"]:
+                raise PaperTargetAuthorityError("Aquila ownership source file hash mismatch")
+            if effective_date != trade_date:
+                raise PaperTargetAuthorityError("Aquila hold source must be same-session")
         decision_lineage: dict[str, Any] | None = None
         prior_decision_lineage: dict[str, Any] | None = None
         if sleeve_id == "caerus_orion":
@@ -458,6 +467,17 @@ def seal_paper_target_bundle(
             "freshness_status": "GOVERNED_PRIOR_LINEAGE",
         }
     )
+    for capital_source in capital_sources:
+        if capital_source["sleeve_id"] == "caerus_aquila":
+            aquila_source = _read_object(capital_source["path"])
+            quantity_contract = aquila_source["quantity_contract"]
+            session_inputs.append({
+                "name": "aquila_ownership_snapshot",
+                "path": quantity_contract["ownership_snapshot_path"],
+                "sha256": quantity_contract["ownership_snapshot_sha256"],
+                "required": True, "as_of": trade_date,
+                "freshness_status": "RECONCILED_SAME_SESSION",
+            })
     observed_sources: set[str] = set()
     for candidate_envelope in sleeve_payload.get("envelopes") or []:
         if not isinstance(candidate_envelope, Mapping):
@@ -697,6 +717,8 @@ def seal_paper_target_bundle(
     }
 
     target_path = bundle_dir / "paper_target_package.json"
+    if allocation.get("quantity_contracts"):
+        target_package["quantity_contracts"] = allocation["quantity_contracts"]
     target_path.write_text(_pretty_json(target_package), encoding="utf-8")
     target_package_hash = _file_hash(target_path)
     signals_payload = {
@@ -1053,6 +1075,8 @@ def validate_sealed_paper_target_bundle(
             session = _read_object(bundle_dir / str(files["session_manifest"]))
             decisions = _read_object(bundle_dir / str(files["sleeve_decisions"]))
             allocation = _read_object(bundle_dir / str(files["portfolio_allocation"]))
+            if package.get("quantity_contracts") != allocation.get("quantity_contracts"):
+                failures.append("paper_target:quantity_contract_mismatch")
             audit_manifest = _read_object(bundle_dir / str(files["audit_manifest"]))
             if session.get("schema_version") != SESSION_SCHEMA:
                 failures.append("paper_target:session_manifest_schema")

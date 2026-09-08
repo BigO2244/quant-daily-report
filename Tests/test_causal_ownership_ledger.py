@@ -223,3 +223,180 @@ def test_causal_fill_history_is_immutable(tmp_path: Path) -> None:
     _write_jsonl(ledger / "causal_fills.jsonl", rows)
     with pytest.raises(CausalOwnershipError, match="append-only causal fill changed"):
         build_causal_ownership(ledger_dir=ledger, exact_plan_paths=[plan])
+
+
+def _wrap_plan(path: Path) -> Path:
+    plan = json.loads(path.read_text())
+    plan['trade_date'] = '2026-08-14'
+    plan.pop('content_hash')
+    plan['content_hash'] = _hash(plan)
+    path.write_text(json.dumps(plan))
+    handoff = path.parent / 'handoff.json'
+    handoff.write_text(json.dumps({
+        'schema_version': 'caerus.authorized_execution_handoff.v1',
+        'execution_lane': 'paper', 'exact_execution_plan': plan,
+        'exact_execution_plan_id': plan['plan_id'],
+        'exact_execution_plan_hash': plan['content_hash'],
+    }))
+    pointer = path.parent / 'pointer.json'
+    pointer.write_text(json.dumps({
+        'schema_version': 'caerus.exact_execution_plan_pointer.v1',
+        'json_path': 'handoff.json', 'plan_id': plan['plan_id'],
+        'plan_hash': plan['content_hash'], 'trade_date': plan['trade_date'],
+    }))
+    return pointer
+
+
+def test_raw_pointer_handoff_deduplicate(tmp_path: Path) -> None:
+    from core.causal_ownership_ledger import _exact_order_index
+    _, plan = _fixture(tmp_path)
+    pointer = _wrap_plan(plan)
+    raw = _exact_order_index([plan], plan.parent)
+    assert _exact_order_index([pointer], plan.parent) == raw
+    assert _exact_order_index([plan, pointer, plan.parent / 'handoff.json'], plan.parent) == raw
+
+
+@pytest.mark.parametrize('mutation', ['escape', 'hash', 'id', 'handoff_hash', 'nested_hash'])
+def test_pointer_tamper_fails(tmp_path: Path, mutation: str) -> None:
+    from core.causal_ownership_ledger import _exact_order_index
+    _, plan = _fixture(tmp_path)
+    pointer = _wrap_plan(plan)
+    value = json.loads(pointer.read_text())
+    if mutation == 'escape':
+        value['json_path'] = '../outside.json'
+    elif mutation == 'hash':
+        value['plan_hash'] = '0' * 64
+    elif mutation == 'id':
+        value['plan_id'] = 'wrong'
+    else:
+        handoff = plan.parent / 'handoff.json'
+        payload = json.loads(handoff.read_text())
+        if mutation == 'handoff_hash':
+            payload['exact_execution_plan_hash'] = '0' * 64
+        else:
+            payload['exact_execution_plan']['created_at'] = '2026-01-01T00:00:00Z'
+        handoff.write_text(json.dumps(payload))
+    pointer.write_text(json.dumps(value))
+    with pytest.raises(CausalOwnershipError):
+        _exact_order_index([pointer], plan.parent)
+
+
+def _cutover_fixture(tmp_path: Path) -> tuple[Path, Path, bytes]:
+    ledger, plan = _fixture(tmp_path)
+    # Reproduce the deployed historical reader: all old fills are immutable legacy.
+    build_causal_ownership(ledger_dir=ledger, exact_plan_paths=[])
+    history = (ledger / 'causal_fills.jsonl').read_bytes()
+    account = json.loads((ledger / 'account_snapshots.jsonl').read_text())
+    account['account_id_hash'] = 'a' * 64
+    _write_jsonl(ledger / 'account_snapshots.jsonl', [account])
+    positions = json.loads((ledger / 'positions_latest.json').read_text())
+    contract = {
+        'schema_version': 'caerus.ownership_cutover.v1', 'account_scope': 'PAPER',
+        'account_id_hash': 'a' * 64, 'effective_at': positions['pulled_at_utc'],
+        'history_prefix_bytes': len(history), 'history_sha256': hashlib.sha256(history).hexdigest(),
+        'history_fill_count': len(history.splitlines()),
+        'opening_positions_snapshot': positions, 'positions_snapshot_hash': _hash(positions),
+        'opening_account_snapshot': account, 'account_snapshot_hash': _hash(account),
+        'opening_book': [{'symbol': 'AAPL', 'sleeve_id': 'caerus_orion', 'quantity': 8},
+                         {'symbol': 'AAPL', 'sleeve_id': 'caerus_aquila', 'quantity': 4}],
+    }
+    contract['content_hash'] = _hash(contract)
+    (ledger / 'ownership_cutover.json').write_text(json.dumps(contract))
+    return ledger, plan, history
+
+
+def test_prospective_cutover_preserves_history_and_is_idempotent(tmp_path: Path) -> None:
+    ledger, plan, history = _cutover_fixture(tmp_path)
+    for _ in range(2):
+        result = build_causal_ownership(ledger_dir=ledger, exact_plan_paths=[plan])
+        assert result['new_causal_fill_rows'] == 0
+        assert (ledger / 'causal_fills.jsonl').read_bytes() == history
+    owners = json.loads((ledger / 'ownership_latest.json').read_text())['positions']
+    assert {r['sleeve_id']: r['quantity'] for r in owners} == {'caerus_orion': 8, 'caerus_aquila': 4}
+
+
+def test_cutover_history_tamper_fails(tmp_path: Path) -> None:
+    ledger, plan, _ = _cutover_fixture(tmp_path)
+    path = ledger / 'causal_fills.jsonl'
+    path.write_bytes(path.read_bytes().replace(b'legacy-buy', b'legacy-bad'))
+    with pytest.raises(CausalOwnershipError, match='history hash mismatch'):
+        build_causal_ownership(ledger_dir=ledger, exact_plan_paths=[plan])
+
+
+def test_explicit_sell_consumes_only_contributing_owner() -> None:
+    from core.causal_ownership_ledger import _consume_contributors
+    book = {'AAPL': {'caerus_orion': 8., 'caerus_aquila': 4.}}
+    _consume_contributors(book, 'AAPL', 8, [{'sleeve_id': 'caerus_orion', 'allocation_fraction': 1.}])
+    assert book == {'AAPL': {'caerus_orion': 0., 'caerus_aquila': 4.}}
+    with pytest.raises(CausalOwnershipError, match='contributing owner inventory'):
+        _consume_contributors(book, 'AAPL', 1, [{'sleeve_id': 'caerus_orion', 'allocation_fraction': 1.}])
+
+
+@pytest.mark.parametrize('matched', [True, False])
+def test_prospective_forward_sell_and_unknown_fill(tmp_path: Path, matched: bool) -> None:
+    ledger, old_plan, history = _cutover_fixture(tmp_path)
+    with (ledger / 'fills.csv').open(newline='') as handle:
+        reader = csv.DictReader(handle)
+        fields, rows = reader.fieldnames, list(reader)
+    row = dict(rows[-1], activity_id='forward-sell', transaction_time_utc='2026-08-15T14:00:00Z',
+               side='sell', qty='8', price='102', notional='816', order_id='forward-order')
+    with (ledger / 'fills.csv').open('w', newline='') as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows + [row])
+    with (ledger / 'orders.jsonl').open('a') as handle:
+        handle.write(json.dumps({'id': 'forward-order', 'client_order_id': 'forward-client' if matched else 'unknown'}) + '\n')
+    plan = {
+        'schema_version': 'caerus.execution_plan.v3', 'plan_id': 'forward-plan',
+        'account_scope': 'PAPER', 'account_id_hash': 'a' * 64,
+        'created_at': '2026-08-15T13:35:00Z', 'buy_orders': [],
+        'sell_orders': [{'symbol': 'AAPL', 'side': 'SELL', 'client_order_id': 'forward-client',
+                         'allocation_id': 'allocation:forward', 'session_id': 'session:forward',
+                         'sleeve_contributions': [{'sleeve_id': 'caerus_orion', 'allocation_fraction': 1}]}],
+    }
+    plan['content_hash'] = _hash(plan)
+    forward = old_plan.parent / 'forward.json'
+    forward.write_text(json.dumps(plan))
+    positions = json.loads((ledger / 'positions_latest.json').read_text())
+    positions['pulled_at_utc'] = '2026-08-15T23:15:00Z'
+    positions['positions'][0].update(qty='4', market_value='408')
+    (ledger / 'positions_latest.json').write_text(json.dumps(positions))
+    with (ledger / 'account_snapshots.jsonl').open('a') as handle:
+        handle.write(json.dumps({'pulled_at_utc': positions['pulled_at_utc'], 'account_id_hash': 'a' * 64,
+                                 'equity': '1424', 'cash': '1016'}) + '\n')
+    if not matched:
+        with pytest.raises(CausalOwnershipError, match='lack exact-plan lineage'):
+            build_causal_ownership(ledger_dir=ledger, exact_plan_paths=[old_plan, forward])
+        assert (ledger / 'causal_fills.jsonl').read_bytes() == history
+        return
+    for _ in range(2):
+        build_causal_ownership(ledger_dir=ledger, exact_plan_paths=[old_plan, forward])
+    assert (ledger / 'causal_fills.jsonl').read_bytes().startswith(history)
+    owners = json.loads((ledger / 'ownership_latest.json').read_text())['positions']
+    assert owners == [{'symbol': 'AAPL', 'sleeve_id': 'caerus_aquila', 'quantity': 4.0}]
+
+
+def test_conflicting_client_id_fails(tmp_path: Path) -> None:
+    from core.causal_ownership_ledger import _exact_order_index
+    _, path = _fixture(tmp_path)
+    plan = json.loads(path.read_text())
+    plan.pop('content_hash')
+    plan['plan_id'] = 'other-plan'
+    plan['content_hash'] = _hash(plan)
+    other = path.parent / 'other.json'
+    other.write_text(json.dumps(plan))
+    with pytest.raises(CausalOwnershipError, match='conflicting exact plans'):
+        _exact_order_index([path, other], path.parent)
+
+
+def test_applied_cutover_cannot_be_reassigned(tmp_path: Path) -> None:
+    ledger, plan, _ = _cutover_fixture(tmp_path)
+    build_causal_ownership(ledger_dir=ledger, exact_plan_paths=[plan])
+    path = ledger / 'ownership_cutover.json'
+    contract = json.loads(path.read_text())
+    contract.pop('content_hash')
+    contract['opening_book'][0]['sleeve_id'] = 'other_sleeve'
+    contract['content_hash'] = _hash(contract)
+    path.write_text(json.dumps(contract))
+    with pytest.raises(CausalOwnershipError, match='previously applied cutover'):
+        build_causal_ownership(ledger_dir=ledger, exact_plan_paths=[plan])

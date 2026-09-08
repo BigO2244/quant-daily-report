@@ -1,11 +1,14 @@
 # Alpha Stack
 
+> **Aquila owner decision — 2026-09-08.** Brett authorized activation of Caerus Aquila in the existing Alpaca PAPER account at 50%. This revision configures an experimental TOP10_EQUAL monthly sleeve: 50% Aquila,45% Orion,5% cash at formation; Aquila shares remain fixed between formations. Orion retains the account risk-history identity. Deployment receipts determine runtime activation, and the existing emergency cooldown still controls buying. This authorization does not establish alpha or change Lyra Live. See `docs/governance/AQUILA_PAPER.md` for the contract.
+
+
 > **Operating evidence override — reviewed 2026-09-05.** [Current maintenance and research plan](../atlas/docs/operations/caerus_data_first_rebuild_plan_20260902.md) governs priorities. Lyra's new submissions were paused September 2; existing positions and Shadow were preserved. Orion retains PAPER authority but September 3 failed reconciliation and September 4 blocked before submission; email escalation failed with SMTP 535. Reconciled account balances do not prove recovery or sleeve-only performance. Maintain fail-closed controls; no tuning, order, deployment or risk change is authorized by cleanup. Broader research is paused; MES is the sole candidate and has zero economic observations. Older active-state and priority prose below cannot override these dated receipts. This local documentation update does not change deployed runtime.
 
 
 Alpha Stack is the Caerus quantitative trading platform for US long-only equities plus a gated options overlay. The current operating reality is:
 - Live: Caerus Lyra — active, funded, recurring Tuesday rebalance
-- Paper: Caerus Orion — active, full-current-account PAPER lane
+- Paper: Caerus Orion and Caerus Aquila — shared account, monthly 50/45/5 target
 - Shadow: Polaris, Orion, Lyra, and concentration comparisons
 - new strategy variants are validated through research and shadow lanes first
 - promotion stays explicit: `research -> backtest -> shadow -> paper -> live`

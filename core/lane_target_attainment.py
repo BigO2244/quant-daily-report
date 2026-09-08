@@ -18,6 +18,113 @@ def _number(value: Any) -> float | None:
     return out if math.isfinite(out) else None
 
 
+def _aquila_attainment_authority(*, plan: Mapping[str, Any], package_payload: Mapping[str, Any],
+                                 account: Mapping[str, Any], actual_quantities: Mapping[str, float],
+                                 actual_values: Mapping[str, float], equity: float,
+                                 trade_date: str, mode: str) -> dict[str, Any]:
+    """Verify exact-order ownership arithmetic independently of target weights."""
+    from authority.exact_plan import exact_execution_plan_from_dict
+    from authority.pipeline import execution_package_from_dict
+    from core.aquila_monthly import validate_quantity_contract
+
+    exact = exact_execution_plan_from_dict(plan["exact_execution_plan"], expected_account_scope="PAPER")
+    package = execution_package_from_dict(package_payload)
+    if str(mode).upper() != "PAPER" or exact.trade_date != trade_date or package.trade_date != trade_date:
+        raise ValueError("Aquila attainment lane/date mismatch")
+    if plan.get("exact_execution_plan_id") != exact.plan_id or plan.get("exact_execution_plan_hash") != exact.content_hash:
+        raise ValueError("Aquila exact-plan handoff identity mismatch")
+    if account.get("account_id_hash") != exact.account_id_hash:
+        raise ValueError("Aquila posttrade account identity mismatch")
+    # The verified exact object freezes nested maps; hash the canonical plain
+    # representation rather than passing mappingproxy values to JSON.
+    qa = exact.to_dict()["constraints"]["aquila_quantity_authority"]
+    if qa.get("approved_execution_package_hash") != package.content_hash:
+        raise ValueError("Aquila exact plan does not bind approved package")
+    contract = qa["quantity_contract"]
+    validate_quantity_contract(contract, trade_date=trade_date)
+    if equity <= 0:
+        raise ValueError("Aquila posttrade equity invalid")
+    fixed = contract["sizing_mode"] == "FIXED_QUANTITY"
+    desired = {s: dict(owners) for s, owners in qa["desired_quantities"].items()}
+    demands = qa["signed_sleeve_demands"]
+    original_owners: dict[str, dict[str, float]] = {}
+    for symbol in set(desired) | set(demands):
+        original_owners[symbol] = {}
+        for owner in set(desired.get(symbol, {})) | set(demands.get(symbol, {})):
+            if owner not in {"caerus_aquila", "caerus_orion"}:
+                raise ValueError("ungoverned Aquila owner")
+            wanted = _number(desired.get(symbol, {}).get(owner, 0))
+            delta = _number(demands.get(symbol, {}).get(owner, 0))
+            if wanted is None or delta is None or wanted < 0 or wanted - delta < -1e-6:
+                raise ValueError("invalid Aquila signed ownership demand")
+            original_owners[symbol][owner] = wanted - delta
+    starting = {r["symbol"]: float(r["quantity"]) for r in exact.starting_positions}
+    for symbol in set(starting) | set(original_owners):
+        if abs(sum(original_owners.get(symbol, {}).values()) - starting.get(symbol, 0)) > 1e-6:
+            raise ValueError("Aquila opening shares differ from exact account")
+    attained = {s: dict(owners) for s, owners in original_owners.items()}
+    for order in exact.orders:
+        symbol = str(order["symbol"])
+        direction = 1 if order["side"] == "BUY" else -1
+        contributions = order.get("sleeve_contributions") or []
+        if not contributions or abs(sum(float(c["allocation_fraction"]) for c in contributions) - 1) > 1e-9:
+            raise ValueError("exact Aquila order lacks complete owner attribution")
+        for contribution in contributions:
+            owner = contribution["sleeve_id"]
+            fraction = float(contribution["allocation_fraction"])
+            if owner not in {"caerus_aquila", "caerus_orion"} or not 0 <= fraction <= 1:
+                raise ValueError("invalid exact Aquila fill owner")
+            owners = attained.setdefault(symbol, {})
+            owners[owner] = owners.get(owner, 0) + direction * float(order["quantity"]) * fraction
+            if owners[owner] < -1e-6:
+                raise ValueError("exact sell consumes another sleeve's shares")
+    expected = {r["symbol"]: float(r["quantity"]) for r in exact.expected_posttrade_positions}
+    mismatches = []
+    for symbol in set(expected) | set(attained) | set(actual_quantities):
+        reconstructed = sum(attained.get(symbol, {}).values())
+        if abs(reconstructed - expected.get(symbol, 0)) > 1e-6:
+            raise ValueError("exact posttrade quantities differ from owner arithmetic")
+        if abs(float(actual_quantities.get(symbol, 0)) - expected.get(symbol, 0)) > 1e-6:
+            mismatches.append(symbol)
+    if fixed:
+        held = contract["target_quantities"]
+        for symbol in set(attained) | set(original_owners) | set(held):
+            quantity = float(held.get(symbol, 0))
+            if abs(original_owners.get(symbol, {}).get("caerus_aquila", 0) - quantity) > 1e-6 or abs(attained.get(symbol, {}).get("caerus_aquila", 0) - quantity) > 1e-6:
+                raise ValueError("exact orders change protected Aquila shares")
+    aq_symbols = set()
+    for row in package.approved_target_rows:
+        contributions = row.get("sleeve_contributions") or []
+        if abs(sum(float(c.get("target_weight", -1)) for c in contributions) - float(row["target_weight"])) > 1e-9:
+            raise ValueError("risk-approved Aquila weights differ from sealed contributions")
+        for c in contributions:
+            if c.get("sleeve_id") == "caerus_aquila":
+                if c.get("quantity_contract_hash") != contract["content_hash"]:
+                    raise ValueError("approved package formation hash mismatch")
+                aq_symbols.add(row["symbol"])
+    if aq_symbols != set(contract["target_quantities"]):
+        raise ValueError("approved package omits Aquila formation")
+    target = {}
+    owner_drifts = []
+    for symbol, owners in desired.items():
+        qty = float(actual_quantities.get(symbol, 0))
+        if qty <= 0 or symbol not in actual_values:
+            raise ValueError("posttrade marks missing for Aquila quantity target")
+        price = float(actual_values[symbol]) / qty
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError("invalid posttrade mark")
+        target[symbol] = sum(float(q) for q in owners.values()) * price / equity
+        for owner in {"caerus_aquila", "caerus_orion"}:
+            drift = (attained.get(symbol, {}).get(owner, 0) - float(owners.get(owner, 0))) * price / equity
+            owner_drifts.append(dict(symbol=symbol, sleeve_id=owner, weight_drift=drift))
+    return dict(target_weights=target, exact_plan_hash=exact.content_hash,
+                approved_execution_package_hash=package.content_hash,
+                protected_aquila_shares_verified=fixed,
+                exact_posttrade_quantities_verified=not mismatches,
+                quantity_mismatch_symbols=sorted(mismatches), sleeve_drifts=owner_drifts,
+                max_absolute_sleeve_weight_drift=max((abs(r["weight_drift"]) for r in owner_drifts), default=0.0))
+
+
 def build_lane_target_attainment(
     *,
     plan: Mapping[str, Any],
@@ -78,7 +185,7 @@ def build_lane_target_attainment(
         quantity = _number(
             row.get("qty")
             if row.get("qty") is not None
-            else row.get("shares")
+            else row.get("shares") if row.get("shares") is not None else row.get("quantity")
         )
         if symbol and quantity is not None:
             actual_quantities[symbol] = actual_quantities.get(symbol, 0.0) + quantity
@@ -93,6 +200,23 @@ def build_lane_target_attainment(
         if cash is not None and equity is not None and equity > 0.0
         else None
     )
+    quantity_evidence = None
+    quantity_error = None
+    exact_payload = plan.get("exact_execution_plan") or {}
+    has_quantity_authority = bool((exact_payload.get("constraints") or {}).get("aquila_quantity_authority")) or any(
+        c.get("sleeve_id") == "caerus_aquila"
+        for row in target_rows if isinstance(row, Mapping)
+        for c in row.get("sleeve_contributions") or []
+    )
+    if has_quantity_authority:
+        try:
+            quantity_evidence = _aquila_attainment_authority(
+                plan=plan, package_payload=package_payload, account=account,
+                actual_quantities=actual_quantities, actual_values=actual_values,
+                equity=float(equity or 0), trade_date=trade_date, mode=mode)
+            target = dict(quantity_evidence["target_weights"])
+        except Exception as exc:
+            quantity_error = str(exc)
     symbols = sorted(set(target).union(actual))
     rows = [
         {
@@ -298,6 +422,12 @@ def build_lane_target_attainment(
     fractional_target_verified = bool(
         fractional_policy
         and policy_error is None
+        and quantity_error is None
+        and (not has_quantity_authority or (
+            quantity_evidence is not None
+            and quantity_evidence["exact_posttrade_quantities_verified"]
+            and quantity_evidence["max_absolute_sleeve_weight_drift"] <= effective_drift_tolerance
+        ))
         and not unapproved_symbols
         and actual_cash is not None
         and cash_floor is not None
@@ -313,6 +443,12 @@ def build_lane_target_attainment(
     elif equity is None or cash is None:
         status = "UNKNOWN_INSUFFICIENT_BROKER_SNAPSHOT"
         reason = "posttrade_equity_or_cash_missing"
+    elif quantity_error:
+        status = "FAIL_QUANTITY_AUTHORITY_INVALID"
+        reason = f"aquila_quantity_authority_invalid:{quantity_error}"
+    elif has_quantity_authority and not fractional_policy:
+        status = "FAIL_POLICY_INVALID"
+        reason = "aquila_quantity_attainment_requires_fractional_policy"
     elif policy_error:
         status = "FAIL_POLICY_INVALID"
         reason = f"target_attainment_policy_invalid:{policy_error}"
@@ -386,6 +522,8 @@ def build_lane_target_attainment(
         "nearest_feasible_verified": nearest_feasible_verified,
         "fractional_target_verified": fractional_target_verified,
         "quantity_mismatches": quantity_mismatches,
+        "aquila_quantity_attainment": quantity_evidence,
+        "aquila_quantity_authority_error": quantity_error,
         "unapproved_symbols": unapproved_symbols,
         "source_artifacts": {
             "plan": "source plan passed to unified lane executor",

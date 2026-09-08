@@ -1,6 +1,6 @@
 {
   "schema_version": "caerus_sleeve_manifest_v1",
-  "manifest_version": "2026-08-12-control-plane-parity-v1",
+  "manifest_version": "2026-09-08-aquila-paper-v1",
   "governance_fr": "FR-069",
   "phase": "Phase B",
   "research_only": true,
@@ -188,6 +188,70 @@
         "Decision-grade PIT evidence.",
         "Material differentiation from Polaris and Lyra.",
         "Owner approval before promotion, retirement, rename, or allocation changes."
+      ],
+      "retirement_policy": "No retirement decision is allowed in Phase B; future retirement requires owner-approved evidence threshold.",
+      "mcp_visibility": "visible_read_only",
+      "implementation_status": "existing_paper_reference",
+      "behavior_change_allowed": false
+    },
+    {
+      "sleeve_id": "aquila",
+      "strategy_id": "caerus_aquila",
+      "display_name": "Caerus Aquila",
+      "status": "current_paper_authority",
+      "lifecycle_stage": "paper_observed",
+      "strategy_registry_status": "paper",
+      "control_plane_frozen": false,
+      "sleeve_type": "security_selection",
+      "family": "reference",
+      "thesis": "Experimental PAPER tracking of ten largest S&P500 companies, equal weight monthly. Proxy research has not established statistically reliable incremental alpha.",
+      "intended_market_environment": "Prospective evidence across market regimes; no favorable regime assumed.",
+      "universe_policy": {
+        "universe_family": "sp500_company_market_cap",
+        "universe_method_required": "prospective_membership_and_market_cap_capture",
+        "point_in_time_required": true,
+        "legacy_current_universe_allowed_for_decision": false
+      },
+      "rebalance_cadence": "Monthly equal-weight formation; actual reconciled shares held between formations.",
+      "holding_count_policy": "Ten unique issuers by prospective market cap; one execution share class each.",
+      "risk_profile": "Concentrated large-cap equity exposure; account risk gates and5%cash apply.",
+      "benchmark_policy": {
+        "primary_benchmark": "SPY",
+        "comparison_required": true
+      },
+      "artifact_requirements": {
+        "required_fields": [
+          "schema_version",
+          "sleeve_id",
+          "strategy_id",
+          "lifecycle_status",
+          "universe_family",
+          "universe_method",
+          "universe_snapshot_hash",
+          "price_source",
+          "benchmark",
+          "window",
+          "holdout_excluded",
+          "metrics",
+          "holdings",
+          "attribution",
+          "reason_codes",
+          "governance_label",
+          "execution_impact"
+        ],
+        "required_artifacts": [
+          "pit_rebaseline",
+          "correlation_analysis",
+          "return_risk_drawdown",
+          "turnover_concentration",
+          "regime_decomposition",
+          "differentiation_packet"
+        ]
+      },
+      "promotion_requirements": [
+        "No automatic promotion or scale-up.",
+        "Separate return, sector and factor comparisons; include costs and negative results.",
+        "Owner approval and decision-grade evidence before any Live use."
       ],
       "retirement_policy": "No retirement decision is allowed in Phase B; future retirement requires owner-approved evidence threshold.",
       "mcp_visibility": "visible_read_only",

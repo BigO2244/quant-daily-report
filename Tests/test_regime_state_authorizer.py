@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from Tests.fixtures.orion_registry import orion_registry
+
 import json
 from pathlib import Path
 
@@ -15,6 +17,8 @@ from core.regime_state_store import (
     load_regime_history,
 )
 from scripts.authorize_exact_execution_plan import (
+    PaperRiskVeto,
+    _paper_regime_owner,
     authorize_exact_execution_plan,
     finalize_regime_committed_handoff,
     main as authorize_main,
@@ -80,7 +84,7 @@ def _commit_result(state_root: Path, result: dict) -> RegimePersistenceResult:
     )
 
 
-def test_authorizer_prepares_then_reuses_committed_observation_across_run_ids(
+def test_authorizer_prepares_then_reuses_committed_observation_across_run_ids(orion_registry,
     tmp_path: Path,
 ):
     state_root = tmp_path / "regime-state"
@@ -146,7 +150,7 @@ def test_authorizer_prepares_then_reuses_committed_observation_across_run_ids(
     ) == 1
 
 
-def test_authorizer_rejects_mutable_outer_regime_confidence_and_counters(
+def test_authorizer_rejects_mutable_outer_regime_confidence_and_counters(orion_registry,
     tmp_path: Path,
 ):
     controls = {
@@ -198,7 +202,7 @@ def test_authorizer_rejects_mutable_outer_regime_confidence_and_counters(
         )
 
 
-def test_authorizer_requires_stable_governed_market_source_bar(tmp_path: Path):
+def test_authorizer_requires_stable_governed_market_source_bar(orion_registry, tmp_path: Path):
     controls = {
         "regime_authority": {
             "observed_state": "LOW",
@@ -223,7 +227,7 @@ def test_authorizer_requires_stable_governed_market_source_bar(tmp_path: Path):
         )
 
 
-def test_governed_emergency_veto_persists_after_acute_signal_clears(
+def test_governed_emergency_veto_persists_after_acute_signal_clears(orion_registry,
     tmp_path: Path,
 ):
     state_root = tmp_path / "regime-state"
@@ -305,9 +309,25 @@ def test_governed_emergency_veto_persists_after_acute_signal_clears(
     assert history[1].action == "PERSIST"
     assert history[1].effective_state == "EMERGENCY_RISK_OFF"
     assert history[1].risk_veto_buys is True
+    diagnostic = PaperRiskVeto(history[1]).details
+    assert diagnostic["observations_in_state"] == 2
+    assert diagnostic["minimum_dwell_observations"] == 5
+    assert diagnostic["event_hash"] == history[1].content_hash
 
 
-def test_authorizer_fails_closed_on_corrupt_persisted_regime_history(
+def test_second_sleeve_preserves_existing_account_risk_namespace(orion_registry, ):
+    from types import SimpleNamespace
+
+    registry = SimpleNamespace(paper_capital_authority="caerus_orion")
+    assert _paper_regime_owner(registry, ["caerus_orion"]) == "caerus_orion"
+    assert _paper_regime_owner(
+        registry, ["caerus_aquila", "caerus_orion"]
+    ) == "caerus_orion"
+    with pytest.raises(RuntimeError, match="risk owner is not capital eligible"):
+        _paper_regime_owner(registry, ["caerus_aquila"])
+
+
+def test_authorizer_fails_closed_on_corrupt_persisted_regime_history(orion_registry,
     tmp_path: Path,
 ):
     state_root = tmp_path / "regime-state"
@@ -346,7 +366,7 @@ def test_authorizer_fails_closed_on_corrupt_persisted_regime_history(
         )
 
 
-def test_failed_exact_build_does_not_commit_normal_observation(
+def test_failed_exact_build_does_not_commit_normal_observation(orion_registry,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -385,7 +405,7 @@ def test_failed_exact_build_does_not_commit_normal_observation(
     ) == []
 
 
-def test_failed_exact_publication_does_not_commit_normal_observation(
+def test_failed_exact_publication_does_not_commit_normal_observation(orion_registry,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -433,7 +453,7 @@ def test_failed_exact_publication_does_not_commit_normal_observation(
     ) == []
 
 
-def test_successful_exact_publication_commits_before_pointer(
+def test_successful_exact_publication_commits_before_pointer(orion_registry,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -483,7 +503,7 @@ def test_successful_exact_publication_commits_before_pointer(
     assert exact.regime_state["state_event_hash"] == history[0].content_hash
 
 
-def test_missing_or_tampered_committed_event_blocks_exact_reader(tmp_path: Path):
+def test_missing_or_tampered_committed_event_blocks_exact_reader(orion_registry, tmp_path: Path):
     state_root = tmp_path / "regime-state"
     controls = {
         "regime_authority": {

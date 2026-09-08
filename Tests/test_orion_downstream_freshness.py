@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from Tests.fixtures.orion_registry import orion_registry
+
 import copy
 import hashlib
 import json
@@ -106,7 +108,7 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
-def test_missing_lineage_and_changed_parent_unchanged_child_fail_closed() -> None:
+def test_missing_lineage_and_changed_parent_unchanged_child_fail_closed(orion_registry, ) -> None:
     missing = _lineaged_source("2026-08-26", salt="current")
     missing.pop("decision_lineage")
     assert validate_orion_decision_lineage(
@@ -129,7 +131,7 @@ def test_missing_lineage_and_changed_parent_unchanged_child_fail_closed() -> Non
     assert any("stale_child:feature_hash" in failure for failure in failures)
 
 
-def test_missing_and_legacy_immediate_prior_lineage_fail_closed() -> None:
+def test_missing_and_legacy_immediate_prior_lineage_fail_closed(orion_registry, ) -> None:
     current = _lineaged_source("2026-08-26", salt="current")
     missing = validate_orion_decision_lineage(
         current,
@@ -151,7 +153,7 @@ def test_missing_and_legacy_immediate_prior_lineage_fail_closed() -> None:
     assert "orion_lineage:prior_lineage_missing_or_legacy" in legacy
 
 
-def test_coverage_stage_diagnostics_and_empty_selection_trace_contract() -> None:
+def test_coverage_stage_diagnostics_and_empty_selection_trace_contract(orion_registry, ) -> None:
     previous = _lineaged_source("2026-08-25", salt="previous")
     current = _lineaged_source("2026-08-26", salt="current")
     current["decision_lineage"]["selection_trace"] = []
@@ -203,7 +205,7 @@ def test_coverage_stage_diagnostics_and_empty_selection_trace_contract() -> None
     )
 
 
-def test_missing_lineage_is_blocked_from_capital_envelope(tmp_path: Path) -> None:
+def test_missing_lineage_is_blocked_from_capital_envelope(orion_registry, tmp_path: Path) -> None:
     registry = load_sleeve_control_registry()
     source = _lineaged_source("2026-08-26", salt="missing")
     source.pop("decision_lineage")
@@ -235,7 +237,7 @@ def test_missing_lineage_is_blocked_from_capital_envelope(tmp_path: Path) -> Non
     assert "STALE_DECISION_SUSPECTED" in orion["reason_codes"]
 
 
-def test_copied_forward_blocks_but_legitimate_unchanged_target_passes() -> None:
+def test_copied_forward_blocks_but_legitimate_unchanged_target_passes(orion_registry, ) -> None:
     previous = _lineaged_source("2026-08-25", salt="previous")
     copied = copy.deepcopy(previous)
     copied.update(trade_date="2026-08-26", effective_trade_date="2026-08-26")
@@ -266,7 +268,7 @@ def test_copied_forward_blocks_but_legitimate_unchanged_target_passes() -> None:
     )
 
 
-def test_explicit_prior_only_migration_anchor_cannot_be_current_authority() -> None:
+def test_explicit_prior_only_migration_anchor_cannot_be_current_authority(orion_registry, ) -> None:
     anchor = _lineaged_source("2026-08-25", salt="migration-anchor")
     anchor["decision_eligible"] = False
     anchor["authority_scope"] = "PRIOR_LINEAGE_TRUST_ANCHOR"
@@ -285,7 +287,7 @@ def test_explicit_prior_only_migration_anchor_cannot_be_current_authority() -> N
     )
 
 
-def test_recomputed_n_seals_for_n_plus_one_and_preserves_lineage(tmp_path: Path) -> None:
+def test_recomputed_n_seals_for_n_plus_one_and_preserves_lineage(orion_registry, tmp_path: Path) -> None:
     payload_path = _bundle(tmp_path, trade_date="2026-08-17", signals=[])
     source_path = _orion_shadow(tmp_path, trade_date="2026-08-14")
     source_lineage = json.loads(source_path.read_text())["decision_lineage"]
@@ -311,7 +313,7 @@ def test_recomputed_n_seals_for_n_plus_one_and_preserves_lineage(tmp_path: Path)
     assert package["prior_decision_lineage"]["effective_trade_date"] == "2026-08-13"
 
 
-def test_guard_requires_latest_completed_session_and_verifies_marker(tmp_path: Path) -> None:
+def test_guard_requires_latest_completed_session_and_verifies_marker(orion_registry, tmp_path: Path) -> None:
     report_date = "2026-08-27"
     effective_date = "2026-08-26"
     blocked = validate_orion_precompute_dependency(
@@ -351,7 +353,7 @@ def test_guard_requires_latest_completed_session_and_verifies_marker(tmp_path: P
     subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
     (tmp_path / ".gitignore").write_text("outputs/\n", encoding="utf-8")
     _write_json(tmp_path / "tracked.json", {"fixture": True})
-    subprocess.run(["git", "add", ".gitignore", "tracked.json"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", ".gitignore", "tracked.json", "config/research/strategy_registry.json", "research_registry/sleeves/manifest.json"], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-m", "fixture"], cwd=tmp_path, check=True, capture_output=True)
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, capture_output=True, text=True
@@ -426,7 +428,7 @@ def test_guard_requires_latest_completed_session_and_verifies_marker(tmp_path: P
     assert any("stale_child:feature_hash" in item for item in copied["failures"])
 
 
-def test_email_evidence_reports_hashes_unchanged_target_and_deployed_sha(
+def test_email_evidence_reports_hashes_unchanged_target_and_deployed_sha(orion_registry,
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.chdir(tmp_path)

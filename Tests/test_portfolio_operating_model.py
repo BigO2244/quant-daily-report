@@ -161,3 +161,26 @@ def test_lineage_validator_detects_allocation_tamper() -> None:
     )
 
     assert "operating_model:allocation_hash" in failures
+
+
+def test_aquila_hold_preserves_quantity_and_shared_symbol_contributions():
+    from core.aquila_monthly import SCHEMA
+    quantities = {"AAPL": 5, "MSFT": 5}
+    contract = dict(schema_version=SCHEMA, trade_date="2026-08-14", generated_at="2026-08-14T11:00:00+00:00", action="HOLD_NO_REBALANCE",
+                    sizing_mode="FIXED_QUANTITY", account_equity=2000,
+                    previous_session="2026-08-13", marks_as_of="2026-08-13T20:00:00+00:00",
+                    marks={"AAPL": 100, "MSFT": 50}, target_quantities=quantities,
+                    formation_id="aug", formation_hash="a"*64, formation_session="2026-07-31", ownership_snapshot_hash="b"*64,
+                    ownership_snapshot_path="immutable/ownership.json", ownership_snapshot_sha256="d"*64,
+                    monthly_plan_sha256="c"*64)
+    contract["content_hash"] = content_hash(contract)
+    aquila = _decision("caerus_aquila", {"AAPL": 2/3, "MSFT": 1/3})
+    aquila["quantity_contract"] = contract
+    allocation = allocate_portfolio(decision_batch=_batch(aquila, _decision("caerus_orion", {"AAPL": 1})),
+                                    allocation_policy=_policy(caerus_aquila=.5/.95, caerus_orion=.45/.95))
+    aapl = next(r for r in allocation["targets"] if r["symbol"] == "AAPL")
+    own = {r["sleeve_id"]: r for r in aapl["sleeve_contributions"]}
+    assert own["caerus_aquila"]["target_quantity"] == 5
+    assert own["caerus_aquila"]["target_weight"] == .25
+    assert own["caerus_orion"]["target_weight"] == pytest.approx(.575)
+    assert allocation["quantity_contracts"]["caerus_aquila"] == contract

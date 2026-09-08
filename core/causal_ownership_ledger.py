@@ -114,13 +114,54 @@ def _latest_orders(path: Path) -> dict[str, dict[str, Any]]:
     return latest
 
 
-def _exact_order_index(plan_paths: Sequence[Path]) -> tuple[dict[str, dict[str, Any]], dt.datetime | None]:
+def _verified_plan(path: Path, plans_root: Path | None = None) -> dict[str, Any]:
+    root = (plans_root or path.parent).resolve()
+    path = path.resolve()
+    if not path.is_relative_to(root):
+        raise CausalOwnershipError("exact plan path escapes approved plans root")
+    payload = _read_json(path)
+    pointer = None
+    if payload.get("schema_version") == "caerus.exact_execution_plan_pointer.v1":
+        pointer = payload
+        target = Path(str(pointer.get("json_path") or ""))
+        # Deployed pointers use repo-relative paths; fixtures may use root-relative.
+        if not target.is_absolute():
+            prefix = Path("outputs/paper_lane/plans")
+            target = root / (target.relative_to(prefix) if target.is_relative_to(prefix) else target)
+        target = target.resolve()
+        if not target.is_relative_to(root) or target == path:
+            raise CausalOwnershipError("exact plan pointer escapes approved plans root")
+        payload = _read_json(target)
+    if payload.get("schema_version") == "caerus.authorized_execution_handoff.v1":
+        handoff = payload
+        payload = handoff.get("exact_execution_plan")
+        if not isinstance(payload, dict) or handoff.get("execution_lane") != "paper":
+            raise CausalOwnershipError("invalid PAPER exact plan handoff")
+        if (handoff.get("exact_execution_plan_id") != payload.get("plan_id")
+                or handoff.get("exact_execution_plan_hash") != payload.get("content_hash")):
+            raise CausalOwnershipError("handoff exact plan identity mismatch")
+    if payload.get("schema_version") != "caerus.execution_plan.v3":
+        raise CausalOwnershipError("unsupported exact plan schema")
+    unhashed = dict(payload)
+    claimed = unhashed.pop("content_hash", None)
+    if not payload.get("plan_id") or claimed != _hash(unhashed):
+        raise CausalOwnershipError("exact plan content hash mismatch")
+    if payload.get("account_scope", "PAPER") != "PAPER":
+        raise CausalOwnershipError("non-PAPER plan in PAPER ownership ledger")
+    if pointer and (pointer.get("plan_id") != payload.get("plan_id")
+                    or pointer.get("plan_hash") != claimed
+                    or pointer.get("trade_date") != payload.get("trade_date")):
+        raise CausalOwnershipError("pointer exact plan identity mismatch")
+    return payload
+
+
+def _exact_order_index(plan_paths: Sequence[Path], plans_root: Path | None = None) -> tuple[dict[str, dict[str, Any]], dt.datetime | None]:
     index: dict[str, dict[str, Any]] = {}
     epoch: dt.datetime | None = None
-    for path in sorted({candidate.resolve() for candidate in plan_paths if candidate.is_file()}):
-        plan = _read_json(path)
-        if str(plan.get("schema_version") or "") != "caerus.execution_plan.v3":
-            continue
+    if any(not candidate.is_file() for candidate in plan_paths):
+        raise CausalOwnershipError("exact plan input is missing")
+    for path in sorted({candidate.resolve() for candidate in plan_paths}):
+        plan = _verified_plan(path, plans_root)
         plan_hash = str(plan.get("content_hash") or "").strip().lower()
         unhashed = dict(plan)
         unhashed.pop("content_hash", None)
@@ -138,6 +179,8 @@ def _exact_order_index(plan_paths: Sequence[Path]) -> tuple[dict[str, dict[str, 
             record = {
                 "plan_id": str(plan.get("plan_id") or ""),
                 "plan_hash": plan_hash,
+                "account_id_hash": plan.get("account_id_hash"),
+                "created_at": plan.get("created_at"),
                 "allocation_id": allocation_id or None,
                 "session_id": order.get("session_id"),
                 "symbol": str(order.get("symbol") or "").strip().upper(),
@@ -178,6 +221,8 @@ def _decision_contributions(raw: Any) -> list[dict[str, Any]]:
         fraction = float(item.get("allocation_fraction") or 0.0)
         if not sleeve_id or not math.isfinite(fraction) or fraction <= 0.0:
             raise CausalOwnershipError("causal sleeve contribution is invalid")
+        if any(row["sleeve_id"] == sleeve_id for row in rows):
+            raise CausalOwnershipError("duplicate causal sleeve contribution")
         total += fraction
         rows.append({**dict(item), "sleeve_id": sleeve_id, "allocation_fraction": fraction})
     if abs(total - 1.0) > 1e-9:
@@ -221,19 +266,113 @@ def _record_hash(row: Mapping[str, Any]) -> str:
     return _hash(unhashed)
 
 
+def _opening_contract(path: Path, ledger_dir: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    contract = _read_json(path)
+    unhashed = dict(contract)
+    claimed = unhashed.pop("content_hash", None)
+    if (contract.get("schema_version") != "caerus.ownership_cutover.v1"
+            or contract.get("account_scope") != "PAPER"
+            or claimed != _hash(unhashed)):
+        raise CausalOwnershipError("invalid ownership cutover contract hash or scope")
+    epoch = _parse_timestamp(contract.get("effective_at"))
+    raw_history = (ledger_dir / "causal_fills.jsonl").read_bytes()
+    prefix_bytes = contract.get("history_prefix_bytes")
+    if not isinstance(prefix_bytes, int) or prefix_bytes <= 0:
+        raise CausalOwnershipError("invalid cutover history prefix")
+    prefix = raw_history[:prefix_bytes]
+    if not prefix.endswith(b"\n") or hashlib.sha256(prefix).hexdigest() != contract.get("history_sha256"):
+        raise CausalOwnershipError("cutover immutable history hash mismatch")
+    rows = [json.loads(line) for line in prefix.splitlines() if line.strip()]
+    if len(rows) != contract.get("history_fill_count") or len({r["activity_id"] for r in rows}) != len(rows):
+        raise CausalOwnershipError("cutover history count mismatch")
+    for row in rows:
+        if row.get("record_hash") != _record_hash(row) or _parse_timestamp(row.get("transaction_time_utc")) >= epoch:
+            raise CausalOwnershipError("cutover history record mismatch")
+    positions = contract.get("opening_positions_snapshot")
+    account = contract.get("opening_account_snapshot")
+    if not isinstance(positions, dict) or not isinstance(account, dict):
+        raise CausalOwnershipError("cutover opening snapshots missing")
+    if (_hash(positions) != contract.get("positions_snapshot_hash")
+            or _hash(account) != contract.get("account_snapshot_hash")
+            or positions.get("pulled_at_utc") != account.get("pulled_at_utc")
+            or _parse_timestamp(positions.get("pulled_at_utc")) != epoch
+            or not re.fullmatch(r"[0-9a-f]{64}", str(contract.get("account_id_hash") or ""))
+            or account.get("account_id_hash") != contract.get("account_id_hash")):
+        raise CausalOwnershipError("cutover account/snapshot binding mismatch")
+    book = contract.get("opening_book")
+    if not isinstance(book, list):
+        raise CausalOwnershipError("cutover opening book missing")
+    expected = {str(r["symbol"]).upper(): float(r["qty"]) for r in positions.get("positions", [])}
+    totals: dict[str, float] = {}
+    seen = set()
+    for row in book:
+        symbol, owner = str(row.get("symbol") or ""), str(row.get("sleeve_id") or "")
+        qty = float(row.get("quantity", 0))
+        if (not symbol or not owner or symbol != symbol.upper() or (symbol, owner) in seen
+                or not math.isfinite(qty) or qty <= 0):
+            raise CausalOwnershipError("invalid cutover opening book row")
+        seen.add((symbol, owner))
+        totals[symbol] = totals.get(symbol, 0) + qty
+    if any(abs(totals.get(k, 0) - expected.get(k, 0)) > QUANTITY_TOLERANCE for k in set(totals) | set(expected)):
+        raise CausalOwnershipError("cutover opening book does not reconcile")
+    # Reconstruct the old book independently to prevent an opening snapshot from
+    # silently introducing quantities absent from preserved broker fill history.
+    historical: dict[str, float] = {}
+    for row in rows:
+        historical[row["symbol"]] = historical.get(row["symbol"], 0) + sum(float(e["signed_quantity"]) for e in row["inventory_effects"])
+    if any(abs(historical.get(k, 0) - expected.get(k, 0)) > QUANTITY_TOLERANCE for k in set(historical) | set(expected)):
+        raise CausalOwnershipError("cutover history and snapshot quantities disagree")
+    return contract, rows
+
+
+def _consume_contributors(ownership: dict[str, dict[str, float]], symbol: str,
+                          quantity: float, decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    owners = ownership.setdefault(symbol, {})
+    effects = []
+    for contribution in decisions:
+        owner = contribution["sleeve_id"]
+        consumed = quantity * contribution["allocation_fraction"]
+        if consumed > owners.get(owner, 0.0) + QUANTITY_TOLERANCE:
+            raise CausalOwnershipError(f"sell demand exceeds contributing owner inventory: {symbol}/{owner}")
+        effects.append({"sleeve_id": owner, "signed_quantity": -consumed})
+    for effect in effects:
+        owner = effect["sleeve_id"]
+        owners[owner] = owners.get(owner, 0.0) + effect["signed_quantity"]
+    return effects
+
+
 def build_causal_ownership(
     *,
     ledger_dir: Path,
     exact_plan_paths: Sequence[Path],
+    plans_root: Path | None = None,
+    opening_contract_path: Path | None = None,
 ) -> dict[str, Any]:
     """Build and persist causal fills, current ownership, and one-time valuation."""
 
     fills = _fill_rows(ledger_dir / "fills.csv")
     broker_orders = _latest_orders(ledger_dir / "orders.jsonl")
-    exact_orders, causal_epoch = _exact_order_index(exact_plan_paths)
+    exact_orders, causal_epoch = _exact_order_index(exact_plan_paths, plans_root)
     ownership: dict[str, dict[str, float]] = {}
     causal_rows: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
+    cutover_path = opening_contract_path or ledger_dir / "ownership_cutover.json"
+    cutover = None
+    preserved = {}
+    if opening_contract_path is not None and not cutover_path.is_file():
+        raise CausalOwnershipError("explicit ownership cutover contract missing")
+    if cutover_path.is_file():
+        cutover, history = _opening_contract(cutover_path, ledger_dir)
+        prior_ownership_path = ledger_dir / "ownership_latest.json"
+        if prior_ownership_path.is_file():
+            bound = _read_json(prior_ownership_path).get("opening_contract_hash")
+            if bound and bound != cutover["content_hash"]:
+                raise CausalOwnershipError("previously applied cutover contract changed")
+        causal_epoch = _parse_timestamp(cutover["effective_at"])
+        preserved = {row["activity_id"]: row for row in history}
+        for row in cutover["opening_book"]:
+            ownership.setdefault(row["symbol"], {})[row["sleeve_id"]] = float(row["quantity"])
+    seen_fills = set()
 
     for fill in fills:
         activity_id = str(fill.get("activity_id") or "").strip()
@@ -245,9 +384,24 @@ def build_causal_ownership(
             not activity_id
             or not symbol
             or side not in {"buy", "sell", "sell_short"}
+            or not math.isfinite(quantity)
             or quantity <= 0.0
         ):
             raise CausalOwnershipError("broker fill row is malformed")
+        if activity_id in seen_fills:
+            raise CausalOwnershipError("duplicate broker fill activity ID")
+        seen_fills.add(activity_id)
+        if cutover and timestamp < causal_epoch:
+            prior = preserved.get(activity_id)
+            if (prior is None or prior["symbol"] != symbol or prior["side"] != side
+                    or prior["quantity"] != quantity
+                    or prior["broker_order_id"] != str(fill.get("order_id") or "").strip()
+                    or prior["transaction_time_utc"] != str(fill.get("transaction_time_utc") or "")
+                    or prior["price"] != float(fill.get("price") or 0)
+                    or prior["notional"] != float(fill.get("notional") or 0)):
+                raise CausalOwnershipError("cutover historical broker fill mismatch")
+            causal_rows.append(prior)
+            continue
         broker_order_id = str(fill.get("order_id") or "").strip()
         broker_order = broker_orders.get(broker_order_id) or {}
         client_order_id = str(broker_order.get("client_order_id") or "").strip()
@@ -266,6 +420,9 @@ def build_causal_ownership(
             )
             continue
         if matched:
+            if cutover and (exact.get("account_id_hash") != cutover["account_id_hash"]
+                            or _parse_timestamp(exact.get("created_at")) > timestamp):
+                raise CausalOwnershipError("prospective fill account or causal timestamp mismatch")
             if exact["symbol"] != symbol or exact["side"] != side:
                 raise CausalOwnershipError(
                     f"broker fill diverges from exact order identity: {activity_id}"
@@ -307,7 +464,10 @@ def build_causal_ownership(
                 {"sleeve_id": LEGACY_OWNER, "signed_quantity": -quantity}
             ]
         else:
-            inventory_effects = _consume_inventory(ownership, symbol, quantity)
+            inventory_effects = (
+                _consume_contributors(ownership, symbol, quantity, decisions)
+                if cutover else _consume_inventory(ownership, symbol, quantity)
+            )
 
         row = {
             "schema_version": CAUSAL_FILL_SCHEMA,
@@ -332,6 +492,8 @@ def build_causal_ownership(
         row["record_hash"] = _record_hash(row)
         causal_rows.append(row)
 
+    if set(preserved) - seen_fills:
+        raise CausalOwnershipError("cutover historical fills missing from broker ledger")
     if unresolved:
         raise CausalOwnershipError(
             "post-cutover broker fills lack exact-plan lineage: "
@@ -349,12 +511,6 @@ def build_causal_ownership(
             )
         if prior is None:
             additions.append(row)
-    if additions:
-        causal_path.parent.mkdir(parents=True, exist_ok=True)
-        with causal_path.open("a", encoding="utf-8") as handle:
-            for row in additions:
-                handle.write(_canonical(row) + "\n")
-
     positions_payload = _read_json(ledger_dir / "positions_latest.json")
     as_of = str(positions_payload.get("pulled_at_utc") or "").strip()
     broker_positions = positions_payload.get("positions") or []
@@ -399,6 +555,8 @@ def build_causal_ownership(
         "as_of": as_of,
         "causal_epoch": causal_epoch.isoformat() if causal_epoch else None,
         "source_fill_count": len(fills),
+        "opening_contract_hash": cutover.get("content_hash") if cutover else None,
+        "account_id_hash": cutover.get("account_id_hash") if cutover else None,
         "attributed_fill_count": sum(
             row["attribution_status"] == "ATTRIBUTED" for row in causal_rows
         ),
@@ -409,7 +567,6 @@ def build_causal_ownership(
         "reconciliation": {"status": "PASS", "quantity_tolerance": QUANTITY_TOLERANCE},
     }
     ownership_payload["content_hash"] = _hash(ownership_payload)
-    _atomic_json(ledger_dir / "ownership_latest.json", ownership_payload)
 
     snapshots = _read_jsonl(ledger_dir / "account_snapshots.jsonl")
     account = next(
@@ -420,6 +577,8 @@ def build_causal_ownership(
         raise CausalOwnershipError(
             "account and positions snapshots do not share one explicit as-of"
         )
+    if cutover and account.get("account_id_hash") != cutover["account_id_hash"]:
+        raise CausalOwnershipError("current account differs from cutover account")
     ownership_by_symbol: dict[str, list[dict[str, Any]]] = {}
     for row in ownership_rows:
         ownership_by_symbol.setdefault(row["symbol"], []).append(row)
@@ -497,6 +656,13 @@ def build_causal_ownership(
         },
     }
     valuation["content_hash"] = _hash(valuation)
+    if additions:
+        causal_path.parent.mkdir(parents=True, exist_ok=True)
+        with causal_path.open("a", encoding="utf-8") as handle:
+            for row in additions:
+                handle.write(_canonical(row) + "\n")
+
+    _atomic_json(ledger_dir / "ownership_latest.json", ownership_payload)
     _atomic_json(ledger_dir / "valuation_latest.json", valuation)
 
     history_path = ledger_dir / "ownership_history.jsonl"

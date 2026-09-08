@@ -276,6 +276,7 @@ def build_sleeve_decision_batch(
         source_refs: list[dict[str, Any]] = []
         target_rows: list[dict[str, Any]] = []
         source_cash_weight = 0.0
+        quantity_contract = None
         for source in source_rows:
             if not isinstance(source, Mapping):
                 continue
@@ -293,9 +294,14 @@ def build_sleeve_decision_batch(
                 }
             )
             if exists and not target_rows:
-                target_rows, source_cash_weight = _normalized_weights(
-                    _read_object(path)
-                )
+                source_payload = _read_object(path)
+                target_rows, source_cash_weight = _normalized_weights(source_payload)
+                if sleeve_id == "caerus_aquila":
+                    from core.aquila_monthly import validate_quantity_contract
+                    quantity_contract = source_payload.get("quantity_contract")
+                    if not isinstance(quantity_contract, Mapping):
+                        raise PortfolioOperatingModelError("Aquila quantity contract missing")
+                    validate_quantity_contract(quantity_contract, trade_date=trade_date)
         if outcome == "RECOMMENDATION" and not target_rows:
             allocation_weight = opportunity.get("allocation_weight")
             if allocation_weight is None:
@@ -332,6 +338,8 @@ def build_sleeve_decision_batch(
             "reason_codes": list(envelope.get("reason_codes") or []),
             "message": evaluation.get("message"),
         }
+        if quantity_contract is not None:
+            decision_body["quantity_contract"] = dict(quantity_contract)
         decision_hash = content_hash(decision_body)
         decision_body["decision_id"] = (
             f"sleeve-decision:{trade_date}:{sleeve_id}:{decision_hash[:24]}"
@@ -405,6 +413,26 @@ def allocate_portfolio(
             "allocation budget identities must exactly match capital-eligible sleeves"
         )
     investable = 1.0 - cash_weight
+    quantity_contracts = {}
+    effective_account_budgets = {s: b * investable for s, b in budgets.items()}
+    for sleeve_id, decision in capital_decisions.items():
+        contract = decision.get("quantity_contract")
+        if sleeve_id == "caerus_aquila":
+            from core.aquila_monthly import validate_quantity_contract
+            if not isinstance(contract, Mapping):
+                raise PortfolioOperatingModelError("Aquila quantity contract missing")
+            validate_quantity_contract(contract, trade_date=str(decision_batch.get("trade_date")))
+            if set(budgets) != {"caerus_aquila", "caerus_orion"} or abs(cash_weight - .05) > 1e-10 or abs(effective_account_budgets[sleeve_id] - .5) > 1e-10:
+                raise PortfolioOperatingModelError("Aquila requires approved 50/45/5 allocation")
+            quantity_contracts[sleeve_id] = dict(contract)
+            if contract["sizing_mode"] == "FIXED_QUANTITY":
+                marked_weight = sum(float(q) * float(contract["marks"][s]) for s,q in contract["target_quantities"].items()) / float(contract["account_equity"])
+                if marked_weight >= investable:
+                    raise PortfolioOperatingModelError("Aquila hold leaves no residual capital")
+                effective_account_budgets[sleeve_id] = marked_weight
+                effective_account_budgets["caerus_orion"] = investable - marked_weight
+        elif contract is not None:
+            raise PortfolioOperatingModelError("quantity contract only supported for Aquila")
     symbol_contributions: dict[str, list[dict[str, Any]]] = {}
     allocation_rows: list[dict[str, Any]] = []
     for sleeve_id in sorted(budgets):
@@ -423,7 +451,7 @@ def allocate_portfolio(
             {
                 "sleeve_id": sleeve_id,
                 "risk_budget": budget,
-                "account_target_weight": round(budget * investable, 12),
+                "account_target_weight": round(effective_account_budgets[sleeve_id], 12),
                 "decision_id": decision.get("decision_id"),
                 "decision_hash": decision.get("content_hash"),
             }
@@ -434,12 +462,25 @@ def allocate_portfolio(
                 target.get("target_weight"),
                 label=f"{sleeve_id}.{symbol}.target_weight",
             )
-            contribution = round(investable * budget * sleeve_target, 12)
+            contribution = round(effective_account_budgets[sleeve_id] * sleeve_target, 12)
+            contract = quantity_contracts.get(sleeve_id)
+            sizing_fields = {}
+            if contract:
+                quantities = contract["target_quantities"]
+                if symbol not in quantities or set(quantities) != {str(t.get("symbol")) for t in target_rows}:
+                    raise PortfolioOperatingModelError("Aquila targets differ from quantity contract")
+                if contract["sizing_mode"] == "REBALANCE_WEIGHT" and abs(sleeve_target - .1) > 1e-10:
+                    raise PortfolioOperatingModelError("Aquila monthly targets must be equal weight")
+                sizing_fields = {"sizing_mode": contract["sizing_mode"], "quantity_contract_hash": contract["content_hash"]}
+                if contract["sizing_mode"] == "FIXED_QUANTITY":
+                    sizing_fields["target_quantity"] = float(quantities[symbol])
+                    contribution = round(float(quantities[symbol]) * float(contract["marks"][symbol]) / float(contract["account_equity"]), 12)
             if contribution <= 0.0:
                 continue
             symbol_contributions.setdefault(symbol, []).append(
                 {
                     "sleeve_id": sleeve_id,
+                    **sizing_fields,
                     "target_weight": contribution,
                     "sleeve_internal_weight": sleeve_target,
                     "decision_id": decision.get("decision_id"),
@@ -489,6 +530,8 @@ def allocate_portfolio(
         "decision_batch_hash": decision_batch.get("content_hash"),
         "allocated_at": allocated_at or dt.datetime.now(dt.timezone.utc).isoformat(),
     }
+    if quantity_contracts:
+        body["quantity_contracts"] = quantity_contracts
     allocation_seed_hash = content_hash(body)
     body["allocation_id"] = (
         f"allocation:{body['trade_date']}:{allocation_seed_hash[:24]}"

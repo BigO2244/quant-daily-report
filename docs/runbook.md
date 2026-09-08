@@ -568,3 +568,20 @@ There is no active monitoring dashboard at this time. Monitoring is done via:
 - Execution emails sent to `EMAIL_RECIPIENT`
 - Reviewing `outputs/ic_monitor/ic_summary.json` for signal health alerts
 - Reviewing `outputs/vix_regime/regime_current.json` for current regime
+
+
+## Aquila PAPER activation — 2026-09-08
+
+Brett authorized50% Aquila in the existing PAPER account. The canonical registry
+now describes monthly 50/45/5 Aquila/Orion/cash, with fixed Aquila shares between
+formations. See `docs/governance/AQUILA_PAPER.md`. Deployment attestation and
+broker receipts determine actual activation and funding. Retain Orion's risk
+history and the existing emergency cooldown; a configuration change does not
+release buying.
+
+Deploy ownership discovery and the verified prospective opening contract
+together. Validate a copied ledger and independent audit first. Preserve all
+historical rows. Use PAPER-only snapshot capture; the broker-ledger cron wrapper
+also reads Live and must not be used for a PAPER-only activation operation.
+Rollback source with a scoped git revert; retain immutable new receipts and
+opening evidence. Never relabel historical returns or delete fills on rollback.

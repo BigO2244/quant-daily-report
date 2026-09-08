@@ -285,3 +285,18 @@ def test_generated_state_is_deterministic_and_lane_specific(tmp_path: Path) -> N
     assert "| LIVE | Lyra | ACTIVE | PROVED |" in first
     assert "| PAPER | Orion | ACTIVE | PROVED |" in first
     assert "disabled legacy FR-104 lane does not disable Lyra Live" in first
+
+
+def test_every_paper_sleeve_requires_its_own_approval(tmp_path):
+    from core.operating_truth import _authority_status
+    lane = {"strategy_ids": ["caerus_orion", "caerus_aquila"],
+            "authority": {"kind": "strategy_registry_paper", "sleeve_approvals": {
+                "caerus_orion": {"approval_scope": "PAPER_ONLY", "owner_approved_at": "2026-08-08"},
+                "caerus_aquila": {"approval_scope": "PAPER_ONLY", "owner_approved_at": "2026-09-08"}}}}
+    strategies = {name: {"paper_execution": {"enabled": True, **approval}}
+                  for name, approval in lane["authority"]["sleeve_approvals"].items()}
+    assert _authority_status(tmp_path, lane, strategies)[0] == "PROVED"
+    strategies["caerus_aquila"]["paper_execution"]["enabled"] = False
+    assert _authority_status(tmp_path, lane, strategies)[0] == "UNPROVED"
+    del lane["authority"]["sleeve_approvals"]["caerus_aquila"]
+    assert "paper_sleeve_approval_set_mismatch" in _authority_status(tmp_path, lane, strategies)[1]

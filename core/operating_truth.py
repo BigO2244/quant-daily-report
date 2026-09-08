@@ -107,14 +107,25 @@ def _authority_status(
             if (row.get("shadow_tracking") or {}).get("enabled") is not True:
                 reasons.append(f"shadow_authority_missing:{strategy_id}")
     elif kind == "strategy_registry_paper":
-        strategy_id = str((lane.get("strategy_ids") or [""])[0])
-        paper = (strategies.get(strategy_id) or {}).get("paper_execution") or {}
-        if (
-            paper.get("enabled") is not True
-            or paper.get("approval_scope") != authority.get("approval_scope")
-            or paper.get("owner_approved_at") != authority.get("owner_approved_at")
-        ):
+        identities = lane.get("strategy_ids") or []
+        approvals = authority.get("sleeve_approvals")
+        if not identities or len(set(identities)) != len(identities):
             reasons.append("paper_authority_mismatch")
+        if len(identities) > 1 and (
+            not isinstance(approvals, Mapping) or set(approvals) != set(identities)
+        ):
+            reasons.append("paper_sleeve_approval_set_mismatch")
+        for strategy_id in identities:
+            expected = approvals.get(strategy_id, {}) if isinstance(approvals, Mapping) else authority
+            paper = (strategies.get(str(strategy_id)) or {}).get("paper_execution") or {}
+            if (
+                paper.get("enabled") is not True
+                or expected.get("approval_scope") != "PAPER_ONLY"
+                or not expected.get("owner_approved_at")
+                or paper.get("approval_scope") != expected.get("approval_scope")
+                or paper.get("owner_approved_at") != expected.get("owner_approved_at")
+            ):
+                reasons.append("paper_authority_mismatch")
     elif kind == "owner_decision":
         path = repo_root / str(authority.get("path") or "")
         decision = _read_json(path) or {}

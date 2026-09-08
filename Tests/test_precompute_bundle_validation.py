@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from Tests.fixtures.orion_registry import orion_registry
+
 import json
 from pathlib import Path
 
@@ -79,7 +81,7 @@ def test_validate_precompute_bundle_requires_all_execution_artifacts(tmp_path: P
     assert "missing:sleeve_evaluations.json" in result["validation_failures"]
 
 
-def test_validate_precompute_bundle_passes_complete_bundle(tmp_path: Path) -> None:
+def test_validate_precompute_bundle_passes_complete_bundle(orion_registry, tmp_path: Path) -> None:
     bundle_dir = tmp_path / "outputs" / "precompute" / "2026-05-15"
     for name in REQUIRED_FILES:
         _write_bundle_file(bundle_dir, name)
@@ -100,7 +102,7 @@ def test_validate_precompute_bundle_passes_complete_bundle(tmp_path: Path) -> No
     )
 
 
-def test_validate_precompute_bundle_rejects_corrupt_sleeve_coverage(
+def test_validate_precompute_bundle_rejects_corrupt_sleeve_coverage(orion_registry,
     tmp_path: Path,
 ) -> None:
     bundle_dir = tmp_path / "outputs" / "precompute" / "2026-05-15"
@@ -120,7 +122,7 @@ def test_validate_precompute_bundle_rejects_corrupt_sleeve_coverage(
     ]
 
 
-def test_validate_precompute_bundle_rejects_nonterminal_sleeve_status(
+def test_validate_precompute_bundle_rejects_nonterminal_sleeve_status(orion_registry,
     tmp_path: Path,
 ) -> None:
     bundle_dir = tmp_path / "outputs" / "precompute" / "2026-05-15"
@@ -139,7 +141,7 @@ def test_validate_precompute_bundle_rejects_nonterminal_sleeve_status(
     ]
 
 
-def test_validate_precompute_bundle_rejects_nonfinite_execution_values(tmp_path: Path) -> None:
+def test_validate_precompute_bundle_rejects_nonfinite_execution_values(orion_registry, tmp_path: Path) -> None:
     bundle_dir = tmp_path / "outputs" / "precompute" / "2026-05-15"
     for name in REQUIRED_FILES:
         _write_bundle_file(bundle_dir, name)

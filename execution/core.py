@@ -153,6 +153,7 @@ class ExecutionRequest:
     # Migrated authority path: when present, Trader must use these approved
     # targets exactly and may not discover or substitute a target source.
     approved_execution_package: Mapping[str, Any] | None = None
+    quantity_authority: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +180,125 @@ class ExecutionResult:
     submitted_buys: tuple[SubmitResult, ...]
 
 
+def _aquila_quantity_trades(*, request: ExecutionRequest, config: ExecutionCoreConfig,
+                            package: Any) -> tuple[pd.DataFrame, Mapping[str, Any]]:
+    """Recompute governed share intent without replacing the approved package."""
+    from core.aquila_monthly import validate_quantity_contract
+
+    authority = request.quantity_authority or {}
+    if config.mode != "paper" or not config.paper_config.allow_fractional or not config.orders.allow_fractional:
+        raise ValueError("Aquila quantity planning requires fractional PAPER mode")
+    from core.target_attainment_policy import FRACTIONAL_SHARE_MODE
+    policy = _approved_target_attainment_policy(request)
+    if not policy or policy["share_mode"] != FRACTIONAL_SHARE_MODE:
+        raise ValueError("Aquila requires governed fractional target-attainment policy")
+    if float(config.paper_config.slippage_bps) != 0:
+        raise ValueError("Aquila direct quantity planning requires actual execution prices")
+    if request.price_basis not in _BROKER_AUTHORITATIVE_PRICE_BASES:
+        raise ValueError("Aquila quantity planning requires authoritative fresh prices")
+    if authority.get("approved_execution_package_hash") != package.content_hash:
+        raise ValueError("Aquila quantity authority package hash mismatch")
+    contract = authority.get("quantity_contract") or {}
+    validate_quantity_contract(contract, trade_date=package.trade_date)
+    if abs(float(package.approved_cash_weight) - .05) > 1e-10 or abs(request.target_cash_weight - .05) > 1e-10:
+        raise ValueError("risk-adjusted Aquila cash requires explicit intervention")
+    nav = float(request.total_equity)
+    if not math.isfinite(nav) or nav <= 0:
+        raise ValueError("Aquila account NAV invalid")
+    prices = request.prices
+    fixed = contract["sizing_mode"] == "FIXED_QUANTITY"
+    held = contract["target_quantities"]
+    aq_gross = sum(float(q) * float(prices[s]) for s, q in held.items()) / nav if fixed else .5
+    residual = .95 - aq_gross
+    if residual < 0:
+        raise ValueError("Aquila held exposure exceeds available risk budget")
+    desired: dict[str, dict[str, float]] = {}
+    seen_aquila = set()
+    orion_internal = 0.0
+    for row in package.approved_target_rows:
+        symbol = str(row.get("symbol") or row.get("ticker") or "").upper()
+        price = _safe_float(prices.get(symbol), 0)
+        if not symbol or symbol in desired or not math.isfinite(price) or price <= 0:
+            raise ValueError("Aquila approved symbol or price invalid")
+        contributions = row.get("sleeve_contributions") or []
+        if not contributions or abs(sum(float(c.get("target_weight", -1)) for c in contributions) - float(row["target_weight"])) > 1e-9:
+            raise ValueError("Aquila risk-approved contribution weights differ")
+        owners = desired.setdefault(symbol, {})
+        for contribution in contributions:
+            owner = str(contribution.get("sleeve_id") or "")
+            if owner in owners:
+                raise ValueError("duplicate Aquila contribution owner")
+            internal = float(contribution.get("sleeve_internal_weight", -1))
+            if not math.isfinite(internal) or not 0 <= internal <= 1:
+                raise ValueError("invalid sleeve internal weight")
+            if owner == "caerus_aquila":
+                if contribution.get("quantity_contract_hash") != contract["content_hash"] or contribution.get("sizing_mode") != contract["sizing_mode"]:
+                    raise ValueError("Aquila sealed contribution contract mismatch")
+                if symbol not in held:
+                    raise ValueError("Aquila symbol absent from formation")
+                if not fixed and abs(internal - .1) > 1e-10:
+                    raise ValueError("monthly Aquila must remain equal weight")
+                quantity = float(held[symbol]) if fixed else nav * .05 / price
+                if fixed and abs(quantity - round(quantity, 6)) > 1e-12:
+                    raise ValueError("Aquila held quantity exceeds fractional precision")
+                seen_aquila.add(symbol)
+            elif owner == "caerus_orion":
+                quantity = nav * residual * internal / price
+                orion_internal += internal
+            else:
+                raise ValueError("ungoverned Aquila contribution owner")
+            owners[owner] = round(quantity, 6)
+    if seen_aquila != set(held) or abs(orion_internal - 1) > 1e-9:
+        raise ValueError("incomplete Aquila or Orion approved allocation")
+    if desired != authority.get("desired_quantities"):
+        raise ValueError("Aquila declared quantities differ from independently derived shares")
+    current = {}
+    for _, row in request.holdings.iterrows():
+        symbol = str(row.get("ticker") or row.get("symbol") or "").upper()
+        quantity = _safe_float(row.get("shares", row.get("quantity", row.get("qty"))), -1)
+        if not symbol or symbol in current or not math.isfinite(quantity) or quantity < 0:
+            raise ValueError("invalid Aquila current account holdings")
+        current[symbol] = quantity
+    trades = []
+    demands = authority.get("signed_sleeve_demands") or {}
+    for symbol in sorted(set(current) | set(desired)):
+        price = _safe_float(prices.get(symbol), 0)
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError("missing Aquila exit price")
+        delta = round(sum(desired.get(symbol, {}).values()) - current.get(symbol, 0), 6)
+        owner_demands = demands.get(symbol) or {}
+        if abs(sum(float(q) for q in owner_demands.values()) - delta) > 1e-6:
+            raise ValueError("Aquila sleeve demands differ from account share delta")
+        if any(float(q) > 1e-6 for q in owner_demands.values()) and any(float(q) < -1e-6 for q in owner_demands.values()):
+            raise ValueError("opposing Aquila demands require transfer receipt")
+        if fixed and abs(float(owner_demands.get("caerus_aquila", 0))) > 1e-6:
+            raise ValueError("Aquila held shares cannot trade between formations")
+        if abs(delta) <= 1e-6:
+            continue
+        deadband = float(getattr(config.paper_config, "rebalance_deadband_pct", 0.0) or 0.0)
+        if symbol in desired and abs(delta) * price / nav < deadband:
+            continue
+        side = "BUY" if delta > 0 else "SELL"
+        minimum = (config.paper_config.fractional_sell_min_trade_dollars
+                   if side == "SELL" and config.paper_config.allow_fractional_sells
+                   else config.paper_config.min_trade_dollars)
+        if abs(delta) * price < float(minimum):
+            continue
+        trades.append(dict(ticker=symbol, side=side, shares=abs(delta), price=price,
+                           notional=abs(delta)*price, slippage_cost=0.0,
+                           reason="governed_aquila_quantity_delta"))
+    if len(trades) > config.constraints.max_trades_per_day:
+        raise ValueError("Aquila quantity plan exceeds order limit")
+    return pd.DataFrame(trades, columns=["ticker", "side", "shares", "price", "notional", "slippage_cost", "reason"]), {
+        "source": "approved_execution_package_quantity_authority",
+        "authority_package_hash": package.content_hash,
+        "quantity_contract_hash": contract["content_hash"],
+        "risk_package_id": package.risk_package_id, "risk_hash": package.risk_hash,
+        "target_cash_weight": package.approved_cash_weight,
+        "precomputed_trade_plan_used": False,
+    }
+
+
 def compute_transition_trades(
     *,
     request: ExecutionRequest,
@@ -195,6 +315,8 @@ def compute_transition_trades(
             package = execution_package_from_dict(request.approved_execution_package)
         except AuthorityContractError as exc:
             raise ValueError(f"invalid approved execution package: {exc}") from exc
+        if request.quantity_authority is not None:
+            return _aquila_quantity_trades(request=request, config=config, package=package)
         approved_rows = [dict(row) for row in package.approved_target_rows]
         if approved_rows and not all("target_weight" in row for row in approved_rows):
             raise ValueError("approved execution package rows must contain target_weight")
@@ -349,6 +471,8 @@ def compute_transition_trades(
             "price_basis": str(request.price_basis or ""),
             "broker_authoritative_prices": broker_authoritative_prices,
         }
+    if request.quantity_authority is not None:
+        raise ValueError("Aquila quantity authority requires approved execution package")
     if request.precomputed_trade_plan_used or request.precomputed_trades:
         raw_trades = _precomputed_trades_frame(request.precomputed_trades)
         trade_meta: dict[str, Any] = {

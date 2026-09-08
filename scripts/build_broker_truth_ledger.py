@@ -460,6 +460,27 @@ def build_daily_states(nav_rows: list[dict], fills: list[dict], closes: dict) ->
 # Per-account build
 # --------------------------------------------------------------------------
 
+def build_account_snapshot(acct: dict, pulled_at: str, account: str) -> dict:
+    """Identify new PAPER snapshots without changing retained account history."""
+    snapshot = {
+        "pulled_at_utc": pulled_at,
+        "equity": acct.get("equity"),
+        "cash": acct.get("cash"),
+        "long_market_value": acct.get("long_market_value"),
+        "short_market_value": acct.get("short_market_value"),
+        "buying_power": acct.get("buying_power"),
+        "status": acct.get("status"),
+        "created_at": acct.get("created_at"),
+        "account_number_last4": str(acct.get("account_number", ""))[-4:],
+    }
+    if account == "paper":
+        from core.live_pilot_guardrails import account_id_hash
+        if not str(acct.get("id") or "").strip():
+            raise ValueError("PAPER broker account snapshot lacks account ID")
+        snapshot["account_id_hash"] = account_id_hash(acct["id"])
+    return snapshot
+
+
 def build_account_ledger(account: str, env_file: Path, verbose: bool = False, rebuild_nav: bool = False) -> dict:
     creds = parse_env_file(env_file)
     missing = [k for k in ("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY") if not creds.get(k)]
@@ -477,17 +498,7 @@ def build_account_ledger(account: str, env_file: Path, verbose: bool = False, re
     # ---- account snapshot -------------------------------------------------
     acct = client.account()
     inception = parse_iso(acct["created_at"]).date()
-    snap = {
-        "pulled_at_utc": pulled_at,
-        "equity": acct.get("equity"),
-        "cash": acct.get("cash"),
-        "long_market_value": acct.get("long_market_value"),
-        "short_market_value": acct.get("short_market_value"),
-        "buying_power": acct.get("buying_power"),
-        "status": acct.get("status"),
-        "created_at": acct.get("created_at"),
-        "account_number_last4": str(acct.get("account_number", ""))[-4:],
-    }
+    snap = build_account_snapshot(acct, pulled_at, account)
     append_jsonl(outdir / "account_snapshots.jsonl", [snap])
 
     # ---- activities (append-only, dedupe by id) ---------------------------

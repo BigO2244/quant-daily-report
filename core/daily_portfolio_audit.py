@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import csv
+import datetime as dt
+import math
 import hashlib
 import json
 from pathlib import Path
@@ -135,6 +138,143 @@ def _resolve_exact_plan(
     return _read(plan_path), {"exact_execution_plan": plan_path}, False, None
 
 
+def _audit_cutover_ownership(root: Path, ownership: dict[str, Any]) -> dict[str, Path]:
+    """Independently replay the prospective book; never rewrite historical facts."""
+    ledger = root / "outputs" / "ledger" / "paper"
+    path = ledger / "ownership_cutover.json"
+    if not path.is_file():
+        if ownership.get("opening_contract_hash"):
+            raise DailyPortfolioAuditError("ownership_cutover_missing")
+        return {}
+
+    def require(condition: bool, reason: str) -> None:
+        if not condition:
+            raise DailyPortfolioAuditError("ownership_cutover_" + reason)
+
+    def verified(payload: dict[str, Any], field: str = "content_hash") -> bool:
+        body = dict(payload)
+        claimed = body.pop(field, None)
+        return claimed == _content_hash(body)
+
+    def timestamp(value: str) -> dt.datetime:
+        parsed = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        require(parsed.tzinfo is not None, "timestamp_invalid")
+        return parsed
+
+    contract = _read(path)
+    require(verified(contract) and contract.get("schema_version") == "caerus.ownership_cutover.v1", "hash_invalid")
+    identity = contract.get("account_id_hash")
+    require(contract.get("account_scope") == "PAPER" and isinstance(identity, str)
+            and len(identity) == 64 and all(c in "0123456789abcdef" for c in identity), "account_invalid")
+    require(verified(ownership) and ownership.get("opening_contract_hash") == contract["content_hash"]
+            and ownership.get("account_id_hash") == identity, "ownership_binding_invalid")
+    epoch = timestamp(contract["effective_at"])
+    history_path = ledger / "causal_fills.jsonl"
+    raw = history_path.read_bytes()
+    length = contract.get("history_prefix_bytes")
+    require(isinstance(length, int) and length > 0, "prefix_invalid")
+    prefix = raw[:length]
+    require(prefix.endswith(b"\n") and hashlib.sha256(prefix).hexdigest() == contract.get("history_sha256"), "history_hash_invalid")
+    old = [json.loads(line) for line in prefix.splitlines() if line.strip()]
+    require(len(old) == contract.get("history_fill_count"), "history_count_invalid")
+    opening = contract["opening_positions_snapshot"]
+    account = contract["opening_account_snapshot"]
+    require(_content_hash(opening) == contract.get("positions_snapshot_hash")
+            and _content_hash(account) == contract.get("account_snapshot_hash")
+            and account.get("account_id_hash") == identity
+            and opening.get("pulled_at_utc") == account.get("pulled_at_utc")
+            and timestamp(opening["pulled_at_utc"]) == epoch, "snapshot_binding_invalid")
+    book: dict[tuple[str, str], float] = {}
+    for row in contract["opening_book"]:
+        key = (row["symbol"], row["sleeve_id"])
+        qty = float(row["quantity"])
+        require(key not in book and bool(key[0]) and bool(key[1]) and math.isfinite(qty) and qty > 0, "opening_book_invalid")
+        book[key] = qty
+    expected_open = {r["symbol"]: float(r["qty"]) for r in opening["positions"]}
+    old_totals: dict[str, float] = {}
+    for row in old:
+        require(verified(row, "record_hash") and timestamp(row["transaction_time_utc"]) < epoch, "historical_record_invalid")
+        old_totals[row["symbol"]] = old_totals.get(row["symbol"], 0) + sum(float(e["signed_quantity"]) for e in row["inventory_effects"])
+    for symbol in set(expected_open) | set(old_totals) | {k[0] for k in book}:
+        require(abs(expected_open.get(symbol, 0) - old_totals.get(symbol, 0)) <= 1e-6
+                and abs(expected_open.get(symbol, 0) - sum(q for (s, _), q in book.items() if s == symbol)) <= 1e-6,
+                "opening_quantity_mismatch")
+    # Discover immutable nested plans by content identity, independently of the
+    # ownership builder's client-order index and emitted ownership positions.
+    plans = {}
+    plans_root = root / "outputs" / "paper_lane" / "plans"
+    for candidate in sorted(plans_root.rglob("*.json")):
+        require(candidate.resolve().is_relative_to(plans_root.resolve()), "plan_path_escape")
+        payload = _read(candidate)
+        if payload.get("schema_version") == "caerus.authorized_execution_handoff.v1":
+            nested = payload.get("exact_execution_plan") or {}
+            require(payload.get("exact_execution_plan_hash") == nested.get("content_hash")
+                    and payload.get("exact_execution_plan_id") == nested.get("plan_id"), "handoff_identity_invalid")
+            payload = nested
+        if payload.get("schema_version") == "caerus.execution_plan.v3":
+            require(verified(payload), "plan_hash_invalid")
+            plans[payload["content_hash"]] = payload
+    rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    require(len({r["activity_id"] for r in rows}) == len(rows), "duplicate_fill")
+    with (ledger / "fills.csv").open(newline="") as handle:
+        fills = list(csv.DictReader(handle))
+    require(len(fills) == len(rows) and {r["activity_id"] for r in fills} == {r["activity_id"] for r in rows}, "broker_fill_set_mismatch")
+    fill_index = {r["activity_id"]: r for r in fills}
+    for row in rows:
+        fill = fill_index[row["activity_id"]]
+        require(verified(row, "record_hash") and row["symbol"] == fill["symbol"]
+                and row["side"] == fill["side"] and row["quantity"] == float(fill["qty"])
+                and row["broker_order_id"] == fill["order_id"]
+                and timestamp(row["transaction_time_utc"]) == timestamp(fill["transaction_time_utc"]), "fill_identity_invalid")
+    broker_orders = {}
+    for line in (ledger / "orders.jsonl").read_text().splitlines():
+        order_row = json.loads(line)
+        broker_orders[order_row["id"]] = order_row
+    for row in rows[len(old):]:
+        require(timestamp(row["transaction_time_utc"]) >= epoch and row["attribution_status"] == "ATTRIBUTED", "forward_timestamp_or_status_invalid")
+        require(broker_orders.get(row["broker_order_id"], {}).get("client_order_id") == row["client_order_id"], "broker_order_link_invalid")
+        plan = plans.get(row["plan_hash"], {})
+        require(plan.get("plan_id") == row["plan_id"] and plan.get("account_id_hash") == identity
+                and plan.get("account_scope") == "PAPER", "forward_plan_identity_invalid")
+        orders = [o for o in [*plan.get("sell_orders", []), *plan.get("buy_orders", [])]
+                  if o.get("client_order_id") == row["client_order_id"]]
+        require(len(orders) == 1, "forward_order_missing")
+        order = orders[0]
+        require(order["symbol"] == row["symbol"] and order["side"].lower() == row["side"]
+                and order.get("allocation_id") == row.get("allocation_id"), "forward_order_identity_invalid")
+        effects = {}
+        sign = 1 if row["side"] == "buy" else -1
+        require(row["side"] in {"buy", "sell"}, "forward_side_invalid")
+        total = 0.0
+        for contribution in order.get("sleeve_contributions", []):
+            owner = contribution["sleeve_id"]
+            fraction = float(contribution["allocation_fraction"])
+            require(owner not in effects and math.isfinite(fraction) and fraction > 0, "forward_demand_invalid")
+            total += fraction
+            effects[owner] = sign * row["quantity"] * fraction
+        require(abs(total - 1) <= 1e-9 and len(row["inventory_effects"]) == len(effects), "forward_demand_total_invalid")
+        observed = {e["sleeve_id"]: float(e["signed_quantity"]) for e in row["inventory_effects"]}
+        require(set(observed) == set(effects) and all(abs(observed[k] - v) <= 1e-6 for k, v in effects.items()), "forward_effect_mismatch")
+        for owner, quantity in effects.items():
+            key = (row["symbol"], owner)
+            book[key] = book.get(key, 0) + quantity
+            require(book[key] >= -1e-6, "negative_owner_inventory")
+    current = {(r["symbol"], r["sleeve_id"]): float(r["quantity"]) for r in ownership["positions"]}
+    require(len(current) == len(ownership["positions"])
+            and all(abs(current.get(k, 0) - book.get(k, 0)) <= 1e-6 for k in set(current) | set(book)), "replay_mismatch")
+    broker = _read(ledger / "positions_latest.json")
+    require(broker.get("pulled_at_utc") == ownership.get("as_of"), "broker_as_of_mismatch")
+    broker_quantities = {r["symbol"]: float(r["qty"]) for r in broker["positions"]}
+    require(all(abs(broker_quantities.get(s, 0) - sum(q for (sym, _), q in book.items() if sym == s)) <= 1e-6
+                for s in set(broker_quantities) | {k[0] for k in book}), "broker_quantity_mismatch")
+    accounts = [json.loads(line) for line in (ledger / "account_snapshots.jsonl").read_text().splitlines() if line.strip()]
+    latest_account = next((r for r in reversed(accounts) if r.get("pulled_at_utc") == ownership.get("as_of")), {})
+    require(latest_account.get("account_id_hash") == identity, "current_account_mismatch")
+    return {"ownership_cutover": path, "broker_orders": ledger / "orders.jsonl",
+            "account_snapshots": ledger / "account_snapshots.jsonl", "causal_fills": history_path,
+            "broker_fills": ledger / "fills.csv", "broker_positions": ledger / "positions_latest.json"}
+
+
 def build_daily_portfolio_audit(*, repo_root: Path, trade_date: str) -> dict[str, Any]:
     root = Path(repo_root).resolve()
     bundle = root / "outputs" / "precompute" / trade_date
@@ -174,6 +314,7 @@ def build_daily_portfolio_audit(*, repo_root: Path, trade_date: str) -> dict[str
     valuation = _read(valuation_path)
     reporting = _read(reporting_path)
 
+    cutover_sources = _audit_cutover_ownership(root, ownership)
     failures: list[str] = []
     plan_body = dict(plan)
     declared_plan_hash = str(plan_body.pop("content_hash", ""))
@@ -266,6 +407,7 @@ def build_daily_portfolio_audit(*, repo_root: Path, trade_date: str) -> dict[str
         "reporting_snapshot": reporting_path,
     }
     sources.update(plan_sources)
+    sources.update(cutover_sources)
     if execution_result_path is not None:
         sources["execution_result"] = execution_result_path
     result = {

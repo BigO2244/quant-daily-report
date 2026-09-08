@@ -27,11 +27,14 @@ def main() -> int:
         type=Path,
         default=REPO_ROOT / "outputs" / "paper_lane" / "plans",
     )
+    parser.add_argument("--opening-contract", type=Path, default=None)
     args = parser.parse_args()
-    paths = sorted(args.plans_root.rglob("exact_execution_plan*.json"))
+    paths = sorted(set(args.plans_root.rglob("exact_execution_plan*.json")) | set((args.plans_root / "authority").rglob("plan_*.json")))
     result = build_causal_ownership(
         ledger_dir=args.ledger_dir,
         exact_plan_paths=paths,
+        plans_root=args.plans_root,
+        opening_contract_path=args.opening_contract,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

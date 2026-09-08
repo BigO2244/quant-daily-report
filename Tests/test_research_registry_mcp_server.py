@@ -251,9 +251,10 @@ def test_mcp_fr069_sleeve_inventory_returns_manifest_counts() -> None:
     assert payload["phase"] == "Phase B"
     assert payload["research_only"] is True
     assert payload["behavior_change_allowed"] is False
-    assert payload["sleeve_count"] == 9
+    assert payload["sleeve_count"] == 10
+    assert payload["counts_by_status"]["current_paper_authority"] == 2
     assert payload["counts_by_status"]["research_placeholder"] == 4
-    assert {item["sleeve_id"] for item in payload["current_sleeves"]} == {"polaris", "polaris_alpha", "orion", "orion_alpha", "lyra"}
+    assert {item["sleeve_id"] for item in payload["current_sleeves"]} == {"polaris", "polaris_alpha", "orion", "aquila", "orion_alpha", "lyra"}
 
 
 def test_mcp_fr069_sleeve_inventory_jsonrpc_call() -> None:

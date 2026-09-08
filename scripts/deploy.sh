@@ -95,6 +95,14 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         scripts/build_operating_truth.py scripts/run_lyra_live_portfolio.py \
         scripts/manage_lyra_live_cron.py scripts/certify_trading_integrity.py
     python3 -m pytest \
+        Tests/test_aquila_monthly.py \
+        Tests/test_aquila_daily_source.py \
+        Tests/test_aquila_execution_core.py \
+        Tests/test_aquila_exact_authorization.py \
+        Tests/test_aquila_target_attainment.py \
+        Tests/test_aquila_ranking_capture.py \
+        Tests/test_paper_ownership_cutover.py \
+        Tests/test_aquila_activation.py \
         Tests/test_live_pilot_guardrails.py \
         Tests/test_live_pilot_client_order_id.py \
         Tests/test_live_pilot_sha_guard.py \

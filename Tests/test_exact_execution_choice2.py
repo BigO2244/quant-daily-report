@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from Tests.fixtures.orion_registry import orion_registry
+
 import copy
 import datetime as dt
 import hashlib
@@ -585,7 +587,7 @@ class SessionFinalBarPaperBroker(TrackingPaperBroker):
         return rows
 
 
-def test_exact_contract_is_deterministic_and_rejects_tampering():
+def test_exact_contract_is_deterministic_and_rejects_tampering(orion_registry, ):
     plan = _plan()
     assert exact_execution_plan_from_dict(plan.to_dict()).content_hash == plan.content_hash
     rebuilt = _plan()
@@ -603,7 +605,7 @@ def test_exact_contract_is_deterministic_and_rejects_tampering():
         _rebuild_exact(plan.to_dict(), authorization_state="AUTHORIZED")
 
 
-def test_operational_retry_run_id_does_not_change_exact_order_identity():
+def test_operational_retry_run_id_does_not_change_exact_order_identity(orion_registry, ):
     original = _plan()
     retry = _rebuild_exact(original.to_dict(), run_id="authority-run-retry")
 
@@ -617,7 +619,7 @@ def test_operational_retry_run_id_does_not_change_exact_order_identity():
     assert retry.content_hash != original.content_hash
 
 
-def test_exact_contract_rejects_cap_authority_and_economic_lies():
+def test_exact_contract_rejects_cap_authority_and_economic_lies(orion_registry, ):
     payload = _plan().to_dict()
     missing_account_binding = copy.deepcopy(payload)
     missing_account_binding.pop("account_id_hash")
@@ -706,7 +708,7 @@ def test_exact_contract_rejects_cap_authority_and_economic_lies():
 
 
 @pytest.mark.parametrize("regime_state", [{}, {"effective_state": "NORMAL"}])
-def test_exact_contract_rejects_empty_or_arbitrary_regime_schema(regime_state: dict):
+def test_exact_contract_rejects_empty_or_arbitrary_regime_schema(orion_registry, regime_state: dict):
     payload = _plan().to_dict()
     with pytest.raises(AuthorityContractError, match="governed regime authority schema"):
         _rebuild_exact(payload, regime_state=regime_state)
@@ -721,7 +723,7 @@ def test_exact_contract_rejects_empty_or_arbitrary_regime_schema(regime_state: d
         ("PAPER", hashlib.sha256(b"paper-account").hexdigest(), "caerus_orion", "2026-08-11"),
     ],
 )
-def test_exact_reader_rejects_committed_regime_event_from_wrong_identity_scope(
+def test_exact_reader_rejects_committed_regime_event_from_wrong_identity_scope(orion_registry,
     tmp_path: Path,
     event_scope: str,
     event_account: str,
@@ -753,7 +755,7 @@ def test_exact_reader_rejects_committed_regime_event_from_wrong_identity_scope(
         _rebuild_exact(payload, expected_posttrade_positions=payload["starting_positions"])
 
 
-def test_exact_executor_submits_sealed_sell_then_buy_and_reconciles(tmp_path: Path):
+def test_exact_executor_submits_sealed_sell_then_buy_and_reconciles(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     plan = _plan()
     result = execute_exact_plan(
@@ -771,7 +773,7 @@ def test_exact_executor_submits_sealed_sell_then_buy_and_reconciles(tmp_path: Pa
     assert not result.orders_suppressed
 
 
-def test_exact_executor_reconciles_market_order_cash_at_actual_fill_prices(
+def test_exact_executor_reconciles_market_order_cash_at_actual_fill_prices(orion_registry,
     tmp_path: Path,
 ):
     class SlippagePaperBroker(TrackingPaperBroker):
@@ -863,7 +865,7 @@ def _fractional_addition_plan(*, canonical_expected: bool = False):
     )
 
 
-def test_fractional_exact_plan_accepts_canonical_six_decimal_expected_state():
+def test_fractional_exact_plan_accepts_canonical_six_decimal_expected_state(orion_registry, ):
     plan = _fractional_addition_plan(canonical_expected=True)
 
     assert plan.expected_posttrade_positions[0]["quantity"] == 6.815142
@@ -900,7 +902,7 @@ class FractionalAggregatePaperBroker(TrackingPaperBroker):
         return copy.deepcopy(row)
 
 
-def test_fractional_binary_tail_reconciles_and_recovers_without_resubmission(
+def test_fractional_binary_tail_reconciles_and_recovers_without_resubmission(orion_registry,
     tmp_path: Path,
 ):
     broker = FractionalAggregatePaperBroker()
@@ -934,7 +936,7 @@ def test_fractional_binary_tail_reconciles_and_recovers_without_resubmission(
     assert broker.submit_calls == 1
 
 
-def test_fractional_reconciliation_rejects_real_submicro_precision_drift(
+def test_fractional_reconciliation_rejects_real_submicro_precision_drift(orion_registry,
     tmp_path: Path,
 ):
     broker = FractionalAggregatePaperBroker(reported_quantity="6.8151424")
@@ -1029,7 +1031,7 @@ def _collared_plan(*, capital_cap_usd: float = 1000.0):
     )
 
 
-def test_market_fill_at_adverse_boundary_reconciles(tmp_path: Path):
+def test_market_fill_at_adverse_boundary_reconciles(orion_registry, tmp_path: Path):
     broker = AdverseFillPaperBroker(sell_price=99.0, buy_price=50.5)
     result = execute_exact_plan(
         plan_payload=_collared_plan().to_dict(),
@@ -1045,7 +1047,7 @@ def test_market_fill_at_adverse_boundary_reconciles(tmp_path: Path):
     assert broker.submit_calls == 2
 
 
-def test_sell_fill_below_protective_limit_stops_buy_phase(tmp_path: Path):
+def test_sell_fill_below_protective_limit_stops_buy_phase(orion_registry, tmp_path: Path):
     broker = AdverseFillPaperBroker(sell_price=98.99)
     result = execute_exact_plan(
         plan_payload=_collared_plan().to_dict(),
@@ -1064,12 +1066,12 @@ def test_sell_fill_below_protective_limit_stops_buy_phase(tmp_path: Path):
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
-def test_protective_buy_limit_cannot_be_authorized_above_sealed_cap():
+def test_protective_buy_limit_cannot_be_authorized_above_sealed_cap(orion_registry, ):
     with pytest.raises(AuthorityContractError, match="buy notional exceeds"):
         _collared_plan(capital_cap_usd=100.0)
 
 
-def test_exact_executor_blocks_identical_state_from_different_paper_account(
+def test_exact_executor_blocks_identical_state_from_different_paper_account(orion_registry,
     tmp_path: Path,
 ):
     plan = _plan()
@@ -1096,7 +1098,7 @@ def test_exact_executor_blocks_identical_state_from_different_paper_account(
     assert not (date_root / "claims").exists()
 
 
-def test_intentional_zero_order_plan_is_authorized_no_trade(tmp_path: Path):
+def test_intentional_zero_order_plan_is_authorized_no_trade(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     result = execute_exact_plan(
         plan_payload=_plan(no_trade=True).to_dict(),
@@ -1111,7 +1113,7 @@ def test_intentional_zero_order_plan_is_authorized_no_trade(tmp_path: Path):
     assert broker.submit_calls == 0
 
 
-def test_direct_exact_new_intents_are_blocked_after_close_without_wal_or_submit(
+def test_direct_exact_new_intents_are_blocked_after_close_without_wal_or_submit(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -1134,7 +1136,7 @@ def test_direct_exact_new_intents_are_blocked_after_close_without_wal_or_submit(
     assert not list((tmp_path / "account_authority").rglob("plan_claim.json"))
 
 
-def test_direct_exact_zero_order_plan_reconciles_after_close(tmp_path: Path):
+def test_direct_exact_zero_order_plan_reconciles_after_close(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     result = execute_exact_plan(
         plan_payload=_plan(no_trade=True).to_dict(),
@@ -1152,7 +1154,7 @@ def test_direct_exact_zero_order_plan_reconciles_after_close(tmp_path: Path):
     assert not list((tmp_path / "wal").rglob("*.json"))
 
 
-def test_completed_wal_recovery_after_close_is_lookup_only_and_reconciles(
+def test_completed_wal_recovery_after_close_is_lookup_only_and_reconciles(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -1185,7 +1187,7 @@ def test_completed_wal_recovery_after_close_is_lookup_only_and_reconciles(
     assert all(row["recovered_by_client_order_id"] for row in recovered.orders_submitted)
 
 
-def test_exact_run_recovery_preserves_original_target_lineage(
+def test_exact_run_recovery_preserves_original_target_lineage(orion_registry,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1253,7 +1255,7 @@ def test_exact_run_recovery_preserves_original_target_lineage(
     assert recovered_handoff["target_attainment_tolerance"] == 0.02
 
 
-def test_immediate_order_id_only_response_refreshes_by_canonical_broker_id(
+def test_immediate_order_id_only_response_refreshes_by_canonical_broker_id(orion_registry,
     tmp_path: Path,
 ):
     class OrderIdOnlyAcceptedBroker(TrackingPaperBroker):
@@ -1374,7 +1376,7 @@ def _seed_legacy_durable_orders(
         )
 
 
-def test_legacy_plan_without_fill_risk_authority_cannot_create_a_new_intent(
+def test_legacy_plan_without_fill_risk_authority_cannot_create_a_new_intent(orion_registry,
     tmp_path: Path,
 ):
     plan = _legacy_pre_fill_risk_plan()
@@ -1396,7 +1398,7 @@ def test_legacy_plan_without_fill_risk_authority_cannot_create_a_new_intent(
     assert not list((tmp_path / "wal").rglob("*/intents/*.json"))
 
 
-def test_legacy_plan_with_all_durable_intents_recovers_lookup_only(
+def test_legacy_plan_with_all_durable_intents_recovers_lookup_only(orion_registry,
     tmp_path: Path,
 ):
     plan = _legacy_pre_fill_risk_plan()
@@ -1424,7 +1426,7 @@ def test_legacy_plan_with_all_durable_intents_recovers_lookup_only(
     assert all(row["recovered_by_client_order_id"] for row in result.orders_submitted)
 
 
-def test_predeploy_market_plan_with_all_durable_intents_recovers_lookup_only(
+def test_predeploy_market_plan_with_all_durable_intents_recovers_lookup_only(orion_registry,
     tmp_path: Path,
 ):
     plan = _legacy_market_plan()
@@ -1455,7 +1457,7 @@ def test_predeploy_market_plan_with_all_durable_intents_recovers_lookup_only(
     assert all(row["recovered_by_client_order_id"] for row in result.orders_submitted)
 
 
-def test_legacy_partial_recovery_resolves_prior_fill_but_never_submits_remainder(
+def test_legacy_partial_recovery_resolves_prior_fill_but_never_submits_remainder(orion_registry,
     tmp_path: Path,
 ):
     plan = _legacy_pre_fill_risk_plan()
@@ -1485,7 +1487,7 @@ def test_legacy_partial_recovery_resolves_prior_fill_but_never_submits_remainder
     assert len(list(wal_root.rglob("*/intents/*.json"))) == 1
 
 
-def test_legacy_partial_recovery_dry_run_does_not_mutate_wal(
+def test_legacy_partial_recovery_dry_run_does_not_mutate_wal(orion_registry,
     tmp_path: Path,
 ):
     plan = _legacy_pre_fill_risk_plan()
@@ -1524,7 +1526,7 @@ def test_legacy_partial_recovery_dry_run_does_not_mutate_wal(
     assert after == before
 
 
-def test_restart_after_accepted_response_loss_recovers_without_duplicate(tmp_path: Path):
+def test_restart_after_accepted_response_loss_recovers_without_duplicate(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker(crash_after_accept=True)
     plan = _plan()
     first = execute_exact_plan(
@@ -1539,7 +1541,7 @@ def test_restart_after_accepted_response_loss_recovers_without_duplicate(tmp_pat
     assert broker.submit_calls == calls_after_first
 
 
-def test_completed_wal_recovery_ignores_later_cap_tightening_and_never_duplicates(
+def test_completed_wal_recovery_ignores_later_cap_tightening_and_never_duplicates(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -1561,7 +1563,7 @@ def test_completed_wal_recovery_ignores_later_cap_tightening_and_never_duplicate
     assert broker.submit_calls == calls
 
 
-def test_partial_buy_recovery_counts_prior_fill_against_tightened_runtime_cap(
+def test_partial_buy_recovery_counts_prior_fill_against_tightened_runtime_cap(orion_registry,
     tmp_path: Path,
 ):
     class MidBatchOpenOrderBroker(TrackingPaperBroker):
@@ -1651,7 +1653,7 @@ def test_partial_buy_recovery_counts_prior_fill_against_tightened_runtime_cap(
     assert "ECONOMICALLY_RECONCILED" in resolution_states
 
 
-def test_partial_wal_recovery_after_close_is_truthful_and_never_duplicates(
+def test_partial_wal_recovery_after_close_is_truthful_and_never_duplicates(orion_registry,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1712,7 +1714,7 @@ def test_partial_wal_recovery_after_close_is_truthful_and_never_duplicates(
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
-def test_foreign_same_date_wal_blocks_a_different_exact_plan_before_broker_mutation(
+def test_foreign_same_date_wal_blocks_a_different_exact_plan_before_broker_mutation(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -1743,7 +1745,7 @@ def _epoch_plan(plan, epoch: str):
     )
 
 
-def test_distinct_paper_drill_epochs_have_isolated_wal_and_claims(tmp_path: Path):
+def test_distinct_paper_drill_epochs_have_isolated_wal_and_claims(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     first = _epoch_plan(_plan(), "2026-08-12T1030ET")
     first_result = execute_exact_plan(
@@ -1776,7 +1778,7 @@ def test_distinct_paper_drill_epochs_have_isolated_wal_and_claims(tmp_path: Path
     assert (tmp_path / "wal/epochs/2026-08-12T1030ET/2026-08-12/intents").is_dir()
 
 
-def test_filled_prior_epoch_blocks_later_epoch_on_lagging_account_snapshot(
+def test_filled_prior_epoch_blocks_later_epoch_on_lagging_account_snapshot(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -1817,7 +1819,7 @@ def test_filled_prior_epoch_blocks_later_epoch_on_lagging_account_snapshot(
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 2
 
 
-def test_three_successive_epochs_validate_ordered_reconciled_state_chain(
+def test_three_successive_epochs_validate_ordered_reconciled_state_chain(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -1899,7 +1901,7 @@ def test_three_successive_epochs_validate_ordered_reconciled_state_chain(
     assert broker.submit_calls == 4
 
 
-def test_latest_epoch_success_replay_uses_current_wal_without_resubmission(
+def test_latest_epoch_success_replay_uses_current_wal_without_resubmission(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -1973,7 +1975,7 @@ def test_latest_epoch_success_replay_uses_current_wal_without_resubmission(
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 4
 
 
-def test_recovery_dry_run_is_wal_nonmutating_and_does_not_poison_next_epoch(
+def test_recovery_dry_run_is_wal_nonmutating_and_does_not_poison_next_epoch(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -2031,7 +2033,7 @@ def test_recovery_dry_run_is_wal_nonmutating_and_does_not_poison_next_epoch(
     assert broker.submit_calls == 2
 
 
-def test_out_of_order_paper_drill_epoch_is_blocked_before_wal_or_submission(
+def test_out_of_order_paper_drill_epoch_is_blocked_before_wal_or_submission(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -2076,7 +2078,7 @@ def test_out_of_order_paper_drill_epoch_is_blocked_before_wal_or_submission(
     ).exists()
 
 
-def test_later_no_trade_claim_blocks_earlier_trade_epoch(tmp_path: Path):
+def test_later_no_trade_claim_blocks_earlier_trade_epoch(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     later_no_trade = _epoch_plan(
         _plan(no_trade=True),
@@ -2111,7 +2113,7 @@ def test_later_no_trade_claim_blocks_earlier_trade_epoch(tmp_path: Path):
     ).exists()
 
 
-def test_current_epoch_recovery_explains_own_fill_after_prior_epoch(
+def test_current_epoch_recovery_explains_own_fill_after_prior_epoch(orion_registry,
     tmp_path: Path,
 ):
     class OneAmbiguousSecondEpochSellBroker(TrackingPaperBroker):
@@ -2203,7 +2205,7 @@ def test_current_epoch_recovery_explains_own_fill_after_prior_epoch(
     assert broker.submit_calls == 4
 
 
-def test_distinct_epoch_cannot_change_account_date_wal_base(tmp_path: Path):
+def test_distinct_epoch_cannot_change_account_date_wal_base(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     first = _epoch_plan(_plan(), "2026-08-12T1030ET")
     assert execute_exact_plan(
@@ -2244,7 +2246,7 @@ def test_distinct_epoch_cannot_change_account_date_wal_base(tmp_path: Path):
     assert not (tmp_path / "wal-b").exists()
 
 
-def test_reusing_epoch_with_different_plan_is_blocked(tmp_path: Path):
+def test_reusing_epoch_with_different_plan_is_blocked(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     first = _epoch_plan(_plan(), "2026-08-12T1030ET")
     execute_exact_plan(
@@ -2263,7 +2265,7 @@ def test_reusing_epoch_with_different_plan_is_blocked(tmp_path: Path):
     assert broker.submit_calls == 2
 
 
-def test_unresolved_prior_epoch_blocks_new_epoch(tmp_path: Path):
+def test_unresolved_prior_epoch_blocks_new_epoch(orion_registry, tmp_path: Path):
     class UnknownAfterAcceptBroker(TrackingPaperBroker):
         def find_order_by_client_id(self, client_id):
             raise TimeoutError(f"broker lookup unavailable for {client_id}")
@@ -2290,7 +2292,7 @@ def test_unresolved_prior_epoch_blocks_new_epoch(tmp_path: Path):
     ["2026-08-12T1130ET", None],
     ids=["epoch-to-epoch", "epoch-to-legacy"],
 )
-def test_prior_accepted_order_blocks_unrelated_later_namespace(
+def test_prior_accepted_order_blocks_unrelated_later_namespace(orion_registry,
     tmp_path: Path,
     second_epoch: str | None,
 ):
@@ -2372,7 +2374,7 @@ def test_prior_accepted_order_blocks_unrelated_later_namespace(
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
-def test_authorizer_precheck_blocks_foreign_accepted_order(
+def test_authorizer_precheck_blocks_foreign_accepted_order(orion_registry,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -2448,7 +2450,7 @@ def test_authorizer_precheck_blocks_foreign_accepted_order(
 
 
 @pytest.mark.parametrize("no_trade", [False, True], ids=["trade", "no-trade"])
-def test_any_unrelated_broker_open_order_blocks_exact_plan(
+def test_any_unrelated_broker_open_order_blocks_exact_plan(orion_registry,
     tmp_path: Path,
     no_trade: bool,
 ):
@@ -2484,7 +2486,7 @@ def test_any_unrelated_broker_open_order_blocks_exact_plan(
     assert not list((tmp_path / "wal").rglob("*/intents/*.json"))
 
 
-def test_open_order_appearing_mid_batch_blocks_every_later_intent(
+def test_open_order_appearing_mid_batch_blocks_every_later_intent(orion_registry,
     tmp_path: Path,
 ):
     class MidBatchExternalOrderBroker(TrackingPaperBroker):
@@ -2530,7 +2532,7 @@ def test_open_order_appearing_mid_batch_blocks_every_later_intent(
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
-def test_external_fill_disappearing_from_open_orders_blocks_before_new_wal(
+def test_external_fill_disappearing_from_open_orders_blocks_before_new_wal(orion_registry,
     tmp_path: Path,
 ):
     class ExternalTerminalFillBroker(TrackingPaperBroker):
@@ -2570,7 +2572,7 @@ def test_external_fill_disappearing_from_open_orders_blocks_before_new_wal(
     assert not list((tmp_path / "wal").rglob("*/intents/*.json"))
 
 
-def test_concurrent_different_same_date_plans_have_one_os_locked_winner(
+def test_concurrent_different_same_date_plans_have_one_os_locked_winner(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -2646,7 +2648,7 @@ def test_concurrent_different_same_date_plans_have_one_os_locked_winner(
     assert claim["plan_hash"] == winner.plan_hash_received
 
 
-def test_concurrent_different_plans_cannot_escape_via_distinct_wal_roots(
+def test_concurrent_different_plans_cannot_escape_via_distinct_wal_roots(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -2712,7 +2714,7 @@ def test_concurrent_different_plans_cannot_escape_via_distinct_wal_roots(
     assert not (losing_wal / first.trade_date / "intents").exists()
 
 
-def test_immutable_plan_claim_tamper_blocks_recovery_without_resubmission(
+def test_immutable_plan_claim_tamper_blocks_recovery_without_resubmission(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -2793,7 +2795,7 @@ class PartialSellBroker(TrackingPaperBroker):
     ],
     ids=["zero-fill", "partial-fill", "missing-fill-price"],
 )
-def test_contradictory_filled_sell_never_advances_to_buy(
+def test_contradictory_filled_sell_never_advances_to_buy(orion_registry,
     tmp_path: Path,
     filled_qty: str,
     filled_avg_price: str,
@@ -2833,7 +2835,7 @@ def test_contradictory_filled_sell_never_advances_to_buy(
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
-def test_broker_observation_persistence_failure_stops_after_first_submission(
+def test_broker_observation_persistence_failure_stops_after_first_submission(orion_registry,
     tmp_path: Path,
     monkeypatch,
 ):
@@ -2863,7 +2865,7 @@ def test_broker_observation_persistence_failure_stops_after_first_submission(
     assert not list((tmp_path / "wal").rglob("*/resolutions/*/*.json"))
 
 
-def test_prior_partial_fill_blocks_unrelated_later_epoch(tmp_path: Path):
+def test_prior_partial_fill_blocks_unrelated_later_epoch(orion_registry, tmp_path: Path):
     broker = PartialSellBroker()
     first = _epoch_plan(_plan(), "2026-08-12T1030ET")
     partial = execute_exact_plan(
@@ -2917,7 +2919,7 @@ def test_prior_partial_fill_blocks_unrelated_later_epoch(tmp_path: Path):
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
-def test_durable_partial_fill_cannot_be_erased_by_lookup_and_lagging_snapshot(
+def test_durable_partial_fill_cannot_be_erased_by_lookup_and_lagging_snapshot(orion_registry,
     tmp_path: Path,
 ):
     broker = PartialSellBroker()
@@ -2986,7 +2988,7 @@ def test_durable_partial_fill_cannot_be_erased_by_lookup_and_lagging_snapshot(
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
-def test_partial_sell_open_then_filled_recovers_stable_id_before_buy(
+def test_partial_sell_open_then_filled_recovers_stable_id_before_buy(orion_registry,
     tmp_path: Path,
 ):
     broker = PartialSellBroker()
@@ -3029,7 +3031,7 @@ def test_partial_sell_open_then_filled_recovers_stable_id_before_buy(
     assert broker.submit_calls == 2
 
 
-def test_partial_sell_then_canceled_preserves_fill_and_never_buys(tmp_path: Path):
+def test_partial_sell_then_canceled_preserves_fill_and_never_buys(orion_registry, tmp_path: Path):
     broker = PartialSellBroker()
     plan = _plan()
     first = execute_exact_plan(
@@ -3082,7 +3084,7 @@ def test_partial_sell_then_canceled_preserves_fill_and_never_buys(tmp_path: Path
     assert broker.submit_calls == 1
 
 
-def test_alpaca_enum_qualified_terminal_status_is_recognized(tmp_path: Path):
+def test_alpaca_enum_qualified_terminal_status_is_recognized(orion_registry, tmp_path: Path):
     class EnumStringBroker(TrackingPaperBroker):
         def submit_market_order(self, **kwargs):
             row = super().submit_market_order(**kwargs)
@@ -3105,7 +3107,7 @@ def test_alpaca_enum_qualified_terminal_status_is_recognized(tmp_path: Path):
     assert [row["side"] for row in result.orders_filled] == ["SELL", "BUY"]
 
 
-def test_august_7_alternative_target_cannot_influence_exact_executor(tmp_path: Path):
+def test_august_7_alternative_target_cannot_influence_exact_executor(orion_registry, tmp_path: Path):
     alternate_evidence = {
         "approved_target_rows": [{"symbol": "QCOM", "target_weight": 1.0}],
         "alternate_target_artifact": (
@@ -3123,7 +3125,7 @@ def test_august_7_alternative_target_cannot_influence_exact_executor(tmp_path: P
     assert "QCOM" not in {row["symbol"] for row in result.orders_submitted}
 
 
-def test_full_batch_asset_failure_blocks_before_any_submission(tmp_path: Path):
+def test_full_batch_asset_failure_blocks_before_any_submission(orion_registry, tmp_path: Path):
     class BadAssetBroker(TrackingPaperBroker):
         def get_asset(self, symbol):
             row = super().get_asset(symbol)
@@ -3140,7 +3142,7 @@ def test_full_batch_asset_failure_blocks_before_any_submission(tmp_path: Path):
     assert broker.submit_calls == 0
 
 
-def test_stale_exact_plan_fails_closed_before_submission(tmp_path: Path):
+def test_stale_exact_plan_fails_closed_before_submission(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     result = execute_exact_plan(
         plan_payload=_plan().to_dict(),
@@ -3156,7 +3158,7 @@ def test_stale_exact_plan_fails_closed_before_submission(tmp_path: Path):
     assert broker.submit_calls == 0
 
 
-def test_runtime_dynamic_cap_tightening_blocks_before_submission(tmp_path: Path):
+def test_runtime_dynamic_cap_tightening_blocks_before_submission(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     result = execute_exact_plan(
         plan_payload=_plan().to_dict(),
@@ -3172,7 +3174,7 @@ def test_runtime_dynamic_cap_tightening_blocks_before_submission(tmp_path: Path)
 
 
 @pytest.mark.parametrize("freshness", ["", "not-a-number", "0"])
-def test_missing_or_invalid_freshness_never_executes_old_plan(tmp_path: Path, freshness: str):
+def test_missing_or_invalid_freshness_never_executes_old_plan(orion_registry, tmp_path: Path, freshness: str):
     broker = TrackingPaperBroker()
     env = _env()
     if freshness == "":
@@ -3195,7 +3197,7 @@ def test_missing_or_invalid_freshness_never_executes_old_plan(tmp_path: Path, fr
     assert broker.submit_calls == 0
 
 
-def test_post_submit_status_timeout_preserves_submitted_evidence(tmp_path: Path):
+def test_post_submit_status_timeout_preserves_submitted_evidence(orion_registry, tmp_path: Path):
     class StatusTimeoutBroker(TrackingPaperBroker):
         def submit_market_order(self, **kwargs):
             row = super().submit_market_order(**kwargs)
@@ -3218,7 +3220,7 @@ def test_post_submit_status_timeout_preserves_submitted_evidence(tmp_path: Path)
     assert "post_submit_broker_status_refresh_failed" in result.reason_code
 
 
-def test_post_fill_snapshot_timeout_preserves_all_submitted_evidence(tmp_path: Path):
+def test_post_fill_snapshot_timeout_preserves_all_submitted_evidence(orion_registry, tmp_path: Path):
     class FinalSnapshotTimeoutBroker(TrackingPaperBroker):
         def __init__(self):
             super().__init__()
@@ -3242,7 +3244,7 @@ def test_post_fill_snapshot_timeout_preserves_all_submitted_evidence(tmp_path: P
     assert "post_submit_broker_snapshot_failed" in result.reason_code
 
 
-def test_recovery_blocks_unexplained_external_state_drift_before_new_order(tmp_path: Path):
+def test_recovery_blocks_unexplained_external_state_drift_before_new_order(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     plan = _plan()
     # Durable first sell exists and is filled at broker; the buy has not begun.
@@ -3275,7 +3277,7 @@ def test_recovery_blocks_unexplained_external_state_drift_before_new_order(tmp_p
     assert broker.submit_calls == calls
 
 
-def test_mutable_paper_target_without_v3_is_structurally_blocked(tmp_path: Path):
+def test_mutable_paper_target_without_v3_is_structurally_blocked(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     env = _env()
     env.pop("CAERUS_REQUIRE_EXACT_EXECUTION_PLAN", None)
@@ -3287,7 +3289,7 @@ def test_mutable_paper_target_without_v3_is_structurally_blocked(tmp_path: Path)
     assert broker.submit_calls == 0
 
 
-def test_fully_armed_live_capital_is_structurally_disabled(tmp_path: Path):
+def test_fully_armed_live_capital_is_structurally_disabled(orion_registry, tmp_path: Path):
     class LiveBroker(TrackingPaperBroker):
         paper = False
         base_url = "https://api.alpaca.markets"
@@ -3310,7 +3312,7 @@ def test_fully_armed_live_capital_is_structurally_disabled(tmp_path: Path):
     assert broker.submit_calls == 0
 
 
-def test_production_entrypoint_routes_v3_directly_and_writes_canonical_artifacts(tmp_path: Path):
+def test_production_entrypoint_routes_v3_directly_and_writes_canonical_artifacts(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     env = {**_env(), "CAERUS_REQUIRE_EXACT_EXECUTION_PLAN": "1"}
     exact = _plan()
@@ -3352,7 +3354,7 @@ def test_production_entrypoint_routes_v3_directly_and_writes_canonical_artifacts
     ]
 
 
-def test_exact_executor_fails_terminal_verification_for_wrong_equity_basis(
+def test_exact_executor_fails_terminal_verification_for_wrong_equity_basis(orion_registry,
     tmp_path: Path,
 ):
     from core.whole_share_feasibility import seal_whole_share_proof
@@ -3456,7 +3458,7 @@ def test_exact_executor_fails_terminal_verification_for_wrong_equity_basis(
     )
 
 
-def test_exact_orders_are_blocked_after_market_close_before_submission(tmp_path: Path):
+def test_exact_orders_are_blocked_after_market_close_before_submission(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     exact = _plan()
 
@@ -3480,7 +3482,7 @@ def test_exact_orders_are_blocked_after_market_close_before_submission(tmp_path:
     assert gate["submission_allowed"] is False
 
 
-def test_exact_zero_order_verification_is_allowed_after_market_close(tmp_path: Path):
+def test_exact_zero_order_verification_is_allowed_after_market_close(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     exact = _plan(no_trade=True)
 
@@ -3504,7 +3506,7 @@ def test_exact_zero_order_verification_is_allowed_after_market_close(tmp_path: P
     assert gate["zero_order_verification_allowed"] is True
 
 
-def test_governed_entrypoint_allows_lookup_only_wal_recovery_after_close(
+def test_governed_entrypoint_allows_lookup_only_wal_recovery_after_close(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -3541,7 +3543,7 @@ def test_governed_entrypoint_allows_lookup_only_wal_recovery_after_close(
     assert all(row["recovered_by_client_order_id"] for row in submitted)
 
 
-def test_no_trade_attribution_uses_execution_pre_to_post_nav_not_authorization_nav(
+def test_no_trade_attribution_uses_execution_pre_to_post_nav_not_authorization_nav(orion_registry,
     tmp_path: Path,
 ):
     class MovingMarkNoTradeBroker(TrackingPaperBroker):
@@ -3596,7 +3598,7 @@ def test_no_trade_attribution_uses_execution_pre_to_post_nav_not_authorization_n
     assert timing["ending_snapshot_residual"] == pytest.approx(0.0)
 
 
-def test_no_trade_fails_when_pre_snapshot_residual_exceeds_its_bps_budget(
+def test_no_trade_fails_when_pre_snapshot_residual_exceeds_its_bps_budget(orion_registry,
     tmp_path: Path,
 ):
     class ExcessPreSnapshotResidualBroker(TrackingPaperBroker):
@@ -3646,7 +3648,7 @@ def test_no_trade_fails_when_pre_snapshot_residual_exceeds_its_bps_budget(
     assert "STARTING_SNAPSHOT_NAV_IDENTITY_MISMATCH" in attribution["reason_codes"]
 
 
-def test_protective_exact_style_rejects_extended_hours_orders():
+def test_protective_exact_style_rejects_extended_hours_orders(orion_registry, ):
     base = _plan().to_dict()
     with pytest.raises(
         AuthorityContractError,
@@ -3684,7 +3686,7 @@ def test_protective_exact_style_rejects_extended_hours_orders():
         )
 
 
-def test_orchestrator_state_prewrite_failure_blocks_before_broker_mutation(
+def test_orchestrator_state_prewrite_failure_blocks_before_broker_mutation(orion_registry,
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     import core.orchestrator_state as orchestrator_state
@@ -3710,7 +3712,7 @@ def test_orchestrator_state_prewrite_failure_blocks_before_broker_mutation(
     assert broker.submit_calls == 0
 
 
-def test_wrapper_preserves_submission_unknown_when_economic_truth_is_unavailable(
+def test_wrapper_preserves_submission_unknown_when_economic_truth_is_unavailable(orion_registry,
     tmp_path: Path,
 ):
     class AmbiguousAcceptedBroker(TrackingPaperBroker):
@@ -3763,7 +3765,7 @@ def test_wrapper_preserves_submission_unknown_when_economic_truth_is_unavailable
     ).status.value == "BLOCKED_SUBMISSION_UNKNOWN"
 
 
-def test_dry_run_postvalidation_snapshot_failure_is_not_green(
+def test_dry_run_postvalidation_snapshot_failure_is_not_green(orion_registry,
     tmp_path: Path,
 ):
     class DryPostSnapshotFailureBroker(TrackingPaperBroker):
@@ -3793,7 +3795,7 @@ def test_dry_run_postvalidation_snapshot_failure_is_not_green(
     ] == "FAIL"
 
 
-def test_clean_dry_run_reports_validated_no_submission_consistently(
+def test_clean_dry_run_reports_validated_no_submission_consistently(orion_registry,
     tmp_path: Path,
 ):
     result = run_live_pilot(
@@ -3813,7 +3815,7 @@ def test_clean_dry_run_reports_validated_no_submission_consistently(
     assert integrity["status"] == "OK"
 
 
-def test_actual_execution_failure_is_hash_chained_as_failed_not_predeclared_pass(
+def test_actual_execution_failure_is_hash_chained_as_failed_not_predeclared_pass(orion_registry,
     tmp_path: Path,
 ):
     class BadAssetBroker(TrackingPaperBroker):
@@ -3843,7 +3845,7 @@ def test_actual_execution_failure_is_hash_chained_as_failed_not_predeclared_pass
     assert broker.submit_calls == 0
 
 
-def test_economic_verification_failure_is_consistent_in_every_terminal_view(
+def test_economic_verification_failure_is_consistent_in_every_terminal_view(orion_registry,
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     import core.economic_reconciliation as economics
@@ -3874,7 +3876,7 @@ def test_economic_verification_failure_is_consistent_in_every_terminal_view(
     assert attempts[-1].terminal_outcome is TerminalOutcome.SYSTEM_FAILURE
 
 
-def test_attempt_registry_failure_cannot_leave_success_artifacts(
+def test_attempt_registry_failure_cannot_leave_success_artifacts(orion_registry,
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     import core.execution_attempt_registry as registry
@@ -3901,7 +3903,7 @@ def test_attempt_registry_failure_cannot_leave_success_artifacts(
     assert json.loads((run_root / "audit" / "execution_integrity.json").read_text())["status"] == "FAIL"
 
 
-def test_attempt_selection_pointer_failure_cannot_leave_success_artifacts(
+def test_attempt_selection_pointer_failure_cannot_leave_success_artifacts(orion_registry,
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     import core.execution_attempt_registry as registry
@@ -3939,7 +3941,7 @@ def test_attempt_selection_pointer_failure_cannot_leave_success_artifacts(
     assert results["status"] == results["terminal_status"] == "FAILED_RECONCILIATION"
 
 
-def test_fresh_broker_decision_seals_transition_before_executor(tmp_path: Path):
+def test_fresh_broker_decision_seals_transition_before_executor(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     source = tmp_path / "target-plan.json"
     source.write_text("{}\n", encoding="utf-8")
@@ -4011,7 +4013,7 @@ def test_fresh_broker_decision_seals_transition_before_executor(tmp_path: Path):
     )
 
 
-def test_authorizer_sizes_target_from_full_current_broker_account(tmp_path: Path):
+def test_authorizer_sizes_target_from_full_current_broker_account(orion_registry, tmp_path: Path):
     broker = TrackingPaperBroker()
     broker.cash = 1100.0
     source = tmp_path / "full-account-target-plan.json"
@@ -4104,7 +4106,7 @@ def test_authorizer_sizes_target_from_full_current_broker_account(tmp_path: Path
     ]
 
 
-def test_august_17_full_account_replay_has_no_avoidable_round_trip(
+def test_august_17_full_account_replay_has_no_avoidable_round_trip(orion_registry,
     tmp_path: Path,
 ):
     class August17Broker(TrackingPaperBroker):
@@ -4225,7 +4227,7 @@ def test_august_17_full_account_replay_has_no_avoidable_round_trip(
         {"CAERUS_LIVE_PILOT_CAP_PCT": "0.85"},
     ],
 )
-def test_governed_full_account_authorization_rejects_synthetic_caps_before_plan(
+def test_governed_full_account_authorization_rejects_synthetic_caps_before_plan(orion_registry,
     tmp_path: Path,
     cap_env: dict[str, str],
 ):
@@ -4285,7 +4287,7 @@ def test_governed_full_account_authorization_rejects_synthetic_caps_before_plan(
     assert broker.submit_calls == 0
 
 
-def test_fresh_broker_decision_preserves_explicit_zero_weight_exit(
+def test_fresh_broker_decision_preserves_explicit_zero_weight_exit(orion_registry,
     tmp_path: Path,
 ):
     broker = TrackingPaperBroker()
@@ -4321,7 +4323,7 @@ def test_fresh_broker_decision_preserves_explicit_zero_weight_exit(
     assert exact.risk_state["trade_meta"]["broker_authoritative_prices"] is True
 
 
-def test_closed_session_final_bar_can_authorize_natural_no_trade(tmp_path: Path):
+def test_closed_session_final_bar_can_authorize_natural_no_trade(orion_registry, tmp_path: Path):
     broker = SessionFinalBarPaperBroker()
     rows = [{"symbol": "OLD", "target_weight": 0.1, "price": 5.0}]
     plan, source, regime_state_root = _governed_authorizer_fixture(
@@ -4410,7 +4412,7 @@ def test_closed_session_final_bar_can_authorize_natural_no_trade(tmp_path: Path)
     )["status"] == "OK"
 
 
-def test_governed_no_trade_attains_proven_whole_share_target(tmp_path: Path):
+def test_governed_no_trade_attains_proven_whole_share_target(orion_registry, tmp_path: Path):
     from core.whole_share_feasibility import seal_whole_share_proof
 
     package_hash = "approved-package-hash"
@@ -4482,7 +4484,7 @@ def test_governed_no_trade_attains_proven_whole_share_target(tmp_path: Path):
     )["status"] == "OK"
 
 
-def test_authorizer_rejects_unrelated_open_order_before_market_pricing(
+def test_authorizer_rejects_unrelated_open_order_before_market_pricing(orion_registry,
     tmp_path: Path,
 ):
     class OpenOrderDecisionBroker(SessionFinalBarPaperBroker):
@@ -4523,7 +4525,7 @@ def test_authorizer_rejects_unrelated_open_order_before_market_pricing(
     assert broker.submit_calls == 0
 
 
-def test_closed_session_all_cash_book_needs_no_market_mark(tmp_path: Path):
+def test_closed_session_all_cash_book_needs_no_market_mark(orion_registry, tmp_path: Path):
     broker = SessionFinalBarPaperBroker()
     broker.positions = []
     broker.cash = 1000.0
@@ -4558,7 +4560,7 @@ def test_closed_session_all_cash_book_needs_no_market_mark(tmp_path: Path):
     assert broker.submit_calls == 0
 
 
-def test_closed_session_material_drift_is_sealed_but_never_submittable(
+def test_closed_session_material_drift_is_sealed_but_never_submittable(orion_registry,
     tmp_path: Path,
 ):
     broker = SessionFinalBarPaperBroker()
@@ -4621,7 +4623,7 @@ def test_closed_session_material_drift_is_sealed_but_never_submittable(
 
 
 @pytest.mark.parametrize("final_bar_mode", ["missing", "wrong_timestamp", "nonfinite"])
-def test_closed_session_final_bar_validation_fails_closed(
+def test_closed_session_final_bar_validation_fails_closed(orion_registry,
     tmp_path: Path,
     final_bar_mode: str,
 ):
@@ -4650,7 +4652,7 @@ def test_closed_session_final_bar_validation_fails_closed(
 
 
 @pytest.mark.parametrize("calendar_mode", ["empty", "mismatch"])
-def test_closed_session_broker_calendar_must_match_governed_session(
+def test_closed_session_broker_calendar_must_match_governed_session(orion_registry,
     tmp_path: Path,
     calendar_mode: str,
 ):
@@ -4678,7 +4680,7 @@ def test_closed_session_broker_calendar_must_match_governed_session(
     assert broker.session_final_bar_calls == 0
 
 
-def test_immediately_pre_close_stale_latest_trade_cannot_use_final_bar_branch(
+def test_immediately_pre_close_stale_latest_trade_cannot_use_final_bar_branch(orion_registry,
     tmp_path: Path,
 ):
     broker = SessionFinalBarPaperBroker()
@@ -4705,7 +4707,7 @@ def test_immediately_pre_close_stale_latest_trade_cannot_use_final_bar_branch(
     assert broker.submit_calls == 0
 
 
-def test_open_session_authorization_cannot_cross_the_official_close(
+def test_open_session_authorization_cannot_cross_the_official_close(orion_registry,
     tmp_path: Path,
 ):
     class LastSecondBroker(SessionFinalBarPaperBroker):
@@ -4745,7 +4747,7 @@ def test_open_session_authorization_cannot_cross_the_official_close(
     assert broker.submit_calls == 0
 
 
-def test_open_session_quote_freshness_is_rechecked_at_authorization_seal(
+def test_open_session_quote_freshness_is_rechecked_at_authorization_seal(orion_registry,
     tmp_path: Path,
 ):
     broker = SessionFinalBarPaperBroker()
@@ -4784,7 +4786,7 @@ def test_open_session_quote_freshness_is_rechecked_at_authorization_seal(
     ],
     ids=["exactly-120-seconds", "120-seconds-plus-1ms"],
 )
-def test_open_session_quote_seal_freshness_boundary(
+def test_open_session_quote_seal_freshness_boundary(orion_registry,
     tmp_path: Path,
     completed_at: str,
     should_pass: bool,
@@ -4850,7 +4852,7 @@ def test_open_session_quote_seal_freshness_boundary(
     ],
     ids=["executor-exactly-120-seconds", "executor-120-seconds-plus-1ms"],
 )
-def test_executor_revalidates_open_quote_freshness_before_first_wal(
+def test_executor_revalidates_open_quote_freshness_before_first_wal(orion_registry,
     tmp_path: Path,
     execution_time: dt.datetime,
     should_submit: bool,
@@ -4898,7 +4900,7 @@ def test_executor_revalidates_open_quote_freshness_before_first_wal(
     assert not list((tmp_path / "wal").rglob("*/intents/*.json"))
 
 
-def test_executor_revalidates_quote_freshness_before_each_new_order(
+def test_executor_revalidates_quote_freshness_before_each_new_order(orion_registry,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -4952,7 +4954,7 @@ def test_executor_revalidates_quote_freshness_before_each_new_order(
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
-def test_executor_accepts_fresh_extra_quote_for_whole_share_no_action_target(
+def test_executor_accepts_fresh_extra_quote_for_whole_share_no_action_target(orion_registry,
     tmp_path: Path,
 ):
     broker = SessionFinalBarPaperBroker()
@@ -4995,7 +4997,7 @@ def test_executor_accepts_fresh_extra_quote_for_whole_share_no_action_target(
     assert broker.submit_calls == len(exact.orders)
 
 
-def test_open_session_rejects_a_trade_timestamped_at_or_after_close(
+def test_open_session_rejects_a_trade_timestamped_at_or_after_close(orion_registry,
     tmp_path: Path,
 ):
     class PostCloseQuoteBroker(SessionFinalBarPaperBroker):
@@ -5041,7 +5043,7 @@ def test_open_session_rejects_a_trade_timestamped_at_or_after_close(
         ("2026-08-13T20:15:00+00:00", "RUN_DATE_NOT_TODAY"),
     ],
 )
-def test_non_session_authorization_cannot_use_closed_final_bar_branch(
+def test_non_session_authorization_cannot_use_closed_final_bar_branch(orion_registry,
     tmp_path: Path,
     created_at: str,
     reason: str,
@@ -5070,7 +5072,7 @@ def test_non_session_authorization_cannot_use_closed_final_bar_branch(
     assert broker.submit_calls == 0
 
 
-def test_authorizer_accepts_real_governed_paper_target_attainment_package(tmp_path: Path):
+def test_authorizer_accepts_real_governed_paper_target_attainment_package(orion_registry, tmp_path: Path):
     policy = {
         "schema_version": "caerus.target_attainment_policy.v1",
         "account_scope": "PAPER",
@@ -5155,7 +5157,7 @@ def test_authorizer_accepts_real_governed_paper_target_attainment_package(tmp_pa
 
 
 @pytest.mark.parametrize("quote_mode", ["missing", "stale"])
-def test_authorizer_fails_closed_on_incomplete_or_stale_final_market_state(
+def test_authorizer_fails_closed_on_incomplete_or_stale_final_market_state(orion_registry,
     tmp_path: Path, quote_mode: str
 ):
     class BadQuoteBroker(TrackingPaperBroker):

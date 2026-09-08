@@ -1,5 +1,8 @@
 # Orchestrator Context
 
+> **Aquila owner decision — 2026-09-08.** Brett authorized activation of Caerus Aquila in the existing Alpaca PAPER account at 50%. This revision configures an experimental TOP10_EQUAL monthly sleeve: 50% Aquila,45% Orion,5% cash at formation; Aquila shares remain fixed between formations. Orion retains the account risk-history identity. Deployment receipts determine runtime activation, and the existing emergency cooldown still controls buying. This authorization does not establish alpha or change Lyra Live. See `docs/governance/AQUILA_PAPER.md` for the contract.
+
+
 > **Operating evidence override — reviewed 2026-09-05.** [Current maintenance and research plan](../../../atlas/docs/operations/caerus_data_first_rebuild_plan_20260902.md) governs priorities. Lyra's new submissions were paused September 2; existing positions and Shadow were preserved. Orion retains PAPER authority but September 3 failed reconciliation and September 4 blocked before submission; email escalation failed with SMTP 535. Reconciled account balances do not prove recovery or sleeve-only performance. Maintain fail-closed controls; no tuning, order, deployment or risk change is authorized by cleanup. Broader research is paused; MES is the sole candidate and has zero economic observations. Older active-state and priority prose below cannot override these dated receipts. This local documentation update does not change deployed runtime.
 
 
@@ -28,14 +31,14 @@ PAPER, and Shadow lanes, deterministic
 artifacts and an explicit research-to-production promotion ladder.
 
 - Lyra Live is active, funded, recurring, and separately governed from Orion PAPER.
-- Orion is the active PAPER capital sleeve. Polaris, Orion, and Lyra also run in
+- Orion is the primary PAPER capital sleeve; Aquila is the experimental monthly PAPER sleeve. Polaris, Orion, and Lyra also run in
   Shadow for modeled comparison; Shadow status does not negate capital authority.
 
 - The owner-approved 2026-08-14 portfolio operating-model migration is
   implemented. Precompute admits one immutable session, produces one terminal
   daily decision for every registered non-frozen sleeve, and applies one
-  configured account allocator. Orion currently receives 100% of sleeve risk
-  budget; adding sleeves is a complete registry/policy change, not a new lane.
+  configured account allocator. Aquila receives 10/19 and Orion9/19 of the sleeve risk
+  budget at monthly formation; adding sleeves is a complete registry/policy change, not a new lane.
 - The session, decisions, allocation, sealed target, exact plan, fills, causal
   ownership, valuation, and daily audit retain immutable hash lineage. Risk may
   only constrain. Recovery target substitution and downstream strategy

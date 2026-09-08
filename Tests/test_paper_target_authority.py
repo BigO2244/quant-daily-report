@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from Tests.fixtures.orion_registry import orion_registry, orion_registry_payload, orion_manifest_payload
+
 import json
 import copy
 from pathlib import Path
@@ -53,7 +55,7 @@ def _sealed_fixture(tmp_path: Path) -> Path:
     return payload_path
 
 
-def test_seal_quarantines_research_and_publishes_one_target_hash(tmp_path: Path) -> None:
+def test_seal_quarantines_research_and_publishes_one_target_hash(orion_registry, tmp_path: Path) -> None:
     payload_path = _sealed_fixture(tmp_path)
     bundle = payload_path.parent
     package = json.loads((bundle / "paper_target_package.json").read_text())
@@ -82,7 +84,7 @@ def test_seal_quarantines_research_and_publishes_one_target_hash(tmp_path: Path)
     ) == []
 
 
-def test_sealed_target_tamper_fails_closed(tmp_path: Path) -> None:
+def test_sealed_target_tamper_fails_closed(orion_registry, tmp_path: Path) -> None:
     payload_path = _sealed_fixture(tmp_path)
     signals_path = payload_path.with_name("signals.json")
     signals = json.loads(signals_path.read_text())
@@ -98,7 +100,7 @@ def test_sealed_target_tamper_fails_closed(tmp_path: Path) -> None:
     assert "paper_target:file_hash_mismatch:signals" in failures
 
 
-def test_seal_is_independent_of_mutable_shadow_publication(tmp_path: Path) -> None:
+def test_seal_is_independent_of_mutable_shadow_publication(orion_registry, tmp_path: Path) -> None:
     payload_path = _sealed_fixture(tmp_path)
     bundle = payload_path.parent
     package = json.loads((bundle / "paper_target_package.json").read_text())
@@ -131,7 +133,7 @@ def test_seal_is_independent_of_mutable_shadow_publication(tmp_path: Path) -> No
     assert "paper_target:source_strategy_hash_mismatch" in failures
 
 
-def test_readiness_certifies_target_not_fake_preopen_orders(tmp_path: Path) -> None:
+def test_readiness_certifies_target_not_fake_preopen_orders(orion_registry, tmp_path: Path) -> None:
     payload_path = _sealed_fixture(tmp_path)
     broker = FakeBroker(_account())
 
@@ -153,13 +155,11 @@ def test_readiness_certifies_target_not_fake_preopen_orders(tmp_path: Path) -> N
     assert broker.submit_calls == 0
 
 
-def test_allocator_seal_supports_governed_multiple_capital_sleeves(
+def test_allocator_seal_supports_governed_multiple_capital_sleeves(orion_registry,
     tmp_path: Path, monkeypatch
 ) -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    registry_payload = json.loads(
-        (repo_root / "config" / "research" / "strategy_registry.json").read_text()
-    )
+    registry_payload = orion_registry_payload()
     registry_payload = copy.deepcopy(registry_payload)
     control_payload = registry_payload["sleeve_control_plane"]
     control_payload["strategy_overrides"]["caerus_lyra"].update(
@@ -191,12 +191,12 @@ def test_allocator_seal_supports_governed_multiple_capital_sleeves(
         }
     )
     registry_path = tmp_path / "config" / "research" / "strategy_registry.json"
-    registry_path.parent.mkdir(parents=True)
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
     registry_path.write_text(json.dumps(registry_payload), encoding="utf-8")
     manifest_path = tmp_path / "research_registry" / "sleeves" / "manifest.json"
-    manifest_path.parent.mkdir(parents=True)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
-        (repo_root / "research_registry" / "sleeves" / "manifest.json").read_text(),
+        json.dumps(orion_manifest_payload()),
         encoding="utf-8",
     )
     control = SleeveControlRegistry.from_path(
@@ -275,3 +275,18 @@ def test_allocator_seal_supports_governed_multiple_capital_sleeves(
         "caerus_orion",
         "caerus_lyra",
     }
+
+
+def test_quantity_contract_cannot_be_injected_into_sealed_legacy_package(orion_registry, tmp_path):
+    payload_path = _sealed_fixture(tmp_path)
+    package_path = payload_path.with_name("paper_target_package.json")
+    package = json.loads(package_path.read_text())
+    package["quantity_contracts"] = {"caerus_aquila": {"target_quantities": {"AAPL": 100}}}
+    package_path.write_text(json.dumps(package))
+    # Rebind the outer file checksum to exercise the independent semantic gate.
+    contract_path = payload_path.with_name("contract.json")
+    contract = json.loads(contract_path.read_text())
+    contract["file_sha256"]["paper_target_package"] = paper_target_authority._file_hash(package_path)
+    contract_path.write_text(json.dumps(contract))
+    failures = validate_sealed_paper_target_bundle(bundle_dir=payload_path.parent, trade_date="2026-08-14", repo_root=tmp_path)
+    assert "paper_target:quantity_contract_mismatch" in failures

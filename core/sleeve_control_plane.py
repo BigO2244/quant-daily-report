@@ -1038,6 +1038,11 @@ def _run_shadow_snapshot(
         )
         payload = _read_json(source)
         observation_status = str(payload.get("observation_status") or "OK").upper()
+    if definition.sleeve_id == "caerus_aquila":
+        from core.aquila_monthly import validate_quantity_contract
+        validate_quantity_contract(payload.get("quantity_contract") or {}, trade_date=trade_date)
+        if payload.get("trade_date") != trade_date or payload.get("decision_eligible") is not True:
+            raise SleeveEvaluationBlocked("Aquila requires a fresh same-session quantity decision")
     data_status = str(
         payload.get("data_status") or ("" if definition.capital_eligible else "OK")
     ).upper()

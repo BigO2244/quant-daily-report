@@ -258,6 +258,9 @@ def write_precompute_bundle(
     # The contract is the completion marker, so publish the all-sleeve
     # evaluation before it.  A partial write can then never advertise a
     # complete five-member bundle.
+    if canonical_trading_mode_label(mode) == "PAPER" and any(d.sleeve_id == "caerus_aquila" and d.capital_eligible for d in sleeve_registry.definitions):
+        from scripts.build_aquila_daily_source import build_daily_source
+        build_daily_source(repo_root=Path.cwd(), bundle_dir=bundle_dir, trade_date=trade_date, capture_missing_ranking=True)
     write_all_sleeve_evaluation(
         output_path=sleeve_evaluations_path,
         trade_date=trade_date,

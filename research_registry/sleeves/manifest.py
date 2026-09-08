@@ -82,7 +82,7 @@ ALLOWED_IMPLEMENTATION_STATUSES = {
     "research_placeholder",
 }
 
-CURRENT_SLEEVE_IDS = {"polaris", "polaris_alpha", "orion", "orion_alpha", "lyra"}
+CURRENT_SLEEVE_IDS = {"polaris", "polaris_alpha", "orion", "orion_alpha", "lyra", "aquila"}
 FUTURE_PLACEHOLDER_IDS = {"phoenix", "cygnus", "cassiopeia", "argo"}
 REQUIRED_SLEEVE_IDS = CURRENT_SLEEVE_IDS | FUTURE_PLACEHOLDER_IDS
 

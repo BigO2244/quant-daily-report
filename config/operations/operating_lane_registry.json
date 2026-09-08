@@ -41,13 +41,24 @@
       "lane_kind": "PAPER",
       "declared_state": "ACTIVE",
       "strategy_ids": [
-        "caerus_orion"
+        "caerus_orion",
+        "caerus_aquila"
       ],
       "authority": {
         "kind": "strategy_registry_paper",
         "path": "config/research/strategy_registry.json",
         "owner_approved_at": "2026-08-08",
-        "approval_scope": "PAPER_ONLY"
+        "approval_scope": "PAPER_ONLY",
+        "sleeve_approvals": {
+          "caerus_orion": {
+            "owner_approved_at": "2026-08-08",
+            "approval_scope": "PAPER_ONLY"
+          },
+          "caerus_aquila": {
+            "owner_approved_at": "2026-09-08",
+            "approval_scope": "PAPER_ONLY"
+          }
+        }
       },
       "schedule": {
         "marker": "scripts/cron_execute.sh",
@@ -120,7 +131,7 @@
       "path": "AGENTS.md",
       "required_claims": [
         "Lyra Live is active, funded, recurring, and separately governed.",
-        "Orion is the active PAPER capital sleeve."
+        "Orion is the primary PAPER capital sleeve; Aquila is the experimental monthly PAPER sleeve."
       ],
       "forbidden_claims": [
         "Live capital remains blocked",
@@ -206,5 +217,5 @@
       ]
     }
   ],
-  "content_hash": "fc3e518335b0c812144270643429cc87f3c2e0c498c7c5dca7feacee5c6b4c7c"
+  "content_hash": "cfbe33002f9507111e114bb58985878a41d53b67695433b0cd795a1d6ce13856"
 }
