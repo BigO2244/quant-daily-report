@@ -7,6 +7,7 @@ import datetime as dt
 import math
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -157,7 +158,13 @@ def _audit_cutover_ownership(root: Path, ownership: dict[str, Any]) -> dict[str,
         return claimed == _content_hash(body)
 
     def timestamp(value: str) -> dt.datetime:
-        parsed = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        raw = str(value).replace("Z", "+00:00")
+        # Alpaca may emit five fractional digits, unsupported by Python 3.10.
+        # Match the ledger's microsecond precision without altering source bytes.
+        fractional = re.fullmatch(r"(.+T\d{2}:\d{2}:\d{2})\.(\d+)([+-]\d{2}:\d{2})", raw)
+        if fractional:
+            raw = fractional[1] + "." + fractional[2][:6].ljust(6, "0") + fractional[3]
+        parsed = dt.datetime.fromisoformat(raw)
         require(parsed.tzinfo is not None, "timestamp_invalid")
         return parsed
 
