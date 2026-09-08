@@ -227,7 +227,7 @@ def test_causal_fill_history_is_immutable(tmp_path: Path) -> None:
 
 def _wrap_plan(path: Path) -> Path:
     plan = json.loads(path.read_text())
-    plan['trade_date'] = '2026-08-14'
+    plan['as_of'] = '2026-08-14T13:35:00Z'
     plan.pop('content_hash')
     plan['content_hash'] = _hash(plan)
     path.write_text(json.dumps(plan))
@@ -235,6 +235,7 @@ def _wrap_plan(path: Path) -> Path:
     handoff.write_text(json.dumps({
         'schema_version': 'caerus.authorized_execution_handoff.v1',
         'execution_lane': 'paper', 'exact_execution_plan': plan,
+        'trade_date': '2026-08-14',
         'exact_execution_plan_id': plan['plan_id'],
         'exact_execution_plan_hash': plan['content_hash'],
     }))
@@ -242,7 +243,7 @@ def _wrap_plan(path: Path) -> Path:
     pointer.write_text(json.dumps({
         'schema_version': 'caerus.exact_execution_plan_pointer.v1',
         'json_path': 'handoff.json', 'plan_id': plan['plan_id'],
-        'plan_hash': plan['content_hash'], 'trade_date': plan['trade_date'],
+        'plan_hash': plan['content_hash'], 'trade_date': '2026-08-14',
     }))
     return pointer
 
@@ -256,7 +257,7 @@ def test_raw_pointer_handoff_deduplicate(tmp_path: Path) -> None:
     assert _exact_order_index([plan, pointer, plan.parent / 'handoff.json'], plan.parent) == raw
 
 
-@pytest.mark.parametrize('mutation', ['escape', 'hash', 'id', 'handoff_hash', 'nested_hash'])
+@pytest.mark.parametrize('mutation', ['escape', 'hash', 'id', 'date', 'handoff_date', 'nested_date', 'handoff_hash', 'nested_hash'])
 def test_pointer_tamper_fails(tmp_path: Path, mutation: str) -> None:
     from core.causal_ownership_ledger import _exact_order_index
     _, plan = _fixture(tmp_path)
@@ -268,11 +269,22 @@ def test_pointer_tamper_fails(tmp_path: Path, mutation: str) -> None:
         value['plan_hash'] = '0' * 64
     elif mutation == 'id':
         value['plan_id'] = 'wrong'
+    elif mutation == 'date':
+        value['trade_date'] = '2026-08-15'
     else:
         handoff = plan.parent / 'handoff.json'
         payload = json.loads(handoff.read_text())
         if mutation == 'handoff_hash':
             payload['exact_execution_plan_hash'] = '0' * 64
+        elif mutation == 'handoff_date':
+            payload['trade_date'] = '2026-08-15'
+        elif mutation == 'nested_date':
+            nested = payload['exact_execution_plan']
+            nested['trade_date'] = '2026-08-15'
+            nested.pop('content_hash')
+            nested['content_hash'] = _hash(nested)
+            payload['exact_execution_plan_hash'] = nested['content_hash']
+            value['plan_hash'] = nested['content_hash']
         else:
             payload['exact_execution_plan']['created_at'] = '2026-01-01T00:00:00Z'
         handoff.write_text(json.dumps(payload))

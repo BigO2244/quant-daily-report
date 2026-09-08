@@ -121,6 +121,7 @@ def _verified_plan(path: Path, plans_root: Path | None = None) -> dict[str, Any]
         raise CausalOwnershipError("exact plan path escapes approved plans root")
     payload = _read_json(path)
     pointer = None
+    handoff = None
     if payload.get("schema_version") == "caerus.exact_execution_plan_pointer.v1":
         pointer = payload
         target = Path(str(pointer.get("json_path") or ""))
@@ -148,9 +149,17 @@ def _verified_plan(path: Path, plans_root: Path | None = None) -> dict[str, Any]
         raise CausalOwnershipError("exact plan content hash mismatch")
     if payload.get("account_scope", "PAPER") != "PAPER":
         raise CausalOwnershipError("non-PAPER plan in PAPER ownership ledger")
+    if pointer or handoff:
+        # v3 serializes as_of; its authority model derives trade_date as as_of[:10].
+        as_of = str(payload.get("as_of") or "")
+        _parse_timestamp(as_of)
+        plan_date = as_of[:10]
+        if (payload.get("trade_date", plan_date) != plan_date
+                or (handoff and handoff.get("trade_date") != plan_date)):
+            raise CausalOwnershipError("handoff exact plan date mismatch")
     if pointer and (pointer.get("plan_id") != payload.get("plan_id")
                     or pointer.get("plan_hash") != claimed
-                    or pointer.get("trade_date") != payload.get("trade_date")):
+                    or pointer.get("trade_date") != plan_date):
         raise CausalOwnershipError("pointer exact plan identity mismatch")
     return payload
 
