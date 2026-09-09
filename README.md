@@ -1,5 +1,7 @@
 # Alpha Stack
 
+> **Owner eligibility amendment — 2026-09-09.** Brett excludes AZO from prospective Aquila eligibility. The collector retains full membership but omits this explicitly excluded issuer before quote requests; every remaining eligible issuer must validate. Existing evidence/backtests remain unchanged. See `docs/governance/AQUILA_PAPER.md`; deployment receipts govern activation.
+
 > **Aquila owner decision — 2026-09-08.** Brett authorized activation of Caerus Aquila in the existing Alpaca PAPER account at 50%. This revision configures an experimental TOP10_EQUAL monthly sleeve: 50% Aquila,45% Orion,5% cash at formation; Aquila shares remain fixed between formations. Orion retains the account risk-history identity. Deployment receipts determine runtime activation, and the existing emergency cooldown still controls buying. This authorization does not establish alpha or change Lyra Live. See `docs/governance/AQUILA_PAPER.md` for the contract.
 
 

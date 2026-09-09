@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import json
+from pathlib import Path
 import re
 from typing import Any, Mapping
 
@@ -18,6 +20,35 @@ SHA = re.compile(r"^[0-9a-f]{64}$")
 
 class AquilaContractError(ValueError):
     pass
+
+
+def owner_exclusion_policy() -> dict[str, Any]:
+    """Read the existing strategy registry, the sole policy authority."""
+    path = Path(__file__).resolve().parents[1] / "config/research/strategy_registry.json"
+    registry = json.loads(path.read_text())
+    policy = registry["sleeve_control_plane"]["strategy_overrides"]["caerus_aquila"]["owner_exclusion_policy"]
+    symbols = policy.get("symbols")
+    if not isinstance(symbols, list) or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.\-]*", s) for s in symbols) or len(symbols) != len(set(symbols)):
+        raise AquilaContractError("invalid owner exclusion policy")
+    for field in ("policy_id", "owner", "reason"):
+        if not isinstance(policy.get(field), str) or not policy[field].strip():
+            raise AquilaContractError("missing owner exclusion " + field)
+    try:
+        effective = dt.date.fromisoformat(policy["effective_date"])
+        if effective.isoformat() != policy["effective_date"]:
+            raise ValueError("noncanonical date")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AquilaContractError("invalid owner exclusion effective date") from exc
+    ids = policy.get("issuer_ids")
+    if not isinstance(ids, list) or any(not isinstance(i, str) or not re.fullmatch(r"[0-9]{10}", i) for i in ids) or len(ids) != len(set(ids)):
+        raise AquilaContractError("invalid owner exclusion issuer identities")
+    return policy
+
+
+def exclusions_for_date(trade_date: str):
+    policy = owner_exclusion_policy()
+    active = dt.date.fromisoformat(trade_date) >= dt.date.fromisoformat(policy["effective_date"])
+    return (set(policy["symbols"]), set(policy["issuer_ids"])) if active else (set(), set())
 
 
 def _positive(value: Any, name: str, *, zero: bool = False) -> float:
@@ -72,7 +103,16 @@ def validate_quantity_contract(contract: Mapping[str, Any], *, trade_date: str) 
     quantities = contract.get("target_quantities")
     if not isinstance(marks, Mapping) or not isinstance(quantities, Mapping) or not quantities:
         raise AquilaContractError("missing marks or quantities")
+    excluded, excluded_ids = exclusions_for_date(trade_date)
+    if excluded or excluded_ids:
+        issuer_map = contract.get("issuer_map")
+        if not isinstance(issuer_map, Mapping) or set(issuer_map) != set(quantities) or any(not isinstance(v, str) or not v for v in issuer_map.values()):
+            raise AquilaContractError("missing complete holding issuer identity map")
+        if excluded_ids.intersection(issuer_map.values()):
+            raise AquilaContractError("owner-excluded Aquila holding issuer")
     for symbol, qty in quantities.items():
+        if symbol in excluded:
+            raise AquilaContractError("owner-excluded Aquila holding: " + symbol)
         if not symbol or str(symbol) != str(symbol).upper():
             raise AquilaContractError("invalid execution symbol")
         _positive(qty, "quantity")
@@ -88,7 +128,7 @@ def validate_quantity_contract(contract: Mapping[str, Any], *, trade_date: str) 
 def build_aquila_source(*, trade_date: str, previous_session: str, generated_at: str,
                         account_equity: float, marks: Mapping[str, float], marks_as_of: str,
                         ownership: Mapping[str, Any], ranking: Mapping[str, Any] | None = None,
-                        monthly_state: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                        monthly_state: Mapping[str, Any] | None = None, holding_issuer_map: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Build today's intent from caller-declared exchange sessions and captured inputs.
 
     Ownership: trade_date, reconciliation_status=PASS, content_hash, quantities.
@@ -119,6 +159,10 @@ def build_aquila_source(*, trade_date: str, previous_session: str, generated_at:
         if captured > timestamp or captured.date() < prior:
             raise AquilaContractError("ranking captured after intent or stale")
         rows = ranking.get("issuers") or []
+        excluded, excluded_ids = exclusions_for_date(trade_date)
+        if any(row.get("issuer_id") in excluded_ids or row.get("execution_symbol") in excluded or row.get("yahoo_symbol") in excluded
+               or excluded.intersection(row.get("listing_symbols") or []) for row in rows):
+            raise AquilaContractError("owner-excluded issuer present in Aquila ranking")
         if len(rows) < 11:
             raise AquilaContractError("rank cutoff requires at least eleven issuers")
         if len({r["issuer_id"] for r in rows}) != len(rows):
@@ -131,6 +175,7 @@ def build_aquila_source(*, trade_date: str, previous_session: str, generated_at:
         symbols = [r["execution_symbol"] for r in rows[:10]]
         if len(set(symbols)) != 10:
             raise AquilaContractError("duplicate execution symbol")
+        issuer_map = {r["execution_symbol"]: r["issuer_id"] for r in rows[:10]}
         quantities = {s: nav * .05 / _positive(marks.get(s), "mark") for s in symbols}
         formation_id, formation_hash = ranking.get("formation_id"), ranking.get("content_hash")
         formation_session = ranking["formation_session"]
@@ -149,12 +194,13 @@ def build_aquila_source(*, trade_date: str, previous_session: str, generated_at:
         formation_id, formation_hash = monthly_state.get("formation_id"), monthly_state.get("formation_hash")
         formation_session = monthly_state.get("formation_session")
         plan_hash = monthly_state.get("monthly_plan_sha256")
+        issuer_map = {s: (holding_issuer_map or {}).get(s) for s in quantities}
     contract = dict(schema_version=SCHEMA, trade_date=trade_date, generated_at=generated_at,
                     action="MONTHLY_REBALANCE" if rebalance else "HOLD_NO_REBALANCE",
                     sizing_mode="REBALANCE_WEIGHT" if rebalance else "FIXED_QUANTITY",
                     account_equity=nav, marks_as_of=marks_as_of, previous_session=previous_session,
                     marks={s: float(marks[s]) for s in quantities},
-                    target_quantities=quantities, ownership_snapshot_hash=ownership["content_hash"],
+                    target_quantities=quantities, issuer_map=issuer_map, ownership_snapshot_hash=ownership["content_hash"],
                     ownership_snapshot_path=ownership.get("source_path"), ownership_snapshot_sha256=ownership.get("source_sha256"),
                     formation_id=formation_id, formation_hash=formation_hash, formation_session=formation_session,
                     monthly_plan_sha256=plan_hash)

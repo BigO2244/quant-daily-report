@@ -201,7 +201,8 @@ def build_daily_source(*, repo_root: Path, bundle_dir: Path, trade_date: str, ge
     close = dt.datetime.combine(dt.date.fromisoformat(previous), dt.time(16), tzinfo=ZoneInfo("America/New_York"))
     source = build_aquila_source(trade_date=trade_date, previous_session=previous, generated_at=generated_at,
                                  account_equity=valuation["equity"], marks=marks, marks_as_of=close.isoformat(),
-                                 ownership=ownership, ranking=ranking, monthly_state=state)
+                                 ownership=ownership, ranking=ranking, monthly_state=state,
+                                 holding_issuer_map={r["execution_symbol"]: r["issuer_id"] for r in alias_ranking["issuers"]})
     source["producer_lineage"] = dict(valuation_sha256=file_hash(valuation_file), valuation_path=str(valuation_file.resolve()), monthly_execution_receipts=receipts,
                                        price_cache_path=str(DEFAULT_CACHE_PATH), price_cache_sha256=file_hash(root / DEFAULT_CACHE_PATH))
     source["producer_lineage"]["ranking_sha256"] = file_hash(ranking_path)

@@ -30,6 +30,7 @@ if __package__ in (None, ''):
 
 from core.governed_xnys_calendar import is_xnys_session, next_xnys_session
 from core.portfolio_operating_model import content_hash
+from core.aquila_monthly import owner_exclusion_policy
 
 MEMBERSHIP_URL = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
 MAX_HTTP, MAX_ISSUERS, MAX_BYTES = 1600, 500, 64 * 1024 * 1024
@@ -181,6 +182,23 @@ def group_issuers(members):
     return issuers
 
 
+def eligible_issuers(issuers, execution_session, *, policy=None):
+    policy = owner_exclusion_policy() if policy is None else policy
+    active = dt.date.fromisoformat(execution_session) >= dt.date.fromisoformat(policy['effective_date'])
+    excluded_symbols = set(policy['symbols']) if active else set()
+    excluded_ids = set(policy['issuer_ids']) if active else set()
+    eligible, excluded = [], []
+    for issuer in issuers:
+        symbols = set(issuer.get('listing_symbols') or []) | {issuer['execution_symbol'], issuer['yahoo_symbol']}
+        if symbols & excluded_symbols or issuer['issuer_id'] in excluded_ids:
+            excluded.append({**issuer, 'reason': 'OWNER_EXCLUDED', 'policy_id': policy['policy_id']})
+        else:
+            eligible.append(issuer)
+    return eligible, {'policy': policy, 'policy_hash': content_hash(policy), 'policy_effective': active,
+                      'membership_issuer_count': len(issuers), 'eligible_issuer_count': len(eligible),
+                      'excluded_issuers': excluded}
+
+
 def validate_clock(previous_session, execution_session, now):
     if now.tzinfo is None:
         raise CaptureError('capture clock requires timezone')
@@ -194,8 +212,9 @@ def validate_clock(previous_session, execution_session, now):
         raise CaptureError('capture must follow completed close and precede execution open')
 
 
-def normalize_panel(issuers, quotes, *, previous_session, execution_session, captured_at, sources):
+def normalize_panel(issuers, quotes, *, previous_session, execution_session, captured_at, sources, policy=None):
     validate_clock(previous_session, execution_session, captured_at)
+    issuers, eligibility = eligible_issuers(issuers, execution_session, policy=policy)
     expected = {r['yahoo_symbol'] for r in issuers}
     if len(expected) != len(issuers) or set(quotes) != expected or len(issuers) < 11:
         raise CaptureError('full issuer panel coverage required')
@@ -227,6 +246,7 @@ def normalize_panel(issuers, quotes, *, previous_session, execution_session, cap
               'formation_id': 'aquila-' + previous_session + '-' + content_hash(normalized)[:16],
               'formation_session': previous_session, 'execution_session': execution_session,
               'captured_at': captured_at.isoformat(), 'issuers': normalized,
+              'universe_eligibility': eligibility,
               'rank_cutoff': {'10': normalized[9]['issuer_id'], '11': normalized[10]['issuer_id']},
               'sources': sources, 'readiness': 'TIER_B', 'classification': 'PROSPECTIVE_YAHOO_COMPANY_CAP_PROXY'}
     result['content_hash'] = content_hash(result)
@@ -408,7 +428,9 @@ def capture_ranking(*, output_root, previous_session, execution_session, now=Non
         response = session.get(MEMBERSHIP_URL)
         if response.status_code != 200:
             raise CaptureError('membership HTTP failure')
-        issuers = group_issuers(parse_membership(response.text))
+        membership_issuers = group_issuers(parse_membership(response.text))
+        policy = owner_exclusion_policy()
+        issuers, eligibility = eligible_issuers(membership_issuers, execution_session, policy=policy)
         def collect(issuer):
             if budget.stopped:
                 raise CaptureError('collection stopped')
@@ -423,8 +445,10 @@ def capture_ranking(*, output_root, previous_session, execution_session, now=Non
         captured = dt.datetime.now(dt.timezone.utc)
         if time.monotonic() >= budget.deadline:
             raise CaptureError('runtime deadline')
-        panel = normalize_panel(issuers, session.quotes, previous_session=previous_session,
-                                execution_session=execution_session, captured_at=captured, sources=list(store.refs))
+        panel = normalize_panel(membership_issuers, session.quotes, previous_session=previous_session,
+                                execution_session=execution_session, captured_at=captured, sources=list(store.refs), policy=policy)
+        if content_hash(owner_exclusion_policy()) != content_hash(policy):
+            raise CaptureError("owner exclusion policy changed during capture")
         receipt = store.write('receipt.json', {'accepted': True, 'http_requests': budget.count,
                               'logical_issuer_calls': len(issuers), 'sources': list(store.refs),
                               'credentials_persisted': False, 'yfinance_version': yf.__version__})

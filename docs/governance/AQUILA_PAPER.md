@@ -8,7 +8,8 @@ proxy backtest did not establish reliable incremental alpha. No Live approval.
 At the initial eligible formation and the first trading session of each month,
 rank current S&P500 companies by market capitalization from the last completed
 session. Combine share classes by issuer identity and select one execution
-symbol per issuer. Own the ten largest issuers, each at5% of account NAV.
+symbol per issuer. Apply the explicit owner exclusions below, then own the ten
+largest eligible issuers, each at5% of account NAV.
 Orion receives 45%and target cash is 5%. The registry represents invested-risk
 budgets as 10/19 Aquila and 9/19 Orion. No growth/inflation overlay is active.
 
@@ -53,7 +54,20 @@ The collector requests raw Yahoo v7 quotes directly. A missing marketCap may
 use Yahoo's provider-reported quoteSummary price-module marketCap only when
 symbol, USD currency, regular-market epoch and price exactly match the v7
 quote. The v7 quote and cap fragment retain separate immutable source hashes.
-No shares-times-price calculation, skipped issuer or stale substitution is
-allowed. Transient 502/503/504 responses get at most three attempts per required
+No shares-times-price calculation, silently skipped eligible issuer or stale
+substitution is allowed. Transient 502/503/504 responses get at most three attempts per required
 endpoint within the original global limits. Rate limits and malformed or
 incomplete evidence fail closed. Source-only probes never publish formations.
+
+## Owner eligibility decision — September 9
+
+Brett excludes AutoZone (AZO) prospectively because he does not want to hold
+it. The existing strategy registry records this explicit exclusion. Retain
+full raw membership, but exclude AZO before quote collection and rank only
+the remaining eligible issuers. The ranking records the policy hash, excluded
+issuer identity and coverage counts. All remaining eligible issuers still
+require complete valid source fields. Aquila formation and quantity contracts
+reject AZO. This is an owner preference, not an inferred historical rank result.
+Existing failures, captures and backtests remain unchanged. No liquidation is
+triggered by this source change; a held excluded position fails closed for
+owner review. Deployment receipts establish runtime activation.

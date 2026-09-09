@@ -180,7 +180,19 @@
         "availability_policy": "same_or_previous_trading_session",
         "capital_eligible": true,
         "execution_eligible": true,
-        "evaluation_only": false
+        "evaluation_only": false,
+        "owner_exclusion_policy": {
+          "policy_id": "aquila_owner_exclusions_20260909",
+          "symbols": [
+            "AZO"
+          ],
+          "owner": "Brett Olson",
+          "effective_date": "2026-09-09",
+          "reason": "Owner does not wish to hold AutoZone; prospective eligibility exclusion, not a historical ranking claim.",
+          "issuer_ids": [
+            "0000866787"
+          ]
+        }
       }
     },
     "functional_sleeves": [

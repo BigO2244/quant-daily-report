@@ -297,7 +297,8 @@ def test_cap_fallback_preserves_separate_field_provenance():
     assert calls[-1][1] == {'modules': 'price', 'formatted': 'false'}
 
 
-def test_complete_500_issuer_capture_is_immutable_and_quote_only(tmp_path, monkeypatch):
+@pytest.mark.parametrize('include_excluded', [False, True])
+def test_complete_500_issuer_capture_is_immutable_and_quote_only(tmp_path, monkeypatch, include_excluded):
     from scripts import capture_aquila_ranking as module
     data = pytest.importorskip('yfinance.data')
     requests = pytest.importorskip('curl_cffi.requests')
@@ -311,6 +312,8 @@ def test_complete_500_issuer_capture_is_immutable_and_quote_only(tmp_path, monke
     monkeypatch.setattr(module.time, 'sleep', lambda _: None)
     html = '<table id="constituents"><tr><th>Symbol</th><th>CIK</th></tr>'
     html += ''.join(f'<tr><td>T{i}</td><td>{i}</td></tr>' for i in range(1, 501)) + '</table>'
+    if include_excluded:
+        html = html.replace('<td>T500</td>', '<td>AZO</td>')
     urls = []
     class Response:
         status_code = 200
@@ -328,10 +331,16 @@ def test_complete_500_issuer_capture_is_immutable_and_quote_only(tmp_path, monke
     monkeypatch.setattr(data, 'YfData', Client)
     path = module.capture_ranking(output_root=tmp_path, previous_session='2026-09-08', execution_session='2026-09-09')
     result = json.loads(path.read_text())
-    assert len(result['issuers']) == 500
+    assert len(result['issuers']) == 500 - int(include_excluded)
+    eligibility = result['universe_eligibility']
+    assert eligibility['membership_issuer_count'] == 500
+    assert eligibility['eligible_issuer_count'] == 500 - int(include_excluded)
+    assert eligibility['policy']['symbols'] == ['AZO']
+    assert [row['execution_symbol'] for row in eligibility['excluded_issuers']] == (['AZO'] if include_excluded else [])
+    assert all(row['execution_symbol'] != 'AZO' for row in result['issuers'])
     assert result['content_hash'] == content_hash({k: v for k, v in result.items() if k != 'content_hash'})
     receipt = json.loads(Path(result['receipt']['path']).read_text())
-    assert receipt['http_requests'] == 501
+    assert receipt['http_requests'] == 501 - int(include_excluded)
     assert all('quoteSummary' not in url and 'timeseries' not in url for url in urls)
     assert path.stat().st_mode & 0o222 == 0
     with pytest.raises(CaptureError, match='overwrite refused'):
@@ -358,3 +367,29 @@ def test_price_fragment_is_sanitized_and_hash_bound(tmp_path, monkeypatch):
     assert session.cap_quotes['AZO']['source_sha256'] == hashlib.sha256(source.read_bytes()).hexdigest()
     assert 'DO_NOT_RETAIN' not in json.dumps(raw) and 'provider text' not in json.dumps(raw)
     session.close()
+
+
+def test_owner_exclusion_does_not_excuse_another_missing_quote():
+    from scripts.capture_aquila_ranking import eligible_issuers
+    issuers, quotes = panel()
+    issuers.append({'issuer_id': 'owner-excluded', 'execution_symbol': 'AZO', 'yahoo_symbol': 'AZO', 'listing_symbols': ['AZO']})
+    eligible, audit = eligible_issuers(issuers, "2026-09-09")
+    assert len(eligible) == 12 and audit['excluded_issuers'][0]['reason'] == 'OWNER_EXCLUDED'
+    for row in quotes.values():
+        row['regularMarketTime'] = int(dt.datetime(2026, 9, 8, 20, tzinfo=dt.timezone.utc).timestamp())
+    def current_panel():
+        return normalize_panel(issuers, quotes, previous_session='2026-09-08', execution_session='2026-09-09', captured_at=dt.datetime(2026, 9, 9, 9, tzinfo=dt.timezone.utc), sources=[])
+    assert len(current_panel()['issuers']) == 12
+    del quotes['T1']
+    with pytest.raises(CaptureError, match='coverage'):
+        current_panel()
+
+
+def test_exclusion_effective_date_and_issuer_identity():
+    from scripts.capture_aquila_ranking import eligible_issuers
+    issuer = {'issuer_id': '0000866787', 'execution_symbol': 'RENAMED', 'yahoo_symbol': 'RENAMED', 'listing_symbols': ['RENAMED']}
+    old, old_audit = eligible_issuers([issuer], '2026-09-08')
+    new, new_audit = eligible_issuers([issuer], '2026-09-09')
+    assert old == [issuer] and not old_audit['policy_effective']
+    assert new == [] and new_audit['policy_effective']
+    assert new_audit['policy_hash'] == content_hash(new_audit['policy'])
