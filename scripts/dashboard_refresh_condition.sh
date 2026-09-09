@@ -28,7 +28,7 @@ in_window() {
 
 if (( weekday <= 5 )); then
     # Security master + canonical precompute.
-    if in_window 395 450; then exit 1; fi
+    if in_window 275 360; then exit 1; fi
     # Monday weekly review.
     if (( weekday == 1 )) && in_window 450 525; then exit 1; fi
     # Paper/Live execution through confirmation.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 1: Precompute — 7:00 AM ET weekdays
+# Phase 1: Precompute — 5:00 AM ET weekdays
 # Generates signals, runs reconciliation, writes precompute bundle to
 # outputs/precompute/<DATE>/ for Phase 2 execution.
 set -euo pipefail
@@ -33,6 +33,14 @@ export MODE="paper"
 export TRADING_MODE="paper"
 export ALPACA_PAPER="1"
 export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
+
+# Admit canonical work only at 05:00 ET, before any producer/network calls.
+# An admitted run may finish after the start minute; 09:35 cannot rebuild it.
+python3 -m scripts.workflow_time_guard precompute --report-date "${REPORT_DATE}" || exit 1
+if [[ "${REPORT_DATE}" != "$(TZ=America/New_York date +%F)" ]]; then
+    echo "FATAL: precompute report date must equal today's ET session" >&2
+    exit 1
+fi
 
 # --- Concentrated-alpha construction (ALWAYS ON; regime-adaptive top-N) ---
 # Concentration is the model: no enable flag, and top-N derives from the VIX

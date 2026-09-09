@@ -19,7 +19,7 @@ The deployed bundle validator currently checks:
 - required files are valid JSON;
 - required file `trade_date` fields match the expected date when present;
 - validation failures are persisted to workflow status artifacts;
-- execution self-heal remains fail-closed when the bundle is incomplete.
+- execution remains fail-closed when the 05:00 bundle is incomplete; no later rebuild is allowed.
 
 Required precompute files:
 

@@ -1,6 +1,7 @@
 import datetime as dt
 import gzip
 import json
+from pathlib import Path
 
 import pytest
 
@@ -158,6 +159,8 @@ def test_probe_is_nonformation_and_bounded(tmp_path, monkeypatch):
             return quote
     monkeypatch.setitem(sys.modules, 'yfinance', types.SimpleNamespace(Ticker=Ticker, cache=cache, __version__='test'))
     monkeypatch.setattr(module, 'recording_session', Session)
+    monkeypatch.setattr(module, 'quote_client', lambda session: object())
+    monkeypatch.setattr(module, 'collect_quote', lambda symbol, session, budget, **kw: Ticker(symbol, session).get_info())
     result_path = module.probe_source(output_root=tmp_path)
     result = json.loads(result_path.read_text())
     assert result_path.name == 'probe.json'
@@ -188,3 +191,170 @@ def test_parameterized_probe_limits_stop_dispatch_and_bytes(tmp_path, monkeypatc
     assert store.retained_bytes <= 100
     with pytest.raises(CaptureError, match='invalid request budget'):
         module.RequestBudget(max_http=1601)
+
+
+def test_quote_transient_retries_share_budget_and_skip_company_info(tmp_path, monkeypatch):
+    from scripts import capture_aquila_ranking as module
+    import time
+    from types import SimpleNamespace
+    data = pytest.importorskip('yfinance.data')
+    requests = pytest.importorskip('curl_cffi.requests')
+    monkeypatch.setattr(module.time, 'sleep', lambda _: None)
+    calls = []
+    statuses = iter([502, 503, 200])
+    class Response:
+        content = b'not retained'
+        def __init__(self, status): self.status_code = status
+        def json(self): return {'quoteResponse': {'result': [{'symbol': 'AAPL', 'currency': 'USD', 'marketCap': 100, 'regularMarketPrice': 10, 'regularMarketTime': EPOCH}]}}
+    def request(self, method, url, **kwargs):
+        calls.append((url, kwargs))
+        return Response(next(statuses))
+    monkeypatch.setattr(requests.Session, 'request', request)
+    class Client:
+        def __init__(self, session): self.session = session
+        def get_raw_json(self, url, params): return self.session.get(url, params=params).json()
+    monkeypatch.setattr(data, 'YfData', Client)
+    budget = module.RequestBudget(max_http=3, max_seconds=60)
+    session = recording_session(CaptureStore(tmp_path / 'retry'), budget)
+    module.collect_quote('AAPL', session, budget)
+    assert budget.count == 3 and not budget.stopped
+    assert session.quotes['AAPL']['regularMarketTime'] == EPOCH
+    assert all(url.endswith('/v7/finance/quote') for url, _ in calls)
+    assert all(kw['params'] == {'symbols': 'AAPL', 'formatted': 'false'} for _, kw in calls)
+    assert len(list((tmp_path / 'retry').glob('http-*.gz'))) == 3
+    session.close()
+
+
+@pytest.mark.parametrize('failure,expected_calls', [('transient', 3), ('malformed', 1), ('rate_limit', 1)])
+def test_quote_retry_policy_never_retries_bad_evidence_or_rate_limit(monkeypatch, failure, expected_calls):
+    from types import SimpleNamespace
+    from scripts import capture_aquila_ranking as module
+    data = pytest.importorskip('yfinance.data')
+    calls = []
+    class Client:
+        def __init__(self, session): pass
+        def get_raw_json(self, url, params):
+            calls.append(url)
+            if failure == 'transient': raise module.TransientQuoteError('transient Yahoo quote HTTP 502')
+            if failure == 'rate_limit': raise CaptureError('provider rate limit or runtime deadline')
+            return {'quoteResponse': {'result': []}}
+    monkeypatch.setattr(data, 'YfData', Client)
+    with pytest.raises(CaptureError):
+        module.collect_quote('AAPL', SimpleNamespace(quotes={}), SimpleNamespace(stopped=False))
+    assert len(calls) == expected_calls
+
+
+def test_failure_frames_never_include_exception_message_or_locals():
+    from scripts.capture_aquila_ranking import safe_failure
+    try:
+        credential = 'DO_NOT_RETAIN_SECRET'
+        raise TypeError('https://example.invalid?crumb=' + credential)
+    except TypeError as exc:
+        result = safe_failure(exc)
+    assert result['error_type'] == 'TypeError'
+    assert result['frames'][-1]['function'] == 'test_failure_frames_never_include_exception_message_or_locals'
+    assert 'DO_NOT_RETAIN' not in json.dumps(result)
+    assert 'crumb' not in json.dumps(result)
+
+
+def test_quote_stopped_global_budget_prevents_dispatch(monkeypatch):
+    from types import SimpleNamespace
+    from scripts import capture_aquila_ranking as module
+    data = pytest.importorskip('yfinance.data')
+    class Client:
+        def __init__(self, session): pass
+        def get_raw_json(self, *args, **kwargs): pytest.fail('global stop must prevent request')
+    monkeypatch.setattr(data, 'YfData', Client)
+    with pytest.raises(CaptureError, match='collection stopped'):
+        module.collect_quote('AAPL', SimpleNamespace(quotes={}), SimpleNamespace(stopped=True))
+
+
+@pytest.mark.parametrize('field,value', [('symbol', 'WRONG'), ('currency', 'CAD'), ('regularMarketTime', EPOCH + 1), ('regularMarketPrice', 99), ('marketCap', None), ('marketCap', 0)])
+def test_cap_fallback_requires_same_identity_epoch_and_real_value(field, value):
+    from types import SimpleNamespace
+    from scripts import capture_aquila_ranking as module
+    raw = {'symbol': 'AZO', 'currency': 'USD', 'regularMarketPrice': 100, 'regularMarketTime': EPOCH, 'source_sha256': 'a' * 64}
+    cap = {**raw, 'marketCap': 500, 'source_sha256': 'b' * 64, field: value}
+    session = SimpleNamespace(quotes={'AZO': raw}, cap_quotes={'AZO': cap})
+    class Client:
+        def get_raw_json(self, *args, **kwargs): return {}
+    with pytest.raises(CaptureError):
+        module.collect_quote('AZO', session, SimpleNamespace(stopped=False), client=Client())
+
+
+def test_cap_fallback_preserves_separate_field_provenance():
+    from types import SimpleNamespace
+    from scripts import capture_aquila_ranking as module
+    raw = {'symbol': 'AZO', 'currency': 'USD', 'regularMarketPrice': 100, 'regularMarketTime': EPOCH, 'source_sha256': 'a' * 64}
+    cap = {**raw, 'marketCap': 500, 'source_sha256': 'b' * 64}
+    session = SimpleNamespace(quotes={'AZO': raw}, cap_quotes={'AZO': cap})
+    calls = []
+    class Client:
+        def get_raw_json(self, url, params): calls.append((url, params))
+    module.collect_quote('AZO', session, SimpleNamespace(stopped=False), client=Client())
+    assert raw['marketCap'] == 500 and raw['source_sha256'] == 'a' * 64
+    assert raw['market_cap_source_sha256'] == 'b' * 64
+    assert calls[-1][1] == {'modules': 'price', 'formatted': 'false'}
+
+
+def test_complete_500_issuer_capture_is_immutable_and_quote_only(tmp_path, monkeypatch):
+    from scripts import capture_aquila_ranking as module
+    data = pytest.importorskip('yfinance.data')
+    requests = pytest.importorskip('curl_cffi.requests')
+    original_datetime = dt.datetime
+    now = original_datetime(2026, 9, 9, 9, tzinfo=dt.timezone.utc)
+    epoch = int(original_datetime(2026, 9, 8, 20, tzinfo=dt.timezone.utc).timestamp())
+    class FixedClock(original_datetime):
+        @classmethod
+        def now(cls, tz=None): return now if tz else now.replace(tzinfo=None)
+    monkeypatch.setattr(module.dt, 'datetime', FixedClock)
+    monkeypatch.setattr(module.time, 'sleep', lambda _: None)
+    html = '<table id="constituents"><tr><th>Symbol</th><th>CIK</th></tr>'
+    html += ''.join(f'<tr><td>T{i}</td><td>{i}</td></tr>' for i in range(1, 501)) + '</table>'
+    urls = []
+    class Response:
+        status_code = 200
+        content = b'synthetic public response'
+        text = html
+        def __init__(self, symbol=None): self.symbol = symbol
+        def json(self): return {'quoteResponse': {'result': [{'symbol': self.symbol, 'currency': 'USD', 'marketCap': 100000 - int(self.symbol[1:]), 'regularMarketPrice': 100, 'regularMarketTime': epoch}]}}
+    def request(self, method, url, **kwargs):
+        urls.append(url)
+        return Response((kwargs.get('params') or {}).get('symbols'))
+    monkeypatch.setattr(requests.Session, 'request', request)
+    class Client:
+        def __init__(self, session): self.session = session
+        def get_raw_json(self, url, params): return self.session.get(url, params=params).json()
+    monkeypatch.setattr(data, 'YfData', Client)
+    path = module.capture_ranking(output_root=tmp_path, previous_session='2026-09-08', execution_session='2026-09-09')
+    result = json.loads(path.read_text())
+    assert len(result['issuers']) == 500
+    assert result['content_hash'] == content_hash({k: v for k, v in result.items() if k != 'content_hash'})
+    receipt = json.loads(Path(result['receipt']['path']).read_text())
+    assert receipt['http_requests'] == 501
+    assert all('quoteSummary' not in url and 'timeseries' not in url for url in urls)
+    assert path.stat().st_mode & 0o222 == 0
+    with pytest.raises(CaptureError, match='overwrite refused'):
+        module.capture_ranking(output_root=tmp_path, previous_session='2026-09-08', execution_session='2026-09-09')
+
+
+def test_price_fragment_is_sanitized_and_hash_bound(tmp_path, monkeypatch):
+    import hashlib
+    from scripts import capture_aquila_ranking as module
+    requests = pytest.importorskip('curl_cffi.requests')
+    class Response:
+        status_code = 200
+        content = b'provider text must not be retained'
+        def json(self):
+            return {'quoteSummary': {'result': [{'price': {'symbol': 'AZO', 'currency': 'USD', 'regularMarketTime': {'raw': EPOCH}, 'regularMarketPrice': {'raw': 100}, 'marketCap': {'raw': 500, 'fmt': 'ignore'}, 'crumb': 'DO_NOT_RETAIN'}}]}}
+    monkeypatch.setattr(requests.Session, 'request', lambda *a, **kw: Response())
+    budget = module.RequestBudget(max_http=1, max_seconds=60)
+    store = CaptureStore(tmp_path / 'cap')
+    session = recording_session(store, budget)
+    session.get('https://query2.finance.yahoo.com/v10/finance/quoteSummary/AZO', params={'modules': 'price', 'crumb': 'DO_NOT_RETAIN'})
+    source = store.root / 'cap-0001.json.gz'
+    raw = json.loads(gzip.decompress(source.read_bytes()))
+    assert raw['price'] == {'symbol': 'AZO', 'currency': 'USD', 'regularMarketTime': EPOCH, 'regularMarketPrice': 100, 'marketCap': 500}
+    assert session.cap_quotes['AZO']['source_sha256'] == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert 'DO_NOT_RETAIN' not in json.dumps(raw) and 'provider text' not in json.dumps(raw)
+    session.close()

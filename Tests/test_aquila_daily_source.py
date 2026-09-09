@@ -200,3 +200,17 @@ def test_colliding_execution_cache_aliases_fail_closed(tmp_path):
     write(path, ranking, True)
     with pytest.raises(AquilaContractError, match="colliding"):
         build_daily_source(repo_root=tmp_path, bundle_dir=tmp_path / "bundle", trade_date="2026-09-08", generated_at="2026-09-08T11:00:00+00:00")
+
+
+def test_capture_failure_points_to_receipt_without_provider_secrets(tmp_path, monkeypatch):
+    import scripts.build_aquila_daily_source as producer
+    setup(tmp_path)
+    (tmp_path / 'outputs/aquila/rankings/2026-09-04.json').unlink()
+    def fail(*args, **kwargs):
+        raise producer.subprocess.CalledProcessError(1, ['collector'], stderr='crumb=DO_NOT_RETAIN')
+    monkeypatch.setattr(producer.subprocess, 'run', fail)
+    with pytest.raises(Exception, match='aquila_ranking_capture_failed') as caught:
+        build_daily_source(repo_root=tmp_path, bundle_dir=tmp_path / 'bundle', trade_date='2026-09-08', generated_at='2026-09-08T11:00:00+00:00', capture_missing_ranking=True)
+    assert 'failure.json' in str(caught.value)
+    assert 'DO_NOT_RETAIN' not in str(caught.value)
+    assert not (tmp_path / 'outputs/shadow_candidates/2026-09-08/caerus_aquila.json').exists()

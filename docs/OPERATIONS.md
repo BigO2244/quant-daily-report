@@ -47,16 +47,16 @@ bash -n scripts/cron_execute.sh
 - Failures are logged to `logs/shadow_YYYY-MM-DD.log` and swallowed.
 - Shadow generation must never block production paper execution.
 
-## Self-Heal Recovery Integrity
+## Precompute schedule and execution integrity
 
 - `scripts/cron_execute.sh` validates the full precompute bundle before running
   execution.
-- Required files are `contract.json`, `daily_snapshot.json`, `signals.json`,
-  and `planned_execution_payload.json`.
-- If validation fails, execution invokes `scripts/cron_precompute.sh` with
-  `SELF_HEAL_PRECOMPUTE_ONLY=1`.
-- Self-heal suppresses precompute email, shadow generation, latest shadow
-  publication, and shadow reconciliation.
+- Required files include `contract.json`, `daily_snapshot.json`, `signals.json`,
+  `planned_execution_payload.json`, `sleeve_evaluations.json`, and the sealed target.
+- Canonical precompute starts at 05:00 America/New_York after the 04:45
+  security-master refresh. Admission is limited to the 05:00 minute.
+- If validation fails at execution, no precompute rebuild is permitted; the
+  account remains blocked with `precompute_bundle_invalid_0500_rebuild_prohibited`.
 - Execution continues only after full bundle validation passes.
 - Partial recovery output fails closed.
 

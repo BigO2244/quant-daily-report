@@ -75,7 +75,7 @@ def main() -> int:
         f"allow_run={str(payload['allow_run']).lower()} "
         f"reason={payload['reason']}"
     )
-    return 0
+    return 0 if args.workflow_kind != "precompute" or payload["allow_run"] else 1
 
 
 if __name__ == "__main__":

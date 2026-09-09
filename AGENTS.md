@@ -219,7 +219,7 @@ states otherwise. Install the VM entries with `crontab scripts/crontab.txt`.
 | Time (ET) | Scheduler | Phase | Script | Output |
 |---|---|---|---|---|
 | 6:30 AM | Mac Studio launchd | Advisory research digest | `com.caerus.quant-research` | `~/.caerus/research-runtime/outputs/digest_YYYY-MM-DD.json`; non-capital and not consumed by canonical precompute |
-| 7:00 AM | Production VM cron | 1 — Precompute | `scripts/cron_precompute.sh` | Immutable session + full sleeve decisions + one account allocation |
+| 5:00 AM | Production VM cron | 1 — Precompute | `scripts/cron_precompute.sh` | Immutable session + full sleeve decisions + one account allocation |
 | 9:35 AM | Production VM cron | 2 — Order execution | `scripts/cron_execute.sh` | Exact Alpaca PAPER equity orders; options disabled |
 | 10:00 AM | Production VM cron | 3 — Confirmation + email | `scripts/cron_confirm.sh` | Email report |
 | 6:30 PM | Production VM cron | Post-close price hydration | `python3 -m scripts.hydrate_price_cache_only --refresh-shadow-artifacts --strict` | `outputs/price_hydration/YYYY-MM-DD/status.json` + refreshed Shadow scorecard artifacts |
@@ -251,13 +251,13 @@ Shadow generation is best-effort only:
   publishes no new `latest` and makes system health non-green
 - shadow cannot block production execution
 
-Self-heal execution recovery is fail-closed:
+Execution consumes the completed 05:00 ET bundle and fails closed:
 - `scripts/cron_execute.sh` validates the full precompute bundle before
   execution continuation.
-- If the bundle is missing or invalid, execution invokes
-  `scripts/cron_precompute.sh` with `SELF_HEAL_PRECOMPUTE_ONLY=1`.
-- Self-heal precompute suppresses precompute email, shadow generation, latest
-  shadow publication, and shadow reconciliation.
+- If the bundle is missing or invalid, execution records the validation failure
+  and stops. It cannot launch a later precompute or source capture.
+- Canonical precompute starts only in the 05:00 ET minute; security master runs
+  at 04:45. A run admitted at 05:00 can finish after that minute.
 - Execution continues only when `core/precompute_bundle_validation.py` confirms
   the schema-3 hash manifest for the session, sleeve evaluations, sleeve
   decisions, portfolio allocation, sealed target, read-only projections, and
@@ -551,7 +551,7 @@ Four independent layers prevent position and regime whipsaw:
 | `brokers/alpaca_broker.py` | Alpaca broker — equity + options order submission |
 | `scripts/crontab.txt` | Full cron schedule — install with `crontab scripts/crontab.txt` |
 | `scripts/cron_research.sh` | Legacy/manual advisory digest wrapper; scheduled execution moved off the VM to Mac Studio launchd label `com.caerus.quant-research` |
-| `scripts/cron_precompute.sh` | Phase 1 — 7:00 AM ET precompute |
+| `scripts/cron_precompute.sh` | Phase 1 — 5:00 AM ET precompute |
 | `scripts/cron_execute.sh` | Phase 2 — 9:35 AM ET order execution |
 | `scripts/cron_confirm.sh` | Phase 3 — 10:00 AM ET confirmation + email |
 | `scripts/build_causal_paper_ledger.py` | Build broker-reconciled causal ownership and valuation |
@@ -856,8 +856,8 @@ Runtime separation:
   Polaris / Orion / Lyra. The session, complete decision batch, and account
   allocation are already sealed before that refresh; later shadow output cannot
   mutate PAPER Decision. Stale shadow state prevents overall green health.
-- Missing or invalid precompute bundles trigger `SELF_HEAL_PRECOMPUTE_ONLY=1`;
-  execution continues only after full bundle validation passes
+- Missing or invalid precompute bundles block execution; the 05:00-only policy
+  prohibits execution-time precompute rebuilds
 - If a `SELF_HEAL` pretrade reconciliation occurs, the wrapper re-runs reconciliation
   once against the refreshed canonical state before proceeding
 - Same-day retry locks block duplicate successful executions but must not strand

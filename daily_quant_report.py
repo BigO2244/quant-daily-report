@@ -6253,6 +6253,13 @@ def main(argv: list[str] | None = None):
     global _RUN_TERMINAL_STATUS, _RUN_TERMINAL_SUBSTATUS, _RUN_TERMINAL_MESSAGE
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = _parse_args(argv)
+    if bool(getattr(args, "write_precompute_bundle", False)):
+        from core.workflow_status import classify_precompute_window
+        guard = classify_precompute_window()
+        if not guard["allow_run"]:
+            raise RuntimeError(guard["reason"])
+        if os.getenv("REPORT_DATE", "").strip() not in ("", guard["now_et"][:10]):
+            raise RuntimeError("precompute report date must equal today's ET session")
     explicit_trading_mode_requested = _explicit_trading_mode_requested()
     mode_norm, trading_mode_norm, paper_requested, legacy_shadow_requested = _resolve_exec_modes()
     boot_now_utc = dt.datetime.now(dt.timezone.utc)
@@ -7617,7 +7624,11 @@ def main(argv: list[str] | None = None):
                 precompute_contract_path,
             )
         except Exception as _precompute_exc:
-            logger.warning("[PRECOMPUTE][WARN] failed writing bundle: %s", _precompute_exc)
+            _RUN_TERMINAL_STATUS = "failed_pre_execution"
+            _RUN_TERMINAL_SUBSTATUS = "precompute_bundle_creation_failed"
+            _RUN_TERMINAL_MESSAGE = "Required precompute bundle creation failed; inspect producer receipt."
+            logger.error("[PRECOMPUTE][FAILED] required bundle creation failed: %s", _precompute_exc)
+            raise
     integrity = {
         "trade_date": trade_date_str,
         "asof_date": str(execution_payload.get("pricing_asof") or prev_trading_day(trade_date_str)),

@@ -6,7 +6,7 @@
 #
 # Advisory Claude Research Agent runs on the Mac Studio at 6:30 AM ET via
 # launchd label com.caerus.quant-research. It is intentionally absent here.
-# Phase 1:  Precompute (signals, recon, position check) — 7:00 AM ET
+# Phase 1:  Precompute (signals, recon, position check) — 5:00 AM ET
 # Phase 2:  Order Execution (Alpaca paper API + gated options overlay) — 9:35 AM ET
 # Phase 3:  Confirmation (verify trades, send email) — 10:00 AM ET
 
@@ -15,10 +15,10 @@ SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 
 # Security master refresh (artifact-only; before precompute final plan)
-45 6 * * 1-5 $HOME/quant-daily-report/scripts/cron_security_master.sh >> $HOME/quant-daily-report/logs/cron_security_master.log 2>&1
+45 4 * * 1-5 $HOME/quant-daily-report/scripts/cron_security_master.sh >> $HOME/quant-daily-report/logs/cron_security_master.log 2>&1
 
 # Phase 1: Canonical precompute (independent of the advisory research digest)
-0 7 * * 1-5 $HOME/quant-daily-report/scripts/cron_precompute.sh >> $HOME/quant-daily-report/logs/cron_precompute.log 2>&1
+0 5 * * 1-5 $HOME/quant-daily-report/scripts/cron_precompute.sh >> $HOME/quant-daily-report/logs/cron_precompute.log 2>&1
 
 # Phase 2: Order Execution
 35 9 * * 1-5 $HOME/quant-daily-report/scripts/cron_execute.sh >> $HOME/quant-daily-report/logs/cron_execute.log 2>&1

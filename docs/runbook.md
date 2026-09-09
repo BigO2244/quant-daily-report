@@ -55,7 +55,7 @@ Review this before 9:35 AM ET each trading day.
 - `Caerus Lyra` = secondary shadow challenger
 - `SPY` = benchmark
 
-### 1. Confirm VM precompute completed (~7:00 AM ET)
+### 1. Confirm VM precompute completed (starts 5:00 AM ET)
 
 - SSH to the VM and inspect `logs/precompute_<DATE>.log`.
 - Confirm `outputs/precompute/<DATE>/contract.json` and companion bundle files exist.
@@ -97,7 +97,7 @@ Or trigger the workflow and watch the "Alpaca smoke test" and "Diag Alpaca auth"
 | Time (ET) | Scheduler | Phase | Key Steps |
 |---|---|---|---|
 | 6:30 AM | Mac Studio launchd | Advisory research digest | `com.caerus.quant-research` writes to `~/.caerus/research-runtime/outputs/`; it has no canonical precompute consumer. |
-| 7:00 AM | VM cron | Precompute | `scripts/cron_precompute.sh` evaluates all sleeves, seals one Orion Decision target, quarantines the legacy research frame, and then writes non-blocking shadow artifacts. |
+| 5:00 AM | VM cron | Precompute | `scripts/cron_precompute.sh` evaluates all sleeves, seals one Orion Decision target, quarantines the legacy research frame, and then writes non-blocking shadow artifacts. |
 | 9:35 AM | VM cron | Execution | `scripts/cron_execute.sh` validates the sealed target, self-heals if needed, applies fresh Risk/broker state, and creates exact orders from the same Decision hash. |
 | 10:00 AM | VM cron | Confirmation | `scripts/cron_confirm.sh` sends confirmation/reporting email. |
 | 7:15 PM | VM cron | Broker truth | `scripts/cron_broker_ledger.sh` pulls the sole actual-PAPER NAV authority from Alpaca. |
@@ -146,30 +146,18 @@ files are:
 The legacy allocator's proposed trades may exist only below the content-hashed
 `research/growth_engine_v4/` subdirectory. They have no execution authority.
 
-If validation fails, `scripts/cron_execute.sh` runs a self-heal precompute with
-`SELF_HEAL_PRECOMPUTE_ONLY=1`. That recovery suppresses:
+Canonical precompute is admitted only during the 05:00 America/New_York
+minute, after the 04:45 security-master refresh. The admitted run can finish
+later. Force-refresh and manual dispatch do not bypass the start restriction.
+If validation fails at 09:35, execution records
+`precompute_bundle_invalid_0500_rebuild_prohibited` and submits no orders.
+It never regenerates the morning decision or captures a ranking after open.
 
-- precompute email
-- shadow generation
-- latest shadow publication
-- shadow reconciliation
-
-Recovery artifacts:
-
-- `outputs/workflow/<DATE>/execution_bundle_validation.json`
-- `outputs/workflow/<DATE>/execution_self_heal.json`
-- `outputs/workflow/<DATE>/precompute_bundle_validation.json`
-- `outputs/workflow/<DATE>/precompute_self_heal.json`
-
-Operational interpretation:
-
-- `execution_continued: true` means recovery produced a fully valid bundle.
-- `execution_continued: false` means execution was intentionally halted.
-- Missing required files in `validation_failures` are blocking.
-- `recovery_attempt_count > 1` means repeated degraded recovery and should be reviewed.
-- Shadow latest artifacts may be stale after self-heal because shadow side
-  effects are intentionally suppressed; inspect the degraded-state flags rather
-  than deleting latest artifacts.
+Inspect `execution_bundle_validation.json` and `execution_self_heal.json` under
+`outputs/workflow/<DATE>/`. The latter records recovery as suppressed by the
+05:00-only policy, with no recovery attempt and no execution continuation.
+Use the precompute log and immutable Aquila failure receipt to identify the
+producer failure. Never delete partial evidence or backdate a replacement.
 
 FR-016 advisory semantic validation planning lives in
 `docs/precompute_semantic_validation.md`. That document defines future
@@ -486,7 +474,7 @@ Resolution:
   precompute, execution/confirmation, Monday review, and post-close windows.
 - Ubuntu package metadata refresh is pinned to 01:15 ET plus at most 15 minutes
   of jitter. Unattended upgrades are pinned to 02:15 ET plus at most 15 minutes
-  of jitter. Both remain enabled, but neither may drift into the 06:45–10:00
+  of jitter. Both remain enabled, but neither may drift into the 04:45–10:00
   trading runway or the 18:30–21:00 post-close chain.
 - Install or repair the tracked package-maintenance overrides on the VM with
   `scripts/install_vm_maintenance_windows.sh`, then verify the next activations

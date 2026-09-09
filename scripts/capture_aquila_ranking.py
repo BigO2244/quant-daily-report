@@ -20,6 +20,7 @@ import re
 import sys
 import threading
 import time
+import traceback
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -39,6 +40,62 @@ PREFERENCES = ({'GOOG', 'GOOGL'}, 'GOOGL'), ({'FOX', 'FOXA'}, 'FOXA'), ({'NWS', 
 
 class CaptureError(ValueError):
     pass
+
+
+class TransientQuoteError(CaptureError):
+    """A recorded 502/503/504 on the required Yahoo quote endpoint."""
+
+
+def safe_failure(exc):
+    # Frame identities aid diagnosis without persisting exception text, locals,
+    # source lines, request query strings, credentials or provider bodies.
+    return {
+        'error_type': type(exc).__name__,
+        'reason': str(exc) if isinstance(exc, CaptureError) else 'provider_or_capture_failure',
+        'frames': [{'file': Path(frame.filename).name, 'function': frame.name,
+                    'line': frame.lineno} for frame in traceback.extract_tb(exc.__traceback__)],
+    }
+
+
+def quote_client(session):
+    from yfinance.data import YfData
+    return YfData(session=session)
+
+
+def collect_quote(symbol, session, budget, *, client=None):
+    """Collect raw quote fields with a same-epoch, provider-cap-only fallback.
+
+    No shares-times-price estimate, dropped issuer, or stale replacement is
+    permitted. Both field sources remain immutable and separately identified.
+    """
+    client = client if client is not None else quote_client(session)
+    def fetch(url, params):
+        for attempt in range(3):
+            if budget.stopped:
+                raise CaptureError('collection stopped')
+            try:
+                return client.get_raw_json(url, params=params)
+            except TransientQuoteError:
+                if attempt == 2:
+                    raise
+    fetch('https://query1.finance.yahoo.com/v7/finance/quote',
+          {'symbols': symbol, 'formatted': 'false'})
+    if symbol not in session.quotes:
+        raise CaptureError('required raw quote missing for ' + symbol)
+    quote = session.quotes[symbol]
+    if quote.get('marketCap') is None:
+        fetch('https://query2.finance.yahoo.com/v10/finance/quoteSummary/' + symbol,
+              {'modules': 'price', 'formatted': 'false'})
+        cap = session.cap_quotes.get(symbol, {})
+        for field in ('symbol', 'currency', 'regularMarketTime', 'regularMarketPrice'):
+            if quote.get(field) is None or cap.get(field) != quote[field]:
+                raise CaptureError('market cap fallback identity or quote epoch mismatch for ' + symbol)
+        value = cap.get('marketCap')
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise CaptureError('missing or invalid provider market cap for ' + symbol)
+        quote['marketCap'] = value
+        quote['market_cap_source_sha256'] = cap['source_sha256']
+        quote['market_cap_source_endpoint'] = 'quoteSummary.price'
 
 
 def _bytes(value):
@@ -156,7 +213,12 @@ def normalize_panel(issuers, quotes, *, previous_session, execution_session, cap
             raise CaptureError('stale or future quote timestamp')
         if not re.fullmatch('[0-9a-f]{64}', str(quote.get('source_sha256', ''))):
             raise CaptureError('missing raw quote lineage')
+        cap_source = quote.get('market_cap_source_sha256', quote['source_sha256'])
+        if not re.fullmatch('[0-9a-f]{64}', str(cap_source)):
+            raise CaptureError('missing market cap field lineage')
         normalized.append({**issuer, 'market_cap': quote['marketCap'],
+                           'market_cap_source_sha256': cap_source,
+                           'market_cap_source_endpoint': quote.get('market_cap_source_endpoint', 'v7.quote'),
                            'regularMarketPrice': quote['regularMarketPrice'],
                            'regularMarketTime': quote['regularMarketTime'],
                            'source_sha256': quote['source_sha256']})
@@ -235,6 +297,7 @@ def recording_session(store, budget):
         def __init__(self):
             super().__init__(impersonate='chrome')
             self.quotes = {}
+            self.cap_quotes = {}
             self.quote_lock = threading.Lock()
 
         def request(self, method, url, *args, **kwargs):
@@ -248,17 +311,27 @@ def recording_session(store, budget):
             safe = {'method': str(method).upper(), 'host': parsed.hostname, 'path': parsed.path,
                     'status': response.status_code, 'captured_at': observed,
                     'response_bytes': len(response.content), 'credentials_persisted': False}
+            params = kwargs.get('params') or {}
+            symbol = params.get('symbols') if isinstance(params, dict) else None
+            if isinstance(symbol, str) and re.fullmatch(r'[A-Z][A-Z0-9.\-]*', symbol):
+                safe['symbol'] = symbol
             store.write(f'http-{number:04d}.json.gz', safe, compress=True)
             with store.lock:
                 store.response_bytes += len(response.content)
                 if store.response_bytes > store.max_bytes:
                     budget.stopped = True
                     raise CaptureError('cumulative HTTP response byte ceiling')
+            if (parsed.path == '/v7/finance/quote' or parsed.path.startswith('/v10/finance/quoteSummary/')) and response.status_code in (502, 503, 504):
+                raise TransientQuoteError('transient Yahoo quote HTTP ' + str(response.status_code))
             # Cookie, crumb, headers and arbitrary provider text are never retained.
             # Preserve only the raw numeric source fields needed for normalization.
             if parsed.path == '/v7/finance/quote' and response.status_code == 200:
                 payload = response.json()
                 result = payload.get('quoteResponse', {}).get('result', [])
+                if not isinstance(result, list) or len(result) != 1 or not isinstance(result[0], dict):
+                    raise CaptureError('expected exactly one raw quote')
+                if symbol is not None and result[0].get('symbol') != symbol:
+                    raise CaptureError('raw quote does not match requested issuer')
                 allowed = ('symbol', 'quoteType', 'currency', 'marketCap', 'regularMarketPrice', 'regularMarketTime', 'marketState')
                 rows = [{key: row[key] for key in allowed if key in row} for row in result]
                 safe['quoteResponse'] = {'result': rows}
@@ -266,6 +339,18 @@ def recording_session(store, budget):
                 with self.quote_lock:
                     for row in rows:
                         self.quotes[row.get('symbol')] = {**row, 'source_sha256': ref['sha256']}
+            elif parsed.path.startswith('/v10/finance/quoteSummary/') and response.status_code == 200:
+                results = response.json().get('quoteSummary', {}).get('result') or []
+                if len(results) != 1 or not isinstance(results[0].get('price'), dict):
+                    raise CaptureError('missing provider price module')
+                price = results[0]['price']
+                fields = ('symbol', 'currency', 'marketCap', 'regularMarketTime', 'regularMarketPrice')
+                raw = {key: price[key].get('raw') if isinstance(price[key], dict) else price[key]
+                       for key in fields if key in price}
+                safe['price'] = raw
+                ref = store.write(f'cap-{number:04d}.json.gz', safe, compress=True)
+                with self.quote_lock:
+                    self.cap_quotes[raw.get('symbol')] = {**raw, 'source_sha256': ref['sha256']}
             elif parsed.hostname == 'en.wikipedia.org' and response.status_code == 200:
                 safe['html'] = response.text
                 store.write(f'membership-{number:04d}.json.gz', safe, compress=True)
@@ -319,6 +404,7 @@ def capture_ranking(*, output_root, previous_session, execution_session, now=Non
     cookie_context.__enter__()
     try:
         session = recording_session(store, budget)
+        client = quote_client(session)
         response = session.get(MEMBERSHIP_URL)
         if response.status_code != 200:
             raise CaptureError('membership HTTP failure')
@@ -326,9 +412,9 @@ def capture_ranking(*, output_root, previous_session, execution_session, now=Non
         def collect(issuer):
             if budget.stopped:
                 raise CaptureError('collection stopped')
-            # Public API; raw v7 epochs come from the recording session, not formatted info.
+            # Direct v7 capture avoids unrelated company-info parsing failures.
             try:
-                yf.Ticker(issuer['yahoo_symbol'], session=session).get_info()
+                collect_quote(issuer['yahoo_symbol'], session, budget, client=client)
             except Exception:
                 budget.stopped = True
                 raise
@@ -348,8 +434,7 @@ def capture_ranking(*, output_root, previous_session, execution_session, now=Non
     except Exception as exc:
         budget.stopped = True
         # Do not persist provider exception messages: they may contain crumb-bearing URLs.
-        store.write('failure.json', {'accepted': False, 'error_type': type(exc).__name__,
-                    'reason': str(exc) if isinstance(exc, CaptureError) else 'provider_or_capture_failure',
+        store.write('failure.json', {'accepted': False, **safe_failure(exc),
                     'http_requests': budget.count, 'sources': list(store.refs), 'credentials_persisted': False})
         raise CaptureError('capture failed; immutable failure receipt: ' + str(root)) from None
     finally:
@@ -358,8 +443,10 @@ def capture_ranking(*, output_root, previous_session, execution_session, now=Non
             session.close()
 
 
-def probe_source(*, output_root):
-    """One membership request plus AAPL get_info; never creates a formation."""
+def probe_source(*, output_root, symbol="AAPL"):
+    """One membership request plus one raw quote; never creates a formation."""
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]*", symbol):
+        raise CaptureError("invalid probe symbol")
     import yfinance as yf
     observed = dt.datetime.now(dt.timezone.utc)
     root = Path(output_root) / ('probe-' + observed.strftime('%Y%m%dT%H%M%S.%fZ'))
@@ -369,16 +456,17 @@ def probe_source(*, output_root):
     with memory_cookie_cache():
         try:
             session = recording_session(store, budget)
+            client = quote_client(session)
             response = session.get(MEMBERSHIP_URL)
             if response.status_code != 200:
                 raise CaptureError('membership HTTP failure')
             members = parse_membership(response.text)
-            if not any(row['symbol'] == 'AAPL' for row in members):
-                raise CaptureError('AAPL absent from membership')
-            yf.Ticker('AAPL', session=session).get_info()
-            quote = session.quotes.get('AAPL', {})
-            if quote.get('symbol') != 'AAPL' or quote.get('currency') != 'USD':
-                raise CaptureError('AAPL quote identity or currency missing')
+            if not any(row['symbol'].replace('.', '-') == symbol for row in members):
+                raise CaptureError('probe symbol absent from membership')
+            collect_quote(symbol, session, budget, client=client)
+            quote = session.quotes.get(symbol, {})
+            if quote.get('symbol') != symbol or quote.get('currency') != 'USD':
+                raise CaptureError('probe quote identity or currency missing')
             for key in ('marketCap', 'regularMarketPrice', 'regularMarketTime'):
                 value = quote.get(key)
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
@@ -389,7 +477,7 @@ def probe_source(*, output_root):
             if not re.fullmatch('[0-9a-f]{64}', str(quote.get('source_sha256', ''))):
                 raise CaptureError('missing probe raw quote lineage')
             payload = {'accepted': False, 'classification': 'SOURCE_ONLY_NOT_FORMATION',
-                       'status': 'PASS', 'captured_at': captured.isoformat(), 'symbol': 'AAPL',
+                       'status': 'PASS', 'captured_at': captured.isoformat(), 'symbol': symbol,
                        'quote': quote, 'membership_listings': len(members), 'sources': list(store.refs),
                        'http_requests': budget.count, 'logical_issuer_calls': 1,
                        'limits': {'http': 12, 'seconds': 60, 'bytes': 4 * 1024 * 1024},
@@ -398,8 +486,7 @@ def probe_source(*, output_root):
         except Exception as exc:
             budget.stopped = True
             store.write('probe.json', {'accepted': False, 'classification': 'SOURCE_ONLY_NOT_FORMATION',
-                        'status': 'FAIL', 'error_type': type(exc).__name__,
-                        'reason': str(exc) if isinstance(exc, CaptureError) else 'provider_or_capture_failure',
+                        'status': 'FAIL', **safe_failure(exc),
                         'http_requests': budget.count, 'sources': list(store.refs), 'credentials_persisted': False})
             raise CaptureError('source probe failed; immutable receipt: ' + str(root)) from None
         finally:
@@ -411,13 +498,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-root', required=True)
     parser.add_argument('--probe-only', action='store_true')
+    parser.add_argument('--probe-symbol', default='AAPL')
     parser.add_argument('--previous-session')
     parser.add_argument('--execution-session')
     args = parser.parse_args()
     if args.probe_only:
         if args.previous_session or args.execution_session:
             parser.error('source-only probe cannot specify formation sessions')
-        result = probe_source(output_root=args.output_root)
+        result = probe_source(output_root=args.output_root, symbol=args.probe_symbol)
         print(json.dumps({'probe_path': str(result), 'accepted': False}))
         return
     if not args.previous_session or not args.execution_session:

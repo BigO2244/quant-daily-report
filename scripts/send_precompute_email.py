@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Send the precompute-complete email after the 7 AM planner finishes.
+Send the precompute-complete email after the 5 AM planner finishes.
 
 Calls format_precompute_email to build the body, then ships it via
 core.quant_report.send_email.  Called from cron_precompute.sh after

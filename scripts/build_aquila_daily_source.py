@@ -151,10 +151,19 @@ def build_daily_source(*, repo_root: Path, bundle_dir: Path, trade_date: str, ge
     if monthly:
         ranking_path = root / f"outputs/aquila/rankings/{previous}.json"
         if not ranking_path.exists() and capture_missing_ranking:
-            subprocess.run([sys.executable, str(root / "scripts/capture_aquila_ranking.py"),
-                            "--output-root", str(root / "outputs/aquila/rankings"),
-                            "--previous-session", previous, "--execution-session", trade_date],
-                           cwd=root, timeout=920, check=True, capture_output=True, text=True)
+            try:
+                subprocess.run([sys.executable, str(root / "scripts/capture_aquila_ranking.py"),
+                                "--output-root", str(root / "outputs/aquila/rankings"),
+                                "--previous-session", previous, "--execution-session", trade_date],
+                               cwd=root, timeout=920, check=True, capture_output=True, text=True)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                # Child output can contain provider URLs; point to sanitized
+                # immutable receipts instead of echoing raw stdout/stderr.
+                raise AquilaContractError(
+                    "aquila_ranking_capture_failed: inspect immutable failure.json under "
+                    + str(root / "outputs/aquila/rankings")
+                    + "; no formation published (" + type(exc).__name__ + ")"
+                ) from None
             # Provider capture must predate source generation, including the
             # first runtime capture that began after this producer started.
             generated_at = dt.datetime.now(dt.timezone.utc).isoformat()

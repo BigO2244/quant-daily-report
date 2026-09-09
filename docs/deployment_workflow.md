@@ -223,7 +223,7 @@ hardening and should be inspected when relevant:
 | `outputs/workflow/<date>/execution_bundle_validation.json` | `scripts/cron_execute.sh` | Full precompute bundle validation before execution continuation. | Blocking |
 | `outputs/workflow/<date>/execution_self_heal.json` | `scripts/cron_execute.sh` | Execution recovery attempt, result, continuation decision, and suppressed side effects. | Blocking when validation fails |
 | `outputs/workflow/<date>/precompute_bundle_validation.json` | `scripts/cron_precompute.sh` | Full bundle validation after precompute writes. | Blocking for precompute success |
-| `outputs/workflow/<date>/precompute_self_heal.json` | `scripts/cron_precompute.sh` | Self-heal-only precompute status and suppressed side effects. | Feeds execution recovery |
+| `outputs/workflow/<date>/precompute_self_heal.json` | `scripts/cron_precompute.sh` | Historical self-heal-only status; later rebuilds prohibited by 05:00 policy. | Diagnostic history |
 | `outputs/precompute/<date>/paper_target_package.json` | `scripts/seal_paper_precompute_target.py` | Immutable Orion Evidence + Decision package and the sole morning target hash. | Blocking |
 
 Failure interpretation:

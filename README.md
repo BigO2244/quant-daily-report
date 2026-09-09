@@ -166,3 +166,7 @@ This shadow lane writes target books and comparison artifacts for Polaris, Orion
 - [Data Standards](docs/alpha_stack/data_standards.md)
 - [Research Validation Spec](docs/alpha_stack/research_validation_spec.md)
 - [Model Strategy](docs/model_strategy.md)
+
+## Precompute timing — September 9 repair
+
+Canonical PAPER precompute starts at 05:00 America/New_York, with security-master refresh at 04:45. Admission is limited to the 05:00 minute; admitted work can finish later. Execution at 09:35 consumes the sealed bundle and cannot rebuild it. Dashboard refresh yields 04:35–06:00. Deployment receipts and installed cron establish activation; this source change alone does not prove deployment.

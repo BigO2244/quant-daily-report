@@ -81,7 +81,7 @@ def _condition_result(weekday: int, hhmm: str) -> int:
 
 
 def test_dashboard_refresh_skips_production_windows():
-    assert _condition_result(2, "0645") == 1
+    assert _condition_result(2, "0445") == 1
     assert _condition_result(1, "0800") == 1
     assert _condition_result(2, "0935") == 1
     assert _condition_result(2, "1830") == 1

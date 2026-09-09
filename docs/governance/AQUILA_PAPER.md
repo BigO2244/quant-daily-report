@@ -46,3 +46,14 @@ comparisons, drawdown, turnover, costs, tracking error and operational failures.
 No reactive tuning or automatic scale-up. Any allocation change, retirement or
 Live decision requires Brett's separate approval. Deployment attestation,
 registry, exact execution receipts and broker truth govern actual runtime state.
+
+## Source collection repair — September 9
+
+The collector requests raw Yahoo v7 quotes directly. A missing marketCap may
+use Yahoo's provider-reported quoteSummary price-module marketCap only when
+symbol, USD currency, regular-market epoch and price exactly match the v7
+quote. The v7 quote and cap fragment retain separate immutable source hashes.
+No shares-times-price calculation, skipped issuer or stale substitution is
+allowed. Transient 502/503/504 responses get at most three attempts per required
+endpoint within the original global limits. Rate limits and malformed or
+incomplete evidence fail closed. Source-only probes never publish formations.

@@ -450,71 +450,29 @@ print(payload.get(os.environ["SUMMARY_FIELD"], ""))
 PY
 }
 
-# --- Verify precompute bundle integrity (with self-heal retry; unchanged) ---
+# --- Consume the completed 05:00 bundle; execution cannot recreate alpha. ---
 BUNDLE_DIR="${REPO_ROOT}/outputs/precompute/${REPORT_DATE}"
-RECOVERY_ATTEMPTED=0
-RECOVERY_RESULT="not_attempted"
-RECOVERY_STARTED_AT=""
-RECOVERY_FINISHED_AT=""
-
 if ! python3 -m core.precompute_bundle_validation \
     --bundle-dir "${BUNDLE_DIR}" \
     --trade-date "${REPORT_DATE}" \
     --require-sealed-paper-target \
     --json-output "${BUNDLE_VALIDATION_PATH}"; then
-    echo "WARN: precompute bundle validation failed; details=${BUNDLE_VALIDATION_PATH}"
-    echo "WARN: attempting self-heal by rebuilding today's precompute bundle before giving up."
-    RECOVERY_ATTEMPTED=1
-    RECOVERY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    if SELF_HEAL_PRECOMPUTE_ONLY=1 REPORT_DATE="${REPORT_DATE}" "${REPO_ROOT}/scripts/cron_precompute.sh"; then
-        RECOVERY_RESULT="completed"
-    else
-        RECOVERY_RESULT="failed"
-        echo "ERROR: self-heal precompute rebuild failed"
-    fi
-    RECOVERY_FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-    if ! python3 -m core.precompute_bundle_validation \
-        --bundle-dir "${BUNDLE_DIR}" \
-        --trade-date "${REPORT_DATE}" \
-        --require-sealed-paper-target \
-        --json-output "${BUNDLE_VALIDATION_PATH}"; then
-        python3 -m core.precompute_bundle_validation \
-            --bundle-dir "${BUNDLE_DIR}" \
-            --trade-date "${REPORT_DATE}" \
-            --require-sealed-paper-target \
-            --json-output "${BUNDLE_VALIDATION_PATH}" \
-            --recovery-status-output "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
-            --previous-recovery-status "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
-            --recovery-attempted \
-            --recovery-result "${RECOVERY_RESULT}" \
-            --execution-continued false \
-            --recovery-started-at "${RECOVERY_STARTED_AT}" \
-            --recovery-finished-at "${RECOVERY_FINISHED_AT}" || true
-        echo "FATAL: precompute bundle validation failed after self-heal; details=${BUNDLE_VALIDATION_PATH}"
-        echo "FATAL: execution halted to avoid degraded bundle execution."
-        echo "self_heal_status=${EXECUTION_SELF_HEAL_STATUS_PATH}"
-        fail_lane "precompute_bundle_validation_failed_after_self_heal"
-    fi
-
     python3 -m core.precompute_bundle_validation \
         --bundle-dir "${BUNDLE_DIR}" \
         --trade-date "${REPORT_DATE}" \
         --require-sealed-paper-target \
         --json-output "${BUNDLE_VALIDATION_PATH}" \
         --recovery-status-output "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
-        --previous-recovery-status "${EXECUTION_SELF_HEAL_STATUS_PATH}" \
-        --recovery-attempted \
-        --recovery-result "${RECOVERY_RESULT}" \
-        --execution-continued true \
-        --recovery-started-at "${RECOVERY_STARTED_AT}" \
-        --recovery-finished-at "${RECOVERY_FINISHED_AT}"
-    echo "self_heal_status=${EXECUTION_SELF_HEAL_STATUS_PATH}"
+        --recovery-result "suppressed_0500_only_policy" \
+        --execution-continued false || true
+    echo "FATAL: 05:00 precompute bundle is unavailable or invalid; execution-time rebuild prohibited."
+    echo "bundle_validation=${BUNDLE_VALIDATION_PATH}"
+    fail_lane "precompute_bundle_invalid_0500_rebuild_prohibited"
 fi
 echo "OK: precompute bundle validated at ${BUNDLE_DIR}"
 echo "bundle_validation=${BUNDLE_VALIDATION_PATH}"
 
-# The 07:00 bundle carries one immutable Decision target, never exact orders.
+# The 05:00 bundle carries one immutable Decision target, never exact orders.
 # Fresh broker and market state below remain mandatory before Risk and Trader
 # can publish the exact broker-ready plan.
 echo "precompute_authority=SEALED_DECISION_TARGET_ONLY"

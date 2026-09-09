@@ -79,3 +79,7 @@ tracked 01:15 and 02:15 ET quiet windows with at most 15 minutes of jitter.
 A conflict makes the affected claim unproved until reconciled. It does not
 automatically halt an unrelated capital lane whose authority and evidence are
 otherwise intact.
+
+## Precompute timing — September 9 repair
+
+Canonical PAPER precompute starts at 05:00 America/New_York, with security-master refresh at 04:45. Admission is limited to the 05:00 minute; admitted work can finish later. Execution at 09:35 consumes the sealed bundle and cannot rebuild it. Dashboard refresh yields 04:35–06:00. Deployment receipts and installed cron establish activation; this source change alone does not prove deployment.

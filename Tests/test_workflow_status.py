@@ -25,15 +25,15 @@ def test_delayed_precompute_event_is_marked_stale_after_threshold() -> None:
     assert status["execution_window_status"] == "stale_precompute"
 
 
-def test_manual_force_refresh_can_override_stale_precompute() -> None:
+def test_manual_force_refresh_cannot_override_0500_precompute() -> None:
     status = classify_precompute_window(
         now=dt.datetime(2026, 3, 18, 9, 59, tzinfo=ET),
         force_refresh=True,
         event_name="workflow_dispatch",
     )
 
-    assert status["allow_run"] is True
-    assert status["event_freshness_status"] == "forced_stale_precompute"
+    assert status["allow_run"] is False
+    assert status["reason"] == "outside_0500_precompute_start"
 
 
 def test_live_window_rejects_too_early_start() -> None:
