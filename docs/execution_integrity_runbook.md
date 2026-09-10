@@ -313,3 +313,13 @@ Pause or halt the next trading day if any of the following are true:
   - `outputs/target_attainment/<DATE>/target_attainment_<DATE>.json`
   - `outputs/operational_drag/<DATE>/operational_drag.json`
 - Record whether the next trading day is safe to continue or should be paused
+
+### Yahoo share-class pricing boundary (2026-09-10)
+
+Execution symbols remain in Alpaca notation (for example `BRK.B`) throughout
+sealed targets, plans, and orders. Yahoo open-price requests translate share-class
+dots to hyphens (`BRK-B`) and map responses back before price hydration. The same
+mapping covers daily retries and intraday fallback. Alias collisions and unexpected
+response symbols fail closed; missing or non-positive prices still block the plan.
+A `live_pilot_target_unpriced` diagnostic with Yahoo's "no timezone found" should
+be checked for a provider-symbol mismatch before attributing it to Alpaca.

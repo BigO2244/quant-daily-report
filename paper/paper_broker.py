@@ -370,6 +370,23 @@ def fetch_open_prices_yfinance(tickers: List[str], run_date: str) -> pd.DataFram
 
 
 def _fetch_open_prices_yfinance_impl(tickers: List[str], run_date: str) -> pd.DataFrame:
+    # Yahoo spells equity share classes with '-', while executable targets use
+    # Alpaca's '.'. Keep provider aliases confined to the data boundary, including
+    # daily retries and intraday fallback; never rename the approved target.
+    aliases = {ticker: ticker.replace(".", "-") for ticker in tickers}
+    reverse = {provider: ticker for ticker, provider in aliases.items()}
+    if len(reverse) != len(aliases):
+        raise ValueError("Ambiguous execution-to-Yahoo symbol aliases")
+    frame = _fetch_open_prices_yfinance_provider(list(reverse), run_date)
+    if not frame.empty:
+        if not frame["ticker"].isin(reverse).all():
+            raise ValueError("Unexpected Yahoo price response symbol")
+        frame = frame.copy()
+        frame["ticker"] = frame["ticker"].map(reverse)
+    return frame
+
+
+def _fetch_open_prices_yfinance_provider(tickers: List[str], run_date: str) -> pd.DataFrame:
     if not tickers:
         return pd.DataFrame(columns=["ticker", "open", "price_date"])
 
