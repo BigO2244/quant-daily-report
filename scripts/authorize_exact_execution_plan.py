@@ -187,9 +187,12 @@ def _apply_aquila_quantity_authority(
     for symbol in set(current) | set(desired):
         delta = {owner: round(desired.get(symbol, {}).get(owner, 0) - current.get(symbol, {}).get(owner, 0), 6)
                  for owner in {"caerus_aquila", "caerus_orion"}}
-        if any(q > 1e-6 for q in delta.values()) and any(q < -1e-6 for q in delta.values()):
-            raise RuntimeError("opposing sleeve demands require a receipt-bound internal ownership transfer")
         demands[symbol] = delta
+    from core.sleeve_ownership_transfer import net_demands
+    broker_demands, transfers = net_demands(
+        demands, prices, {r["sleeve_id"]: r for r in allocation["sleeve_allocations"]})
+    if fixed and transfers:
+        raise RuntimeError("protected Aquila holdings cannot transfer")
     targets = request.targets.copy()
     targets["target_weight"] = targets["ticker"].map(weights)
     return dataclasses.replace(request, targets=targets), {
@@ -198,6 +201,8 @@ def _apply_aquila_quantity_authority(
         "ownership_snapshot_sha256": contract["ownership_snapshot_sha256"],
         "desired_quantities": desired,
         "signed_sleeve_demands": demands,
+        "broker_sleeve_demands": broker_demands,
+        "internal_transfers": transfers,
         "aquila_account_weight_at_decision": aq_weight,
         "orion_account_weight_at_decision": residual,
     }
@@ -206,11 +211,13 @@ def _apply_aquila_quantity_authority(
 def _bind_quantity_demand_owners(rows: list[dict[str, Any]], evidence: Mapping[str, Any], allocation: Mapping[str, Any]) -> None:
     if not evidence:
         return
+    from core.sleeve_ownership_transfer import validate_transfers
+    broker_demands = validate_transfers(evidence)
     decisions = {r["sleeve_id"]: r for r in allocation["sleeve_allocations"]}
     for row in rows:
         symbol = str(row["symbol"])
         direction = 1 if str(row["side"]).upper() == "BUY" else -1
-        demand = {owner: direction * quantity for owner, quantity in evidence["signed_sleeve_demands"].get(symbol, {}).items()
+        demand = {owner: direction * quantity for owner, quantity in broker_demands.get(symbol, {}).items()
                   if direction * quantity > 1e-6}
         total = sum(demand.values())
         if total <= 0 or float(row.get("quantity", row.get("shares", row.get("qty", 0)))) > total + 1e-6:

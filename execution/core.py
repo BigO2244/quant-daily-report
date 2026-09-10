@@ -260,7 +260,8 @@ def _aquila_quantity_trades(*, request: ExecutionRequest, config: ExecutionCoreC
             raise ValueError("invalid Aquila current account holdings")
         current[symbol] = quantity
     trades = []
-    demands = authority.get("signed_sleeve_demands") or {}
+    from core.sleeve_ownership_transfer import validate_transfers
+    demands = validate_transfers(authority)
     for symbol in sorted(set(current) | set(desired)):
         price = _safe_float(prices.get(symbol), 0)
         if not math.isfinite(price) or price <= 0:

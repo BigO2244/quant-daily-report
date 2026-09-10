@@ -78,6 +78,9 @@ def _aquila_attainment_authority(*, plan: Mapping[str, Any], package_payload: Ma
             owners[owner] = owners.get(owner, 0) + direction * float(order["quantity"]) * fraction
             if owners[owner] < -1e-6:
                 raise ValueError("exact sell consumes another sleeve's shares")
+    from core.sleeve_ownership_transfer import validate_transfers, apply_transfers
+    validate_transfers(qa)
+    apply_transfers(attained, qa.get("internal_transfers") or [])
     expected = {r["symbol"]: float(r["quantity"]) for r in exact.expected_posttrade_positions}
     mismatches = []
     for symbol in set(expected) | set(attained) | set(actual_quantities):

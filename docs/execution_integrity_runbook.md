@@ -323,3 +323,26 @@ mapping covers daily retries and intraday fallback. Alias collisions and unexpec
 response symbols fail closed; missing or non-positive prices still block the plan.
 A `live_pilot_target_unpriced` diagnostic with Yahoo's "no timezone found" should
 be checked for a provider-symbol mismatch before attributing it to Alpaca.
+
+### Shared-stock sleeve ownership transfers (2026-09-10)
+
+Owner-requested PAPER reliability repair supports opposing Aquila/Orion demands
+at monthly formation. Authorization binds original sleeve demands, paired internal
+transfers, both decision identities, fresh valuation prices, and residual broker
+orders into the immutable exact plan. Only net account orders reach Alpaca.
+Protected between-formation Aquila quantities remain immutable.
+
+The executor validates transfer arithmetic before submission. After every exact
+order fills and economic/target reconciliation passes, it atomically publishes
+one immutable receipt per exact-plan hash under `outputs/paper_lane/ownership_transfers/`.
+Dry runs and incomplete executions cannot commit ownership. Recovery consumes the
+same exact plan and stable broker client IDs; receipt replay cannot double-transfer.
+Receipt persistence failure prevents terminal success even if broker fills completed.
+
+Causal ownership applies committed receipts chronologically between broker fills.
+Receipts must match the exact plan, account, original ownership snapshot, and all
+broker fill identities/quantities. Fully filled transfer plans with missing receipts
+block ledger publication. The independent daily audit replays paired ownership
+changes and reconciles sleeve quantities to the broker. Transfers are separately
+identified accounting events, never fabricated broker fills or changed history;
+aggregate account quantity and cash do not change at transfer.

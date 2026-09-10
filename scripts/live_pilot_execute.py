@@ -4560,6 +4560,22 @@ def _run_exact_execution_path(
             f"{target_attainment.get('reason_code') or 'unknown'}"
         )
         final_reconciliation_status = "FAILED_RECONCILIATION"
+    transfer_receipt = None
+    if not dry_run and final_terminal_outcome in {TerminalOutcome.RECONCILED_SUCCESS, TerminalOutcome.AUTHORIZED_NO_TRADE}:
+        try:
+            from core.sleeve_ownership_transfer import commit_transfer_receipt
+            transfer_receipt = commit_transfer_receipt(
+                plan=exact_execution_plan_from_dict(package),
+                receipt_root=Path(output_root) / "ownership_transfers",
+                run_id=run_id, outcome=outcome, economic_status=economic_status,
+                attainment_ok=target_attainment_ok and equality_ok)
+        except Exception as exc:
+            terminal_status = "FAILED_RECONCILIATION"
+            final_terminal_outcome = TerminalOutcome.SYSTEM_FAILURE
+            from core.failure_semantics import FailureClass
+            final_failure_class = FailureClass.RECONCILIATION_FAILURE
+            final_reason = f"internal_transfer_commit_failed:{exc}"
+            final_reconciliation_status = "FAILED_RECONCILIATION"
     summary = {
         "schema_version": "live_pilot_operator_summary.v1",
         "generated_at": _now_utc(),
@@ -4582,6 +4598,7 @@ def _run_exact_execution_path(
         "suppressed_count": len(suppressed),
         "suppressed_orders": suppressed,
         "reconciliation_status": final_reconciliation_status,
+        "internal_transfer_receipt_hash": (transfer_receipt or {}).get("content_hash"),
         "canonical_economic_verification_status": economic_status,
         "canonical_economic_verification_reason": economic_reason,
         "execution_target_attainment_required": target_attainment_required,

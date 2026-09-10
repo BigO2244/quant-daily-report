@@ -381,6 +381,17 @@ def build_causal_ownership(
         preserved = {row["activity_id"]: row for row in history}
         for row in cutover["opening_book"]:
             ownership.setdefault(row["symbol"], {})[row["sleeve_id"]] = float(row["quantity"])
+    from core.sleeve_ownership_transfer import load_transfer_receipts, apply_transfers
+    plans = {_verified_plan(p, plans_root)["content_hash"]: _verified_plan(p, plans_root) for p in exact_plan_paths}
+    transfer_root = (plans_root.parent / "ownership_transfers") if plans_root else ledger_dir / "ownership_transfers"
+    ownership_as_of = _read_json(ledger_dir / "positions_latest.json")["pulled_at_utc"]
+    transfers = load_transfer_receipts(receipt_root=transfer_root, plans=plans,
+        account_hash=(cutover or {}).get("account_id_hash"), broker_orders=broker_orders,
+        fills=fills, as_of=ownership_as_of)
+    pending_transfers = list(transfers)
+    def apply_until(stamp):
+        while pending_transfers and _parse_timestamp(pending_transfers[0]["committed_at"]) <= stamp:
+            apply_transfers(ownership, pending_transfers.pop(0)["transfers"])
     seen_fills = set()
 
     for fill in fills:
@@ -428,6 +439,7 @@ def build_causal_ownership(
                 }
             )
             continue
+        apply_until(timestamp)
         if matched:
             if cutover and (exact.get("account_id_hash") != cutover["account_id_hash"]
                             or _parse_timestamp(exact.get("created_at")) > timestamp):
@@ -509,6 +521,7 @@ def build_causal_ownership(
             + ",".join(row["activity_id"] for row in unresolved[:5])
         )
 
+    apply_until(_parse_timestamp(ownership_as_of))
     causal_path = ledger_dir / "causal_fills.jsonl"
     existing = {str(row.get("activity_id") or ""): row for row in _read_jsonl(causal_path)}
     additions: list[dict[str, Any]] = []
@@ -573,6 +586,7 @@ def build_causal_ownership(
             row["attribution_status"] == "LEGACY_UNATTRIBUTED" for row in causal_rows
         ),
         "positions": ownership_rows,
+        **({"internal_transfer_receipt_hashes": [r["content_hash"] for r in transfers]} if transfers else {}),
         "reconciliation": {"status": "PASS", "quantity_tolerance": QUANTITY_TOLERANCE},
     }
     ownership_payload["content_hash"] = _hash(ownership_payload)

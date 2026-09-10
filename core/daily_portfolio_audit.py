@@ -237,7 +237,23 @@ def _audit_cutover_ownership(root: Path, ownership: dict[str, Any]) -> dict[str,
     for line in (ledger / "orders.jsonl").read_text().splitlines():
         order_row = json.loads(line)
         broker_orders[order_row["id"]] = order_row
+    from core.sleeve_ownership_transfer import load_transfer_receipts
+    transfers = load_transfer_receipts(receipt_root=plans_root.parent / "ownership_transfers",
+        plans=plans, account_hash=identity, broker_orders=broker_orders, fills=fills, as_of=ownership["as_of"])
+    require(ownership.get("internal_transfer_receipt_hashes", []) == [r["content_hash"] for r in transfers], "transfer_receipt_set_mismatch")
+    pending_transfers = list(transfers)
+    def transfer_until(stamp):
+        while pending_transfers and timestamp(pending_transfers[0]["committed_at"]) <= stamp:
+            receipt = pending_transfers.pop(0)
+            for transfer in receipt["transfers"]:
+                source = (transfer["symbol"], transfer["from_sleeve"])
+                target = (transfer["symbol"], transfer["to_sleeve"])
+                qty = float(transfer["quantity"])
+                require(qty > 0 and book.get(source, 0) + 1e-6 >= qty, "transfer_inventory_invalid")
+                book[source] = book.get(source, 0) - qty
+                book[target] = book.get(target, 0) + qty
     for row in rows[len(old):]:
+        transfer_until(timestamp(row["transaction_time_utc"]))
         require(timestamp(row["transaction_time_utc"]) >= epoch and row["attribution_status"] == "ATTRIBUTED", "forward_timestamp_or_status_invalid")
         require(broker_orders.get(row["broker_order_id"], {}).get("client_order_id") == row["client_order_id"], "broker_order_link_invalid")
         plan = plans.get(row["plan_hash"], {})
@@ -266,6 +282,7 @@ def _audit_cutover_ownership(root: Path, ownership: dict[str, Any]) -> dict[str,
             key = (row["symbol"], owner)
             book[key] = book.get(key, 0) + quantity
             require(book[key] >= -1e-6, "negative_owner_inventory")
+    transfer_until(timestamp(ownership["as_of"]))
     current = {(r["symbol"], r["sleeve_id"]): float(r["quantity"]) for r in ownership["positions"]}
     require(len(current) == len(ownership["positions"])
             and all(abs(current.get(k, 0) - book.get(k, 0)) <= 1e-6 for k in set(current) | set(book)), "replay_mismatch")

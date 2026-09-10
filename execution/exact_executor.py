@@ -1400,6 +1400,8 @@ def _execute_exact_plan_locked(
 ) -> ExactExecutionOutcome:
     """Validate and execute exactly one v3 plan, or fail closed without mutation."""
     plan = exact_execution_plan_from_dict(plan_payload, expected_account_scope="PAPER")
+    from core.sleeve_ownership_transfer import validate_transfers
+    validate_transfers(plan.to_dict()["constraints"].get("aquila_quantity_authority") or {})
     epoch = plan_drill_epoch(plan)
     # Normalize once and use the canonical path for every claim, scan, and
     # write.  Otherwise aliases such as ``~/wal`` and ``/home/user/wal`` can
