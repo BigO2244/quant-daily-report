@@ -17,8 +17,8 @@ from Tests.test_live_pilot_build_plan_from_precompute import _bundle, _build, _o
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("hold", [False, True])
-def test_active_aquila_registry_monthly_chain(tmp_path, monkeypatch, hold):
+@pytest.mark.parametrize("hold,shared", [(False, False), (True, False), (False, True)])
+def test_active_aquila_registry_monthly_chain(tmp_path, monkeypatch, hold, shared):
     registry = load_sleeve_control_registry()
     assert set(registry.paper_allocation_policy['sleeve_risk_budgets']) == {'caerus_aquila', 'caerus_orion'}
     for name in ('config/research/strategy_registry.json', 'research_registry/sleeves/manifest.json'):
@@ -27,9 +27,13 @@ def test_active_aquila_registry_monthly_chain(tmp_path, monkeypatch, hold):
         shutil.copyfile(ROOT / name, path)
     date = '2026-08-12'
     symbols = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'WMT', 'LLY']
+    if shared:
+        symbols[-1] = 'MU'
     book = {'account_id_hash': hashlib.sha256(b'paper-account').hexdigest(),
             'opening_contract_hash': 'b'*64, 'reconciliation': {'status': 'PASS'},
             'positions': [{'symbol': 'OLD', 'sleeve_id': 'caerus_orion', 'quantity': 1}]}
+    if shared:
+        book['positions'] = [{'symbol':'MU','sleeve_id':'caerus_orion','quantity':4}]
     if hold:
         book['positions'] = [{'symbol':s,'sleeve_id':'caerus_aquila','quantity':1} for s in symbols]
     book['content_hash'] = content_hash(book)
@@ -64,6 +68,15 @@ def test_active_aquila_registry_monthly_chain(tmp_path, monkeypatch, hold):
                   state_dir=tmp_path/'outputs/paper_lane/state')
     assert plan['status'] == 'READY_FOR_MANUAL_APPROVAL', plan
     class FractionalBroker(TrackingPaperBroker):
+        def submit_market_order(self, **kwargs):
+            original = [dict(r) for r in self.positions]
+            result = super().submit_market_order(**kwargs)
+            if shared and str(kwargs['side']).upper() == 'SELL':
+                previous = next(r for r in original if r['symbol'] == kwargs['symbol'])
+                remainder = float(previous['qty']) - float(kwargs['qty'])
+                if remainder > 0:
+                    self.positions.append(dict(symbol=kwargs['symbol'], qty=str(remainder), market_value=str(remainder*50)))
+            return result
         def get_asset(self, symbol):
             return {**super().get_asset(symbol), 'fractionable': True}
         def get_latest_trades(self, tickers):
@@ -73,6 +86,9 @@ def test_active_aquila_registry_monthly_chain(tmp_path, monkeypatch, hold):
                     if symbol in symbols: row['price'] = '70'
             return result
     broker = FractionalBroker()
+    if shared:
+        broker.cash = 800
+        broker.positions = [{'symbol':'MU','qty':'4','market_value':'200'}]
     if hold:
         broker.cash = 300
         broker.positions = [{'symbol':s,'qty':'1','market_value':'70'} for s in symbols]
@@ -86,7 +102,7 @@ def test_active_aquila_registry_monthly_chain(tmp_path, monkeypatch, hold):
     qa = exact.constraints['aquila_quantity_authority']
     assert qa['aquila_account_weight_at_decision'] == pytest.approx(.7 if hold else .5)
     assert qa['orion_account_weight_at_decision'] == pytest.approx(.25 if hold else .45)
-    assert len(qa['desired_quantities']) == 15
+    assert len(qa['desired_quantities']) == (14 if shared else 15)
     assert all(qa['desired_quantities'][s]['caerus_aquila'] == 1 for s in symbols)
     assert broker.submit_calls == 0
     if hold:
@@ -102,3 +118,15 @@ def test_active_aquila_registry_monthly_chain(tmp_path, monkeypatch, hold):
     assert completed["reconciliation_status"] == "CLEAN"
     assert completed["execution_target_attainment_status"] == "OK_TARGET_ATTAINED"
     assert broker.submit_calls == len(exact.orders)
+
+    if shared:
+        receipts = list((tmp_path/'outputs/paper_lane/ownership_transfers').glob('*.json'))
+        assert len(receipts) == 1
+        receipt = json.loads(receipts[0].read_text())
+        assert receipt['plan_hash'] == exact.content_hash
+        assert receipt['transfers'][0]['symbol'] == 'MU'
+        assert receipt['transfers'][0]['quantity'] == 1
+        assert completed['internal_transfer_receipt_hash'] == receipt['content_hash']
+        shared_orders = [r for r in exact.orders if r['symbol']=='MU']
+        assert len(shared_orders) == 1 and shared_orders[0]['side']=='SELL'
+        assert shared_orders[0]['quantity'] == pytest.approx(1.2)
