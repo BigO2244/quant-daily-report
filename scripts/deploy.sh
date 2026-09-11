@@ -132,6 +132,8 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         Tests/test_broker_truth_ledger.py \
         Tests/test_accounting_precompute_recovery.py \
         Tests/test_exact_execution_choice2.py \
+        Tests/test_alpaca_cash_posting.py \
+        Tests/test_economic_reconciliation.py \
         Tests/test_aquila_recovery_ownership.py \
         Tests/test_aquila_recovery_authorization.py \
         Tests/test_aquila_recovery_chain.py \

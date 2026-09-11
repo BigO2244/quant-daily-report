@@ -159,3 +159,27 @@ def test_future_activity_and_rehashed_trace_tampering_rejected():
         with pytest.raises(ValueError):
             validated_posted_cash(evidence, fills=local_fills, trade_date=args['trade_date'],
                                   starting_cash=args['starting_cash'], ending_cash=args['ending_cash'])
+
+
+def test_snapshot_fractional_precision_accepts_prior_fill_in_same_second(monkeypatch):
+    import datetime
+    import types
+    from scripts import live_pilot_execute as execution
+    instants = iter([datetime.datetime(2026, 9, 11, 15, 9, 0, 600000, tzinfo=datetime.timezone.utc),
+                     datetime.datetime(2026, 9, 11, 15, 9, 0, 900000, tzinfo=datetime.timezone.utc)])
+    class Clock:
+        @classmethod
+        def now(cls, tz): return next(instants)
+    monkeypatch.setattr(execution, 'dt', types.SimpleNamespace(datetime=Clock, timezone=datetime.timezone))
+    broker = types.SimpleNamespace(get_account=lambda: {}, get_positions=lambda: [], list_orders=lambda **kwargs: [])
+    snapshot = execution._broker_snapshot(broker)
+    assert snapshot['capture_started_at'].endswith('.600000+00:00')
+    assert snapshot['captured_at'] == snapshot['capture_completed_at'] == '2026-09-11T15:09:00.900000+00:00'
+    args = fixture()
+    for row in args['activities']:
+        row['transaction_time'] = '2026-09-11T15:09:00.800000Z'
+    args['observed_at'] = snapshot['captured_at']
+    assert certify_cash_posting(**args)['ending_cash'] == '543.22'
+    args['activities'][0]['transaction_time'] = '2026-09-11T15:09:00.950000Z'
+    with pytest.raises(ValueError, match='after broker snapshot'):
+        certify_cash_posting(**args)

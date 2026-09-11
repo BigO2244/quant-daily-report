@@ -574,11 +574,11 @@ def _broker_snapshot(
     *,
     fail_on_open_order_lookup: bool = False,
 ) -> dict[str, Any]:
-    capture_started_at = _now_utc()
+    capture_started_at = dt.datetime.now(dt.timezone.utc).isoformat()
     account = broker.get_account() if hasattr(broker, "get_account") else {}
     positions = broker.get_positions() if hasattr(broker, "get_positions") else []
     open_orders = _list_open_orders(broker)
-    capture_completed_at = _now_utc()
+    capture_completed_at = dt.datetime.now(dt.timezone.utc).isoformat()
     lookup_failure = next(
         (
             order
