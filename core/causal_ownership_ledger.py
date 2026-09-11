@@ -31,6 +31,26 @@ class CausalOwnershipError(RuntimeError):
     pass
 
 
+def broker_valuation_check(account: Mapping[str, Any], positions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """One strict accounting identity for capture and causal publication.
+
+    Endpoint marks can move between reads. Retry the reads; never expand the
+    existing one-basis-point causal tolerance or synthesize broker equity.
+    """
+    equity = float(account["equity"])
+    cash = float(account["cash"])
+    values = [float(row["market_value"]) for row in positions]
+    if not all(math.isfinite(x) for x in [equity, cash, *values]):
+        raise CausalOwnershipError("broker valuation contains non-finite values")
+    market_value = math.fsum(values)
+    difference = equity - cash - market_value
+    tolerance = max(0.01, abs(equity) / 10_000.0)
+    return {"equity": equity, "cash": cash, "positions_mv": market_value,
+            "difference_dollars": difference, "tolerance_dollars": tolerance,
+            "diff_pct": abs(difference) / max(abs(equity), 1e-9),
+            "pass": abs(difference) <= tolerance}
+
+
 def _canonical(payload: Any) -> str:
     return json.dumps(
         payload,
@@ -641,16 +661,15 @@ def build_causal_ownership(
                 "ownership": attributed,
             }
         )
-    equity = float(account.get("equity") or 0.0)
-    cash = float(account.get("cash") or 0.0)
-    positions_market_value = sum(
-        float(row.get("market_value") or 0.0) for row in valued_positions
-    )
-    valuation_difference = equity - cash - positions_market_value
-    valuation_tolerance = max(0.01, abs(equity) / 10_000.0)
-    if abs(valuation_difference) > valuation_tolerance:
+    check = broker_valuation_check(account, valued_positions)
+    equity, cash = check["equity"], check["cash"]
+    positions_market_value = check["positions_mv"]
+    valuation_difference = check["difference_dollars"]
+    valuation_tolerance = check["tolerance_dollars"]
+    if not check["pass"]:
         raise CausalOwnershipError(
-            "broker equity does not reconcile to cash plus current positions"
+            "broker equity does not reconcile to cash plus current positions: "
+            f"difference={valuation_difference:.6f} tolerance={valuation_tolerance:.6f}"
         )
     valuation = {
         "schema_version": VALUATION_SCHEMA,

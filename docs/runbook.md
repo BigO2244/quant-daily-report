@@ -573,3 +573,26 @@ historical rows. Use PAPER-only snapshot capture; the broker-ledger cron wrapper
 also reads Live and must not be used for a PAPER-only activation operation.
 Rollback source with a scoped git revert; retain immutable new receipts and
 opening evidence. Never relabel historical returns or delete fills on rollback.
+
+## Accounting capture and failure alerts — September 11
+
+The nightly broker ledger captures account and positions with adjacent GETs,
+records each endpoint interval, and accepts only a pair satisfying the same
+one-basis-point dollar invariant used by causal ownership. At most three
+pairs are attempted. Each rejected pair is retained under
+`outputs/ledger/<account>/snapshot_captures/`; no stale pair is relabeled fresh.
+`pulled_at_utc` is the accepted capture completion time, not a claim that
+independent broker endpoints were atomic. Historical data work uses that
+accepted pair, rather than fetching positions later under an older timestamp.
+
+The accounting wrapper stops after a failed producer. Both accounting and
+precompute failures produce an explicit failure-email receipt under
+`outputs/workflow/<date>/`. SMTP acceptance is recorded separately from inbox
+delivery; failed delivery never turns a failed pipeline green. Successful
+alerts are deduplicated. Self-heal-only precompute retains email suppression.
+
+Recovery preserves original failure receipts and accounting history. Diagnose
+the rejected pair, use a fresh coherent broker capture, rebuild ownership and
+valuation, and validate before using them. The 05:00 admission policy and
+09:35 prohibition on precompute rebuilding remain binding. Offline replay
+success does not establish successful scheduled operation.

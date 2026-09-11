@@ -11,6 +11,24 @@ cd "${REPO_ROOT}"
 # --- Timezone ---
 export TZ="America/New_York"
 
+# Install before credentials/runtime/time admission so early failures are visible.
+export REPORT_DATE="${REPORT_DATE:-$(date +%F)}"
+FAILURE_STAGE="credentials"
+notify_precompute_failure() {
+    local original_status=$?
+    trap - EXIT
+    if [[ ${original_status} -ne 0 ]] && [[ ! "${SELF_HEAL_PRECOMPUTE_ONLY:-0}" =~ ^(1|true|TRUE|yes|YES|y|Y)$ ]]; then
+        python3 -m scripts.send_workflow_failure_email \
+            --repo-root "${REPO_ROOT}" --workflow precompute \
+            --report-date "${REPORT_DATE}" --stage "${FAILURE_STAGE}" \
+            --reason-code workflow_failed --exit-code "${original_status}" \
+            --log-path "${REPO_ROOT}/logs/precompute_${REPORT_DATE}.log" || \
+            echo "ERROR: precompute failure alert was not accepted; inspect workflow delivery status" >&2
+    fi
+    exit "${original_status}"
+}
+trap notify_precompute_failure EXIT
+
 # --- Load credentials and config ---
 if [[ -f "${REPO_ROOT}/.env" ]]; then
     set -a
@@ -23,6 +41,7 @@ else
 fi
 
 # --- Activate venv ---
+FAILURE_STAGE="runtime"
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/scripts/runtime_env.sh"
 activate_runtime_venv "${REPO_ROOT}" || exit 1
@@ -36,6 +55,7 @@ export ALPACA_BASE_URL="https://paper-api.alpaca.markets"
 
 # Admit canonical work only at 05:00 ET, before any producer/network calls.
 # An admitted run may finish after the start minute; 09:35 cannot rebuild it.
+FAILURE_STAGE="time_guard"
 python3 -m scripts.workflow_time_guard precompute --report-date "${REPORT_DATE}" || exit 1
 if [[ "${REPORT_DATE}" != "$(TZ=America/New_York date +%F)" ]]; then
     echo "FATAL: precompute report date must equal today's ET session" >&2
@@ -87,6 +107,7 @@ fi
 # the explicit readiness marker for the latest completed XNYS session, which
 # preserves the governed current/prior-session source policy.
 EXIT_CODE=0
+FAILURE_STAGE="dependency_guard"
 mkdir -p "${WORKFLOW_DIR}"
 if ! python3 -m core.orion_precompute_guard \
     --repo-root "${REPO_ROOT}" \
@@ -100,6 +121,7 @@ fi
 
 # --- Run precompute planner ---
 if [[ ${EXIT_CODE} -eq 0 ]]; then
+    FAILURE_STAGE="planner"
     python3 daily_quant_report.py --plan-only --write-precompute-bundle >> "${LOG_FILE}" 2>&1 || EXIT_CODE=$?
 fi
 
@@ -110,6 +132,7 @@ fi
 # sleeves are allocated once and every downstream consumer is hash-bound to the
 # resulting immutable account target.
 if [[ ${EXIT_CODE} -eq 0 ]]; then
+    FAILURE_STAGE="seal"
     if ! python3 -m scripts.seal_paper_precompute_target \
         --trade-date "${REPORT_DATE}" \
         --bundle-dir "${REPO_ROOT}/outputs/precompute/${REPORT_DATE}" >> "${LOG_FILE}" 2>&1; then
@@ -122,6 +145,7 @@ fi
 BUNDLE_DIR="${REPO_ROOT}/outputs/precompute/${REPORT_DATE}"
 if [[ ${EXIT_CODE} -eq 0 ]]; then
     mkdir -p "${WORKFLOW_DIR}"
+    FAILURE_STAGE="bundle_validation"
     if ! python3 -m core.precompute_bundle_validation \
         --bundle-dir "${BUNDLE_DIR}" \
         --trade-date "${REPORT_DATE}" \
@@ -134,6 +158,7 @@ if [[ ${EXIT_CODE} -eq 0 ]]; then
         echo "bundle_validation=${BUNDLE_VALIDATION_PATH}" | tee -a "${LOG_FILE}"
         if [[ ! "${EXECUTION_READINESS_CERTIFICATION_ENABLED}" =~ ^(0|false|FALSE|no|NO|n|N|off|OFF)$ ]]; then
             CERTIFICATION_PATH="${BUNDLE_DIR}/execution_readiness_certification.json"
+            FAILURE_STAGE="certification"
             if ! python3 -m scripts.certify_execution_readiness \
                 --trade-date "${REPORT_DATE}" \
                 --mode paper \

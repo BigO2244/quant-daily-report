@@ -28,22 +28,17 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def test_cron_execute_self_heal_invokes_precompute_recovery_mode() -> None:
+def test_cron_execute_rejects_invalid_bundle_without_rebuilding() -> None:
     text = CRON_EXECUTE_SCRIPT.read_text(encoding="utf-8")
-
     assert "core.precompute_bundle_validation" in text
-    assert 'SELF_HEAL_PRECOMPUTE_ONLY=1 REPORT_DATE="${REPORT_DATE}"' in text
-    assert '"${REPO_ROOT}/scripts/cron_precompute.sh"' in text
-    assert "execution_self_heal.json" in text
-    assert "execution halted to avoid degraded bundle execution" in text
-    # Unified paper lane: the shared engine (plan builder + executor) is only
-    # invoked AFTER the self-heal gate; a failed self-heal halts before it.
-    assert (
-        "live_pilot_build_plan_from_precompute.py"
-        in text.split("precompute bundle validation failed after self-heal", 1)[-1]
-    )
+    assert "--require-sealed-paper-target" in text
+    assert "precompute_bundle_invalid_0500_rebuild_prohibited" in text
+    assert '"${REPO_ROOT}/scripts/cron_precompute.sh"' not in text
+    assert 'SELF_HEAL_PRECOMPUTE_ONLY=1 REPORT_DATE=' not in text
+    # Shared PAPER engine remains downstream of the sealed-bundle gate.
+    gate = text.index('fail_lane "precompute_bundle_invalid_0500_rebuild_prohibited"')
+    assert text.index('scripts/live_pilot_build_plan_from_precompute.py', gate) > gate
     assert "scripts/live_pilot_execute.py" in text
-    # The dormant legacy engine must not be invoked (comments may mention it).
     code_lines = "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#")
     )

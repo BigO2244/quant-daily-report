@@ -40,6 +40,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -481,6 +482,51 @@ def build_account_snapshot(acct: dict, pulled_at: str, account: str) -> dict:
     return snapshot
 
 
+def capture_account_positions(client, outdir: Path, *, attempts: int = 3,
+                              retry_delay: float = 1.0) -> tuple[dict, list, str, dict]:
+    """Capture adjacent GETs and retain every attempted pair before publication.
+
+    pulled_at is a capture completion timestamp, not a claim that two broker
+    endpoints are atomic. Individual request intervals are retained explicitly.
+    No history/price work intervenes. The same causal invariant gates acceptance.
+    """
+    from core.causal_ownership_ledger import broker_valuation_check
+    if not 1 <= attempts <= 3:
+        raise ValueError("snapshot attempts must be between one and three")
+    captures = outdir / "snapshot_captures"
+    captures.mkdir(parents=True, exist_ok=True)
+    for attempt in range(1, attempts + 1):
+        account_started = dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
+        acct = client.account()
+        account_completed = dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
+        positions_started = dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
+        positions = client.positions()
+        positions_completed = dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
+        check = broker_valuation_check(acct, positions)
+        receipt = {
+            "schema_version": "caerus.adjacent_broker_snapshot.v1", "attempt": attempt,
+            "account_started_at_utc": account_started,
+            "account_completed_at_utc": account_completed,
+            "positions_started_at_utc": positions_started,
+            "positions_completed_at_utc": positions_completed,
+            "as_of_basis": "capture_completed_at_utc",
+            "valuation_check": check, "status": "PASS" if check["pass"] else "RETRY_REJECTED",
+            "account_values": {k: acct.get(k) for k in ("equity", "cash", "long_market_value", "short_market_value")},
+            "positions": positions,
+        }
+        token = positions_completed.replace(":", "").replace("-", "")
+        receipt_path = captures / f"snapshot_{token}_{attempt}.json"
+        atomic_write(receipt_path, json.dumps(receipt, indent=2, sort_keys=True))
+        receipt["receipt_path"] = str(receipt_path)
+        if check["pass"]:
+            return acct, positions, positions_completed, receipt
+        log(f"snapshot attempt={attempt} rejected difference={check['difference_dollars']:.6f} "
+            f"tolerance={check['tolerance_dollars']:.6f}")
+        if attempt < attempts:
+            time.sleep(retry_delay)
+    raise RuntimeError("broker snapshot inconsistent after three bounded attempts; prior latest snapshots preserved")
+
+
 def build_account_ledger(account: str, env_file: Path, verbose: bool = False, rebuild_nav: bool = False) -> dict:
     creds = parse_env_file(env_file)
     missing = [k for k in ("ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY") if not creds.get(k)]
@@ -489,16 +535,15 @@ def build_account_ledger(account: str, env_file: Path, verbose: bool = False, re
     client = AlpacaReadOnly(creds)
     outdir = LEDGER_ROOT / account
     outdir.mkdir(parents=True, exist_ok=True)
-    pulled_at = utc_now_iso()
-
     manifest_path = outdir / "manifest.json"
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     flags: list[str] = []
 
     # ---- account snapshot -------------------------------------------------
-    acct = client.account()
+    acct, positions, pulled_at, capture = capture_account_positions(client, outdir)
     inception = parse_iso(acct["created_at"]).date()
     snap = build_account_snapshot(acct, pulled_at, account)
+    snap["capture_provenance"] = {k: capture[k] for k in ("account_started_at_utc", "account_completed_at_utc", "positions_started_at_utc", "positions_completed_at_utc", "as_of_basis", "receipt_path")}
     append_jsonl(outdir / "account_snapshots.jsonl", [snap])
 
     # ---- activities (append-only, dedupe by id) ---------------------------
@@ -661,11 +706,11 @@ def build_account_ledger(account: str, env_file: Path, verbose: bool = False, re
     log(f"{account}: daily_state rows={len(daily_states)} appended_revisions={state_appended}")
 
     # ---- positions snapshot ------------------------------------------------
-    positions = client.positions()
+    # Reuse the accepted adjacent capture, never a later endpoint read.
     pos_dir = outdir / "positions"
     pos_dir.mkdir(exist_ok=True)
     position_payload = json.dumps(
-        {"pulled_at_utc": pulled_at, "positions": positions}, indent=2, sort_keys=True
+        {"pulled_at_utc": pulled_at, "positions": positions, "capture_provenance": snap["capture_provenance"]}, indent=2, sort_keys=True
     )
     pull_token = pulled_at.replace(":", "").replace("-", "")
     atomic_write(
@@ -748,17 +793,8 @@ def reconcile(account, acct, positions, nav_rows, activities) -> dict:
         }
 
     # 2. equity == cash + market value of positions (internal consistency).
-    mv = sum(float(p.get("market_value") or 0) for p in positions)
-    cash = float(acct["cash"])
-    implied = cash + mv
-    diff_pct = abs(eq_acct - implied) / max(eq_acct, 1e-9)
-    checks["equity_vs_cash_plus_positions"] = {
-        "equity": eq_acct,
-        "cash": cash,
-        "positions_mv": round(mv, 2),
-        "diff_pct": round(diff_pct, 6),
-        "pass": diff_pct < 0.005,
-    }
+    from core.causal_ownership_ledger import broker_valuation_check
+    checks["equity_vs_cash_plus_positions"] = broker_valuation_check(acct, positions)
 
     # 3. Position quantities derived from the full fill history vs broker
     #    positions endpoint (catches missing fills / pagination gaps).

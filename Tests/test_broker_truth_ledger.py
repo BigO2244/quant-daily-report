@@ -316,3 +316,67 @@ def test_tca_forced_residual_does_not_count_as_validated_reconciliation():
     assert summary["reconciles"] is True
     assert summary["attribution_validated"] is False
     assert summary["validation"]["residual_share_of_absolute_attribution"] == 1.0
+
+
+def test_september10_capture_retries_without_relaxing_causal_tolerance(tmp_path):
+    from core.causal_ownership_ledger import broker_valuation_check
+    failed = [1069.709384, 1011.648078, 2027.157325, 2057.338501, 2000.767616]
+    events = []
+    class Client:
+        def account(self):
+            events.append('account')
+            return {'equity': '10654.49', 'cash': '2488.94'}
+        def positions(self):
+            events.append('positions')
+            values = failed if len(events) == 2 else [8165.55]
+            return [{'market_value': str(v)} for v in values]
+    account, positions, as_of, receipt = bld.capture_account_positions(Client(), tmp_path, retry_delay=0)
+    assert events == ['account', 'positions', 'account', 'positions']
+    receipts = [json.loads(p.read_text()) for p in sorted((tmp_path / 'snapshot_captures').glob('*.json'))]
+    rejected = receipts[0]['valuation_check']
+    assert rejected['difference_dollars'] == pytest.approx(-1.070904)
+    assert rejected['tolerance_dollars'] == pytest.approx(1.065449)
+    assert not rejected['pass']
+    assert broker_valuation_check(account, positions)['pass']
+    assert receipt['attempt'] == 2
+    assert as_of == receipt['positions_completed_at_utc']
+    assert receipt['account_started_at_utc'] <= receipt['account_completed_at_utc'] <= as_of
+
+
+def test_bad_snapshot_is_bounded_and_preserves_latest(tmp_path):
+    latest = tmp_path / 'positions_latest.json'
+    accounts = tmp_path / 'account_snapshots.jsonl'
+    latest.write_text('preserved positions')
+    accounts.write_text('preserved accounts')
+    class Client:
+        calls = 0
+        def account(self):
+            self.calls += 1
+            return {'equity': '1000', 'cash': '100'}
+        def positions(self):
+            self.calls += 1
+            return [{'market_value': '950'}]
+    client = Client()
+    with pytest.raises(RuntimeError, match='bounded attempts'):
+        bld.capture_account_positions(client, tmp_path, retry_delay=0)
+    assert client.calls == 6
+    assert len(list((tmp_path / 'snapshot_captures').glob('*.json'))) == 3
+    assert latest.read_text() == 'preserved positions'
+    assert accounts.read_text() == 'preserved accounts'
+
+
+def test_raw_and_causal_valuation_use_same_strict_gate():
+    from core.causal_ownership_ledger import broker_valuation_check
+    account = {'equity': '10654.49', 'cash': '2488.94'}
+    positions = [{'symbol': 'AAPL', 'qty': '1', 'market_value': '8166.620904'}]
+    check = broker_valuation_check(account, positions)
+    raw = bld.reconcile('paper', account, positions, [], [])
+    assert raw['checks']['equity_vs_cash_plus_positions'] == check
+    assert not check['pass']
+
+
+@pytest.mark.parametrize('bad', ['nan', 'inf', '-inf'])
+def test_nonfinite_broker_marks_fail_closed(bad):
+    from core.causal_ownership_ledger import broker_valuation_check, CausalOwnershipError
+    with pytest.raises(CausalOwnershipError, match='non-finite'):
+        broker_valuation_check({'equity': '1000', 'cash': bad}, [])
