@@ -109,6 +109,7 @@ class EconomicReconciliation:
     fill_notional_sells: float
     fill_fees: float
     tolerance: EconomicTolerance
+    cash_posting_evidence: Mapping[str, Any] | None = None
 
     @property
     def reconciled(self) -> bool:
@@ -130,6 +131,7 @@ class EconomicReconciliation:
                 "expected": self.expected_ending_cash,
                 "actual": self.actual_ending_cash,
                 "delta": self.cash_delta,
+                **({"posting_evidence": dict(self.cash_posting_evidence)} if self.cash_posting_evidence is not None else {}),
             },
             "fills": {
                 "buy_notional": self.fill_notional_buys,
@@ -272,6 +274,7 @@ def reconcile_economic_truth(
     broker_equity: float,
     broker_position_value: float | None = None,
     tolerance: EconomicTolerance | None = None,
+    cash_posting_evidence: Mapping[str, Any] | None = None,
 ) -> EconomicReconciliation:
     """Verify position, cash, mark, and NAV identities from broker evidence."""
 
@@ -336,6 +339,12 @@ def reconcile_economic_truth(
     }
 
     expected_cash = float(starting_cash) - buy_notional + sell_notional - fees
+    if cash_posting_evidence is not None:
+        from core.alpaca_cash_posting import validated_posted_cash
+        expected_cash = validated_posted_cash(
+            cash_posting_evidence, fills=fills, trade_date=trade_date,
+            starting_cash=starting_cash, ending_cash=ending_cash,
+        )
     cash_delta = float(ending_cash) - expected_cash
 
     marked_value = sum(
@@ -400,6 +409,7 @@ def reconcile_economic_truth(
         fill_notional_sells=sell_notional,
         fill_fees=fees,
         tolerance=limits,
+        cash_posting_evidence=cash_posting_evidence,
     )
 
 

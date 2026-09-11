@@ -3940,6 +3940,22 @@ def _write_blocked_artifacts(
     return summary
 
 
+def _paper_cash_posting_evidence(*, broker, trade_date, orders, starting_cash,
+                                 ending_cash, boundary, observed_at):
+    """Apply the provider contract only to the real Alpaca PAPER adapter."""
+    if not isinstance(broker, AlpacaBroker) or not broker.paper:
+        return None
+    if not observed_at:
+        raise ValueError("cash posting broker snapshot timestamp missing")
+    from core.alpaca_cash_posting import read_account_activities, certify_cash_posting
+    activities = read_account_activities(broker.trading_client, trade_date=trade_date)
+    return certify_cash_posting(
+        activities=activities, orders=orders, starting_cash=starting_cash,
+        ending_cash=ending_cash, boundary=boundary, trade_date=trade_date,
+        observed_at=observed_at,
+    )
+
+
 def _run_exact_execution_path(
     *,
     plan: Mapping[str, Any],
@@ -4266,7 +4282,13 @@ def _run_exact_execution_path(
         )
         if ending_cash is None or ending_equity is None:
             raise ValueError("broker ending cash/equity missing")
+        cash_posting_evidence = _paper_cash_posting_evidence(
+            broker=broker, trade_date=trade_date, orders=outcome.orders_filled,
+            starting_cash=exact.starting_cash, ending_cash=ending_cash,
+            boundary=exact.as_of, observed_at=post_snapshot.get("captured_at"),
+        )
         economic = reconcile_economic_truth(
+            cash_posting_evidence=cash_posting_evidence,
             trade_date=trade_date,
             starting_cash=exact.starting_cash,
             starting_positions={
