@@ -1,11 +1,11 @@
 {
   "schema_version": "caerus.paper_intraday_drill_policy.v1",
-  "policy_id": "paper_corrective_execution_2026-09-11",
+  "policy_id": "paper_closed_chain_corrective_execution_2026-09-11",
   "trade_date": "2026-09-11",
   "paper_only": true,
   "live_eligible": false,
   "allowed_epochs": [
-    "2026-09-11T1005ET"
+    "2026-09-11T1045ET"
   ],
   "safety_contract": {
     "account_date_mutex_remains_global": true,
@@ -14,9 +14,35 @@
     "wal_and_claim_records_are_append_only": true,
     "normal_hours_market_orders_after_close_prohibited": true
   },
-  "ownership_bridge": {
-    "prior_exact_plan_path": "outputs/paper_lane/plans/authority/2026-09-11/plan_2026-09-11_ce8ce4dd7edfa40af9c7d385.json",
+  "ownership_bridge_chain": {
     "approved_target_hash": "e7bae8b87295e74ff95c5d13713287d6ab274aba5270cd2f36a03d6f92cdc648",
-    "prior_exact_plan_file_sha256": "d8ff67a88eaf888957b7624bd43ec6049ff5a10e9487a1cffd90960cd89265a7"
+    "parents": [
+      {
+        "exact_plan_path": "outputs/paper_lane/plans/authority/2026-09-11/plan_2026-09-11_ce8ce4dd7edfa40af9c7d385.json",
+        "exact_plan_file_sha256": "d8ff67a88eaf888957b7624bd43ec6049ff5a10e9487a1cffd90960cd89265a7",
+        "plan_id": "plan:2026-09-11:ce8ce4dd7edfa40af9c7d385",
+        "plan_hash": "260b65600e364dc0248405dcc3fca5f5213d697e23310d110e92b9eea55aa027",
+        "wal_namespace": "canonical",
+        "expected_client_order_ids": [
+          "cx-18a423df40e0d33a0161ed0c73d9fb77a8bb916f",
+          "cx-1dfe78986c7bfb740fa3ed6fb0e5ef3cf099b5f4",
+          "cx-c5faf20dd2ff2f8f5fa7a08d9341891f4943fc95",
+          "cx-df42c310e437ab705ea374bbe007f76d3908544a",
+          "cx-e5f9f6898a2d06d6b04e8b81d8f53929fd8dccbf"
+        ]
+      },
+      {
+        "exact_plan_path": "outputs/paper_lane/plans/authority/2026-09-11/plan_2026-09-11_dd445d4905b276e06de3033a.json",
+        "exact_plan_file_sha256": "c41dc35c40a741a5403a7a83d4be622bd2056877dc16b2a2c74d1786ebceffa0",
+        "plan_id": "plan:2026-09-11:dd445d4905b276e06de3033a",
+        "plan_hash": "9c9d71123648fb17e0c3f734b19d40d865ae2655ca8e216523455438e29c0df6",
+        "wal_namespace": "2026-09-11T1005ET",
+        "expected_client_order_ids": [
+          "cx-2fe07b631f28ad12e02e41ccabc34472497ec0f0",
+          "cx-56886dc7e3bb7d4b320a5b9c1e4338a0f8f0b1d9",
+          "cx-6b406807c897482d437f063a276f5e0da5f59a1a"
+        ]
+      }
+    ]
   }
 }
