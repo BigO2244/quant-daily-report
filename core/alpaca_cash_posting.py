@@ -5,6 +5,9 @@ import datetime as dt
 from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN, localcontext
 import hashlib
 import json
+import re
+
+import pandas as pd
 from collections.abc import Mapping, Sequence
 from zoneinfo import ZoneInfo
 
@@ -22,9 +25,25 @@ def _decimal(value):
 
 
 def _time(value):
-    result = dt.datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-    if result.tzinfo is None:
-        raise ValueError('activity boundary requires timezone')
+    """Parse timezone-aware RFC3339 without dropping broker nanoseconds.
+
+    Python's older datetime parser accepts only selected fractional widths;
+    Timestamp supports all one through nine digits returned by broker APIs.
+    Validate the grammar first so its broader natural-language parser cannot
+    admit naive dates or silently reinterpret malformed broker evidence.
+    """
+    raw = str(value)
+    if not re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?"
+        r"(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)", raw
+    ) or raw.endswith('-00:00'):
+        raise ValueError('activity timestamp requires timezone-aware RFC3339')
+    try:
+        result = pd.Timestamp(raw)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ValueError('invalid activity timestamp') from exc
+    if pd.isna(result) or result.tzinfo is None:
+        raise ValueError('activity timestamp requires timezone-aware RFC3339')
     return result
 
 

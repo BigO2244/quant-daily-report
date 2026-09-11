@@ -183,3 +183,57 @@ def test_snapshot_fractional_precision_accepts_prior_fill_in_same_second(monkeyp
     args['activities'][0]['transaction_time'] = '2026-09-11T15:09:00.950000Z'
     with pytest.raises(ValueError, match='after broker snapshot'):
         certify_cash_posting(**args)
+
+
+# All 33 retained broker activities: identifiers anonymized, raw timestamps preserved.
+ACTUAL_DAY_ACTIVITIES = [{'activity_type': 'FILL', 'cum_qty': '1.327061', 'id': 'activity-0', 'leaves_qty': '0', 'order_id': 'prior-12', 'price': '102.63', 'qty': '1', 'side': 'sell', 'symbol': 'INTC', 'transaction_time': '2026-09-11T13:35:28.340483Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.327061', 'id': 'activity-1', 'leaves_qty': '1', 'order_id': 'prior-12', 'price': '102.63', 'qty': '0.327061', 'side': 'sell', 'symbol': 'INTC', 'transaction_time': '2026-09-11T13:35:28.342105Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '0.193074', 'id': 'activity-2', 'leaves_qty': '0', 'order_id': 'prior-13', 'price': '301.136', 'qty': '0.193074', 'side': 'sell', 'symbol': 'LRCX', 'transaction_time': '2026-09-11T13:35:29.881121Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.560744', 'id': 'activity-3', 'leaves_qty': '0', 'order_id': 'prior-14', 'price': '987.514', 'qty': '0.560744', 'side': 'sell', 'symbol': 'MU', 'transaction_time': '2026-09-11T13:35:30.102289Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '1.267882', 'id': 'activity-4', 'leaves_qty': '0', 'order_id': 'prior-15', 'price': '853.01', 'qty': '1', 'side': 'sell', 'symbol': 'STX', 'transaction_time': '2026-09-11T13:35:30.988503Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.267882', 'id': 'activity-5', 'leaves_qty': '1', 'order_id': 'prior-15', 'price': '853.01', 'qty': '0.267882', 'side': 'sell', 'symbol': 'STX', 'transaction_time': '2026-09-11T13:35:30.989883Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '1', 'id': 'activity-6', 'leaves_qty': '1.2555', 'order_id': 'prior-16', 'price': '460', 'qty': '1', 'side': 'sell', 'symbol': 'WDC', 'transaction_time': '2026-09-11T13:35:32.78476Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '2.2555', 'id': 'activity-7', 'leaves_qty': '0', 'order_id': 'prior-16', 'price': '460', 'qty': '1', 'side': 'sell', 'symbol': 'WDC', 'transaction_time': '2026-09-11T13:35:34.047938Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '1.2555', 'id': 'activity-8', 'leaves_qty': '1', 'order_id': 'prior-16', 'price': '460', 'qty': '0.2555', 'side': 'sell', 'symbol': 'WDC', 'transaction_time': '2026-09-11T13:35:34.049494Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '0.140728', 'id': 'activity-9', 'leaves_qty': '0', 'order_id': 'prior-17', 'price': '103.694', 'qty': '0.140728', 'side': 'sell', 'symbol': 'INTC', 'transaction_time': '2026-09-11T14:23:01.954243Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '1.602608', 'id': 'activity-10', 'leaves_qty': '0', 'order_id': 'prior-18', 'price': '333.23', 'qty': '1', 'side': 'buy', 'symbol': 'AAPL', 'transaction_time': '2026-09-11T14:23:03.283113Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.602608', 'id': 'activity-11', 'leaves_qty': '1', 'order_id': 'prior-18', 'price': '333.23', 'qty': '0.602608', 'side': 'buy', 'symbol': 'AAPL', 'transaction_time': '2026-09-11T14:23:03.284644Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '1', 'id': 'activity-12', 'leaves_qty': '1.08181', 'order_id': 'prior-19', 'price': '256.56', 'qty': '1', 'side': 'buy', 'symbol': 'AMZN', 'transaction_time': '2026-09-11T14:23:05.246015Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '2.08181', 'id': 'activity-13', 'leaves_qty': '0', 'order_id': 'prior-19', 'price': '256.55', 'qty': '1', 'side': 'buy', 'symbol': 'AMZN', 'transaction_time': '2026-09-11T14:23:05.940165Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '1.08181', 'id': 'activity-14', 'leaves_qty': '1', 'order_id': 'prior-19', 'price': '256.55', 'qty': '0.08181', 'side': 'buy', 'symbol': 'AMZN', 'transaction_time': '2026-09-11T14:23:05.94178Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '0.018199', 'id': 'activity-15', 'leaves_qty': '0', 'order_id': 'order-0', 'price': '335.482', 'qty': '0.018199', 'side': 'sell', 'symbol': 'AAPL', 'transaction_time': '2026-09-11T15:08:31.465978Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.004104', 'id': 'activity-16', 'leaves_qty': '0', 'order_id': 'order-1', 'price': '255.786', 'qty': '0.004104', 'side': 'sell', 'symbol': 'AMZN', 'transaction_time': '2026-09-11T15:08:31.653804Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.006536', 'id': 'activity-17', 'leaves_qty': '0', 'order_id': 'order-2', 'price': '299.566', 'qty': '0.006536', 'side': 'sell', 'symbol': 'LRCX', 'transaction_time': '2026-09-11T15:08:31.845388Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '1.460154', 'id': 'activity-18', 'leaves_qty': '0', 'order_id': 'order-3', 'price': '364.24', 'qty': '1', 'side': 'buy', 'symbol': 'AVGO', 'transaction_time': '2026-09-11T15:08:32.677551Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.460154', 'id': 'activity-19', 'leaves_qty': '1', 'order_id': 'order-3', 'price': '364.24', 'qty': '0.460154', 'side': 'buy', 'symbol': 'AVGO', 'transaction_time': '2026-09-11T15:08:32.679136Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '1.049703', 'id': 'activity-20', 'leaves_qty': '0', 'order_id': 'order-4', 'price': '506.43', 'qty': '1', 'side': 'buy', 'symbol': 'BRK.B', 'transaction_time': '2026-09-11T15:08:34.779543Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.049703', 'id': 'activity-21', 'leaves_qty': '1', 'order_id': 'order-4', 'price': '506.43', 'qty': '0.049703', 'side': 'buy', 'symbol': 'BRK.B', 'transaction_time': '2026-09-11T15:08:34.781173Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '1.556234', 'id': 'activity-22', 'leaves_qty': '0', 'order_id': 'order-5', 'price': '341.51', 'qty': '1', 'side': 'buy', 'symbol': 'GOOGL', 'transaction_time': '2026-09-11T15:08:37.479342Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.556234', 'id': 'activity-23', 'leaves_qty': '1', 'order_id': 'order-5', 'price': '341.51', 'qty': '0.556234', 'side': 'buy', 'symbol': 'GOOGL', 'transaction_time': '2026-09-11T15:08:37.48111Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '0.815411', 'id': 'activity-24', 'leaves_qty': '0', 'order_id': 'order-6', 'price': '652.034', 'qty': '0.815411', 'side': 'buy', 'symbol': 'META', 'transaction_time': '2026-09-11T15:08:38.714468Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '1.075459', 'id': 'activity-25', 'leaves_qty': '0', 'order_id': 'order-7', 'price': '494.22', 'qty': '1', 'side': 'buy', 'symbol': 'MSFT', 'transaction_time': '2026-09-11T15:08:39.420897Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.075459', 'id': 'activity-26', 'leaves_qty': '1', 'order_id': 'order-7', 'price': '494.22', 'qty': '0.075459', 'side': 'buy', 'symbol': 'MSFT', 'transaction_time': '2026-09-11T15:08:39.422426Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '2.414679', 'id': 'activity-27', 'leaves_qty': '0', 'order_id': 'order-8', 'price': '220.2', 'qty': '2', 'side': 'buy', 'symbol': 'NVDA', 'transaction_time': '2026-09-11T15:08:41.73577Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.414679', 'id': 'activity-28', 'leaves_qty': '2', 'order_id': 'order-8', 'price': '220.2', 'qty': '0.414679', 'side': 'buy', 'symbol': 'NVDA', 'transaction_time': '2026-09-11T15:08:41.737295Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '0.038375', 'id': 'activity-29', 'leaves_qty': '0', 'order_id': 'order-9', 'price': '821.71', 'qty': '0.038375', 'side': 'buy', 'symbol': 'STX', 'transaction_time': '2026-09-11T15:08:43.368305Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '1.453866', 'id': 'activity-30', 'leaves_qty': '0', 'order_id': 'order-10', 'price': '365.49', 'qty': '1', 'side': 'buy', 'symbol': 'TSLA', 'transaction_time': '2026-09-11T15:08:44.230697Z', 'type': 'fill'}, {'activity_type': 'FILL', 'cum_qty': '0.453866', 'id': 'activity-31', 'leaves_qty': '1', 'order_id': 'order-10', 'price': '365.49', 'qty': '0.453866', 'side': 'buy', 'symbol': 'TSLA', 'transaction_time': '2026-09-11T15:08:44.232312Z', 'type': 'partial_fill'}, {'activity_type': 'FILL', 'cum_qty': '0.035062', 'id': 'activity-32', 'leaves_qty': '0', 'order_id': 'order-11', 'price': '447.788', 'qty': '0.035062', 'side': 'buy', 'symbol': 'WDC', 'transaction_time': '2026-09-11T15:08:45.800292Z', 'type': 'fill'}]
+
+
+@pytest.mark.parametrize('digits', range(1, 10))
+@pytest.mark.parametrize('zone', ['Z', '+00:00', '-04:00'])
+def test_rfc3339_every_broker_fraction_width_preserves_nanoseconds(digits, zone):
+    from core.alpaca_cash_posting import _time
+    hour = '11' if zone == '-04:00' else '15'
+    fraction = '123456789'[:digits]
+    parsed = _time(f'2026-09-11T{hour}:09:00.{fraction}{zone}')
+    base = _time('2026-09-11T15:09:00Z')
+    assert (parsed - base).value == int(fraction.ljust(9, '0'))
+
+
+@pytest.mark.parametrize('value', ['2026-09-11T15:09:00', '2026-09-11',
+                                   '2026-09-11 15:09:00Z', 'September 11 2026 UTC',
+                                   '2026-09-11T15:09:00.1234567890Z',
+                                   '2026-09-11T15:09:00+25:00',
+                                   '2026-09-11T15:09:00-00:00',
+                                   '2026-02-30T15:09:00Z'])
+def test_timestamp_rejects_naive_or_non_rfc3339(value):
+    from core.alpaca_cash_posting import _time
+    with pytest.raises(ValueError): _time(value)
+
+
+def test_future_nanosecond_is_not_truncated_into_observation():
+    args = fixture()
+    args['observed_at'] = '2026-09-11T15:10:00.123456788Z'
+    args['activities'][0]['transaction_time'] = '2026-09-11T15:10:00.123456789Z'
+    with pytest.raises(ValueError, match='after broker snapshot'):
+        certify_cash_posting(**args)
+    args['activities'][0]['transaction_time'] = '2026-09-11T15:10:00.123456787Z'
+    assert certify_cash_posting(**args)['ending_cash'] == '543.22'
+
+
+def test_actual_all_33_activity_replay_including_prior_five_fraction_timestamp():
+    from brokers.alpaca_broker import AlpacaBroker
+    from scripts.live_pilot_execute import _paper_cash_posting_evidence
+    args = fixture()
+    args.pop('activities')
+    args['observed_at'] = '2026-09-11T15:13:20.658381+00:00'
+    broker = object.__new__(AlpacaBroker)
+    broker.paper = True
+    broker.trading_client = Client([deepcopy(ACTUAL_DAY_ACTIVITIES)])
+    assert any(r['transaction_time'] == '2026-09-11T13:35:32.78476Z' for r in ACTUAL_DAY_ACTIVITIES)
+    evidence = _paper_cash_posting_evidence(broker=broker, **args)
+    assert evidence['all_activity_count'] == 33
+    assert len(evidence['activities']) == 18
+    assert len(evidence['orders']) == 12
+    assert evidence['ending_cash'] == '543.22'
+    assert evidence['per_fill_signed_consideration'] == '-3759.30'
