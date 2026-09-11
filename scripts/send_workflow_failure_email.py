@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import sys
 import signal
+import shlex
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,12 +33,24 @@ EMAIL_ENV_KEYS = {
 def _load_email_env(repo_root: Path) -> None:
     """Read only email configuration; never execute .env or expand references."""
     env_path = repo_root / ".env"
-    if env_path.exists():
-        from dotenv import dotenv_values
-        values = dotenv_values(env_path, interpolate=False)
-        for key in EMAIL_ENV_KEYS:
-            if values.get(key) is not None:
-                os.environ.setdefault(key, values[key])
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export") and len(line) > 6 and line[6].isspace():
+            line = line[6:].lstrip()
+        key, separator, value = line.partition("=")
+        key = key.strip()
+        # Filter before parsing values: broker configuration is irrelevant,
+        # including malformed broker lines, and must never enter the environment.
+        if not separator or key not in EMAIL_ENV_KEYS or key in os.environ:
+            continue
+        pieces = shlex.split(value, comments=True, posix=True)
+        if len(pieces) > 1:
+            raise ValueError("Email environment values containing spaces must be quoted")
+        os.environ[key] = pieces[0] if pieces else ""
 
 
 def _write_json(path: Path, payload: dict) -> None:

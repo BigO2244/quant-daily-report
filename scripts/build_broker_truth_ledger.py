@@ -517,7 +517,8 @@ def capture_account_positions(client, outdir: Path, *, attempts: int = 3,
         token = positions_completed.replace(":", "").replace("-", "")
         receipt_path = captures / f"snapshot_{token}_{attempt}.json"
         atomic_write(receipt_path, json.dumps(receipt, indent=2, sort_keys=True))
-        receipt["receipt_path"] = str(receipt_path)
+        receipt["receipt_path"] = str(receipt_path.relative_to(outdir))
+        receipt["receipt_path_basis"] = "ledger_directory"
         if check["pass"]:
             return acct, positions, positions_completed, receipt
         log(f"snapshot attempt={attempt} rejected difference={check['difference_dollars']:.6f} "
@@ -543,7 +544,7 @@ def build_account_ledger(account: str, env_file: Path, verbose: bool = False, re
     acct, positions, pulled_at, capture = capture_account_positions(client, outdir)
     inception = parse_iso(acct["created_at"]).date()
     snap = build_account_snapshot(acct, pulled_at, account)
-    snap["capture_provenance"] = {k: capture[k] for k in ("account_started_at_utc", "account_completed_at_utc", "positions_started_at_utc", "positions_completed_at_utc", "as_of_basis", "receipt_path")}
+    snap["capture_provenance"] = {k: capture[k] for k in ("account_started_at_utc", "account_completed_at_utc", "positions_started_at_utc", "positions_completed_at_utc", "as_of_basis", "receipt_path", "receipt_path_basis")}
     append_jsonl(outdir / "account_snapshots.jsonl", [snap])
 
     # ---- activities (append-only, dedupe by id) ---------------------------

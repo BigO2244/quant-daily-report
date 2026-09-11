@@ -90,6 +90,9 @@ echo "[VM_VALIDATION] targeted_pytest"
   Tests/test_lyra_live_portfolio.py \
   Tests/test_cron_command_validation.py \
   Tests/test_trading_integrity_certification.py \
+  Tests/test_broker_truth_ledger.py \
+  Tests/test_accounting_precompute_recovery.py \
+  Tests/test_workflow_failure_email.py \
   -q
 
 echo "[VM_VALIDATION] operating_truth"

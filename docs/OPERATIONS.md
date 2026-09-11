@@ -375,7 +375,7 @@ one-basis-point dollar invariant used by causal ownership. At most three
 pairs are attempted. Each rejected pair is retained under
 `outputs/ledger/<account>/snapshot_captures/`; no stale pair is relabeled fresh.
 `pulled_at_utc` is the accepted capture completion time, not a claim that
-independent broker endpoints were atomic. Historical data work uses that
+independent broker endpoints were atomic. Capture receipt paths are relative to their ledger directory. Historical data work uses that
 accepted pair, rather than fetching positions later under an older timestamp.
 
 The accounting wrapper stops after a failed producer. Both accounting and

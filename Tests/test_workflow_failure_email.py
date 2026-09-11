@@ -225,16 +225,17 @@ def test_real_sender_path_loads_only_email_env_without_execution_or_interpolatio
     import types
     from scripts.send_workflow_failure_email import EMAIL_ENV_KEYS
     from core.email_env import resolve_email_env
+    monkeypatch.setitem(sys.modules, "dotenv", None)
     monkeypatch.setattr(os, "environ", os.environ.copy())
     for key in EMAIL_ENV_KEYS | {"ALPACA_API_KEY", "EMAIL_SIDE_EFFECT"}:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("SMTP_HOST", "already-configured.example")
     (tmp_path / ".env").write_text(
-        'export EMAIL_SENDER="operator@example.com"\n'
+        'export EMAIL_SENDER="operator@example.com" # SMTP identity\n'
         'EMAIL_RECIPIENT="owner@example.com"\n'
         "EMAIL_APP_PASSWORD='literal${ALPACA_API_KEY}$(touch SHOULD_NOT_EXIST)'\n"
         'SMTP_HOST="file-host.example"\n'
-        'ALPACA_API_KEY="broker-secret"\n'
+        'ALPACA_API_KEY="broker-secret\n'
         'EMAIL_SIDE_EFFECT="not-allowlisted"\n'
     )
     observed = []

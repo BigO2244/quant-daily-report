@@ -339,6 +339,8 @@ def test_september10_capture_retries_without_relaxing_causal_tolerance(tmp_path)
     assert not rejected['pass']
     assert broker_valuation_check(account, positions)['pass']
     assert receipt['attempt'] == 2
+    assert receipt['receipt_path_basis'] == 'ledger_directory'
+    assert (tmp_path / receipt['receipt_path']).is_file()
     assert as_of == receipt['positions_completed_at_utc']
     assert receipt['account_started_at_utc'] <= receipt['account_completed_at_utc'] <= as_of
 
