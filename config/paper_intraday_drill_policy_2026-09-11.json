@@ -1,0 +1,22 @@
+{
+  "schema_version": "caerus.paper_intraday_drill_policy.v1",
+  "policy_id": "paper_corrective_execution_2026-09-11",
+  "trade_date": "2026-09-11",
+  "paper_only": true,
+  "live_eligible": false,
+  "allowed_epochs": [
+    "2026-09-11T1005ET"
+  ],
+  "safety_contract": {
+    "account_date_mutex_remains_global": true,
+    "epoch_reuse_is_idempotent_only": true,
+    "unresolved_prior_epoch_blocks_submission": true,
+    "wal_and_claim_records_are_append_only": true,
+    "normal_hours_market_orders_after_close_prohibited": true
+  },
+  "ownership_bridge": {
+    "prior_exact_plan_path": "outputs/paper_lane/plans/authority/2026-09-11/plan_2026-09-11_ce8ce4dd7edfa40af9c7d385.json",
+    "approved_target_hash": "e7bae8b87295e74ff95c5d13713287d6ab274aba5270cd2f36a03d6f92cdc648",
+    "prior_exact_plan_file_sha256": "d8ff67a88eaf888957b7624bd43ec6049ff5a10e9487a1cffd90960cd89265a7"
+  }
+}
