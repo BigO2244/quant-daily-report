@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import fcntl
+import hashlib
 import json
 import os
 import subprocess
@@ -295,6 +296,145 @@ def _confirmation_is_due(trade_date: str, now: dt.datetime | None = None) -> boo
     return current_et.date().isoformat() == trade_date and (current_et.hour, current_et.minute) >= (10, 0)
 
 
+
+def _read_confirmation_json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _send_late_confirmation(*, repo_root: Path, trade_date: str,
+                            outcome: AttemptOutcome, confirmation_path: Path) -> dict:
+    """Send only for this successful run; SMTP ambiguity remains non-retryable."""
+    from core.target_attainment_policy import target_status_passes
+
+    run_root = Path(outcome.run_root)
+    if not run_root.is_absolute():
+        run_root = repo_root / run_root
+    run_root = run_root.resolve()
+    try:
+        pointer = read_trade_stage_pointer(trade_date, "execution", workspace_root=repo_root) or {}
+    except (OSError, ValueError, RuntimeError):
+        return {"status": "NOT_CONFIRMABLE", "attempted": False}
+    pointer_root = Path(str(pointer.get("run_root") or "."))
+    if not pointer_root.is_absolute():
+        pointer_root = repo_root / pointer_root
+    operator = _read_confirmation_json(run_root / "operator_summary.json")
+    results = _read_confirmation_json(run_root / "execution_results.json")
+    integrity = _read_confirmation_json(run_root / "audit" / "execution_integrity.json")
+    valid_run = (
+        outcome.exit_code == 0 and bool(outcome.run_id)
+        and pointer.get("run_id") == outcome.run_id and pointer_root.resolve() == run_root
+        and str(pointer.get("mode") or "").upper() == "PAPER"
+        and pointer.get("trade_date") == trade_date and pointer.get("stage") == "execution"
+        and str(pointer.get("status") or "").lower() == "success"
+        and operator.get("execution_source") == "exact_execution_plan_v3"
+        and str(operator.get("terminal_status") or "").upper() == "SUBMITTED"
+        and str(operator.get("terminal_outcome") or "").upper() == "RECONCILED_SUCCESS"
+        and str(operator.get("reconciliation_status") or "").upper() in {"CLEAN", "RECONCILED"}
+        and str(integrity.get("status") or "").upper() == "OK"
+        and all(item.get("run_id") == outcome.run_id and item.get("trade_date") == trade_date
+                and str(item.get("mode") or "").upper() == "PAPER" for item in (operator, results))
+        and results.get("terminal_outcome") == "RECONCILED_SUCCESS"
+        and results.get("reconciliation_status") == "CLEAN"
+        and isinstance(results.get("execution_target_attainment_required"), bool)
+        and (not results["execution_target_attainment_required"]
+             or target_status_passes(results.get("execution_target_attainment_status")))
+    )
+    if not valid_run:
+        return {"status": "NOT_CONFIRMABLE", "attempted": False}
+    try:
+        operator_hash = hashlib.sha256(json.dumps(operator, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
+    except (ValueError, TypeError):
+        return {"status": "NOT_CONFIRMABLE", "attempted": False}
+    receipt_path = run_root / "trading_confirmation_delivery.json"
+    def receipt_after(started: dt.datetime | None = None):
+        # Parse and hash exactly one byte snapshot. A second path read could
+        # disappear/change after parsing and must never escape into execution.
+        try:
+            raw = receipt_path.read_bytes()
+            receipt = json.loads(raw)
+        except FileNotFoundError:
+            return None, None, False
+        except OSError:
+            return None, None, True
+        except (ValueError, UnicodeError):
+            return None, None, False
+        if not isinstance(receipt, dict):
+            return None, None, False
+        if not (receipt.get("schema_version") == "caerus.trading_confirmation_delivery.v1"
+                and receipt.get("run_id") == outcome.run_id and receipt.get("trade_date") == trade_date
+                and receipt.get("operator_summary_sha256") == operator_hash
+                and isinstance(receipt.get("confirmation_email_sent"), bool)):
+            return None, None, False
+        try:
+            recorded = dt.datetime.fromisoformat(str(receipt.get("recorded_at")).replace("Z", "+00:00"))
+            earliest = dt.datetime.combine(dt.date.fromisoformat(trade_date), dt.time.min, tzinfo=dt.timezone.utc)
+            if recorded.tzinfo is None or recorded < earliest or recorded > dt.datetime.now(dt.timezone.utc):
+                return None, None, False
+            if started is not None and recorded < started:
+                return None, None, False
+        except (ValueError, TypeError):
+            return None, None, False
+        return receipt, hashlib.sha256(raw).hexdigest(), False
+    previous = _read_confirmation_json(confirmation_path)
+    prior_started = None
+    if previous.get("run_id") == outcome.run_id and previous.get("attempted_at"):
+        try:
+            prior_started = dt.datetime.fromisoformat(str(previous["attempted_at"]).replace("Z", "+00:00"))
+            if prior_started.tzinfo is None:
+                prior_started = None
+        except ValueError:
+            pass
+    prior_receipt, prior_receipt_hash, prior_read_error = receipt_after(prior_started)
+    base = {"schema_version": "paper_execution_retry_late_confirmation.v1", "trade_date": trade_date,
+            "run_id": outcome.run_id, "run_root": str(run_root), "operator_summary_sha256": operator_hash,
+            "delivery_receipt_path": str(receipt_path)}
+    if prior_read_error:
+        final = {**base, "status": "SEND_UNKNOWN", "attempted": False, "error_type": "ReceiptReadError"}
+        _write_payload(confirmation_path, final)
+        return final
+    if prior_receipt and prior_receipt["confirmation_email_sent"] is True:
+        final = {**base, "status": "SENT", "attempted": False, "deduplicated": True, "completed_at": _now_utc()}
+        _write_payload(confirmation_path, final)
+        return final
+    # Only a successful sender invocation with a bound, fresh explicit no-send
+    # receipt proves that retry cannot duplicate an email. Legacy FAILED/SENT or
+    # interrupted ATTEMPTING records provide no such proof.
+    retry_proven_suppression = (
+        prior_started is not None and previous.get("status") == "SUPPRESSED" and previous.get("exit_code") == 0
+        and previous.get("run_id") == outcome.run_id and previous.get("operator_summary_sha256") == operator_hash
+        and prior_receipt is not None and prior_receipt["confirmation_email_sent"] is False
+        and previous.get("delivery_receipt_sha256") == prior_receipt_hash
+    )
+    if confirmation_path.exists() and not retry_proven_suppression:
+        return {**base, "status": "PRIOR_ATTEMPT_BLOCKS_SEND", "attempted": False}
+    started = dt.datetime.now(dt.timezone.utc)
+    attempt = {**base, "status": "ATTEMPTING", "attempted": True, "attempted_at": started.isoformat()}
+    _write_payload(confirmation_path, attempt)
+    env = {**os.environ, "EMAIL_TRADING_CONFIRMATION": "1", "REPORT_DATE": trade_date,
+           "TRADING_CONFIRMATION_RUN_ROOT": str(run_root),
+           "TRADING_CONFIRMATION_RESULTS_PATH": str(run_root / "execution_results.json")}
+    try:
+        completed = subprocess.run([sys.executable, "-m", "scripts.send_trading_confirmation_email"],
+                                   cwd=repo_root, env=env, check=False)
+        exit_code = int(completed.returncode)
+    except Exception as exc:
+        final = {**attempt, "status": "SEND_UNKNOWN", "error_type": type(exc).__name__, "completed_at": _now_utc()}
+    else:
+        receipt, receipt_hash, _read_error = receipt_after(started)
+        sent = receipt is not None and receipt["confirmation_email_sent"] is True
+        suppressed = exit_code == 0 and receipt is not None and receipt["confirmation_email_sent"] is False
+        final = {**attempt, "status": "SENT" if sent else "SUPPRESSED" if suppressed else "SEND_UNKNOWN",
+                 "exit_code": exit_code, "completed_at": _now_utc()}
+        if receipt is not None:
+            final["delivery_receipt_sha256"] = receipt_hash
+    _write_payload(confirmation_path, final)
+    return final
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     repo_root = Path(args.repo_root).resolve()
@@ -445,37 +585,15 @@ def main(argv: list[str] | None = None) -> int:
         mark_retrying_fn=mark_retrying,
     )
     if outcome.exit_code == 0:
-        # A delayed run can recover on any attempt after the normal 10:00 job.
-        # Record intent before sending so a crash or manual rerun cannot duplicate it.
-        if _confirmation_is_due(args.trade_date) and not confirmation_path.exists():
-            _write_payload(
-                confirmation_path,
-                {
-                    "schema_version": "paper_execution_retry_late_confirmation.v1",
-                    "trade_date": args.trade_date,
-                    "attempted_at": _now_utc(),
-                    "status": "ATTEMPTING",
-                },
-            )
-            confirm = subprocess.run(
-                [sys.executable, "-m", "scripts.send_trading_confirmation_email"],
-                cwd=repo_root,
-                env=dict(os.environ),
-                check=False,
-            )
-            _write_payload(
-                confirmation_path,
-                {
-                    "schema_version": "paper_execution_retry_late_confirmation.v1",
-                    "trade_date": args.trade_date,
-                    "completed_at": _now_utc(),
-                    "status": "SENT" if confirm.returncode == 0 else "FAILED",
-                    "exit_code": confirm.returncode,
-                },
+        if _confirmation_is_due(args.trade_date):
+            confirmation = _send_late_confirmation(
+                repo_root=repo_root, trade_date=args.trade_date, outcome=outcome,
+                confirmation_path=confirmation_path,
             )
             updated = dict(payload)
-            updated["late_confirmation_exit_code"] = confirm.returncode
-            updated["late_confirmation_attempted"] = True
+            updated["late_confirmation_exit_code"] = confirmation.get("exit_code")
+            updated["late_confirmation_attempted"] = confirmation.get("attempted", False)
+            updated["late_confirmation_status"] = confirmation["status"]
             publish(updated)
         return 0
 

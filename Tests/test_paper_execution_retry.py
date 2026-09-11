@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 import datetime as dt
 import fcntl
@@ -271,11 +272,12 @@ def test_main_runs_normal_confirmation_after_fifth_attempt_recovery(
         lambda **_kwargs: (outcome, payload),
     )
     monkeypatch.setattr(paper_execution_retry, "_confirmation_is_due", lambda _trade_date: True)
-    monkeypatch.setattr(
-        paper_execution_retry.subprocess,
-        "run",
-        lambda command, **_kwargs: calls.append(list(command)) or SimpleNamespace(returncode=0),
-    )
+    confirm_kwargs, _ = _confirmation_fixture(tmp_path, monkeypatch, outcome=outcome)
+    def send_with_receipt(command, **_kwargs):
+        calls.append(list(command))
+        _delivery_receipt(confirm_kwargs, sent=True)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", send_with_receipt)
 
     exit_code = paper_execution_retry.main(
         ["--trade-date", "2026-07-15", "--repo-root", str(tmp_path)]
@@ -400,3 +402,186 @@ def test_cli_does_not_accept_an_arbitrary_child_script() -> None:
                 "/tmp/not-paper.sh",
             ]
         )
+
+
+
+def _confirmation_fixture(tmp_path, monkeypatch, outcome=None):
+    outcome = outcome or _outcome(exit_code=0, retryable=False, reason="success", submitted_count=3)
+    day = "2026-07-15"
+    run_root = tmp_path / outcome.run_root
+    run_root.mkdir(parents=True, exist_ok=True)
+    operator = {"execution_source": "exact_execution_plan_v3", "mode": "PAPER", "run_id": outcome.run_id, "trade_date": day,
+                "terminal_status": "SUBMITTED", "terminal_outcome": "RECONCILED_SUCCESS", "reconciliation_status": "CLEAN"}
+    results = {**operator, "terminal_outcome": "RECONCILED_SUCCESS", "reconciliation_status": "CLEAN",
+               "execution_target_attainment_required": True, "execution_target_attainment_status": "OK_TARGET_ATTAINED"}
+    (run_root / "operator_summary.json").write_text(json.dumps(operator))
+    (run_root / "execution_results.json").write_text(json.dumps(results))
+    (run_root / "audit").mkdir(exist_ok=True)
+    (run_root / "audit/execution_integrity.json").write_text(json.dumps({"status": "OK"}))
+    pointer = {"run_id": outcome.run_id, "run_root": outcome.run_root, "trade_date": day,
+               "mode": "PAPER", "stage": "execution", "status": "success"}
+    monkeypatch.setattr(paper_execution_retry, "read_trade_stage_pointer", lambda *a, **k: pointer)
+    marker = tmp_path / "outputs/workflow" / day / "paper_execution_retry_late_confirmation.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    return dict(repo_root=tmp_path, trade_date=day, outcome=outcome, confirmation_path=marker), pointer
+
+
+def _delivery_receipt(kwargs, *, sent, override=None):
+    run_root = kwargs["repo_root"] / kwargs["outcome"].run_root
+    operator = json.loads((run_root / "operator_summary.json").read_text())
+    digest = hashlib.sha256(json.dumps(operator, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    receipt = {"schema_version": "caerus.trading_confirmation_delivery.v1", "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+               "run_id": kwargs["outcome"].run_id, "trade_date": kwargs["trade_date"], "operator_summary_sha256": digest,
+               "confirmation_email_sent": sent, **(override or {})}
+    (run_root / "trading_confirmation_delivery.json").write_text(json.dumps(receipt))
+
+
+def test_late_confirmation_explicitly_enables_and_scopes_sender_and_dedupes(tmp_path, monkeypatch):
+    kwargs, _ = _confirmation_fixture(tmp_path, monkeypatch)
+    monkeypatch.setenv("EMAIL_TRADING_CONFIRMATION", "0")
+    monkeypatch.setenv("EMAIL_DRY_RUN", "1")
+    calls = []
+    def send(command, *, env, **unused):
+        calls.append(command)
+        assert env["EMAIL_TRADING_CONFIRMATION"] == "1"
+        assert env["EMAIL_DRY_RUN"] == "1"  # Global dry run is never overridden.
+        assert env["REPORT_DATE"] == kwargs["trade_date"]
+        assert env["TRADING_CONFIRMATION_RUN_ROOT"] == str((tmp_path / kwargs["outcome"].run_root).resolve())
+        assert env["TRADING_CONFIRMATION_RESULTS_PATH"].endswith("/execution_results.json")
+        _delivery_receipt(kwargs, sent=True)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", send)
+    first = paper_execution_retry._send_late_confirmation(**kwargs)
+    second = paper_execution_retry._send_late_confirmation(**kwargs)
+    assert first["status"] == second["status"] == "SENT"
+    assert second["attempted"] is False and second["deduplicated"] is True
+    assert len(calls) == 1
+
+
+def test_successful_suppression_is_not_sent_and_can_retry_only_with_same_receipt(tmp_path, monkeypatch):
+    kwargs, _ = _confirmation_fixture(tmp_path, monkeypatch)
+    sent_flags = iter([False, True])
+    def sender(*a, **k):
+        _delivery_receipt(kwargs, sent=next(sent_flags))
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", sender)
+    first = paper_execution_retry._send_late_confirmation(**kwargs)
+    assert first["status"] == "SUPPRESSED"
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "SENT"
+
+
+@pytest.mark.parametrize("case", ["missing", "wrong_run", "wrong_hash", "wrong_schema", "stale", "failure", "failure_false_receipt", "exception"])
+def test_missing_wrong_or_ambiguous_delivery_never_claims_sent_or_retries(tmp_path, monkeypatch, case):
+    kwargs, _ = _confirmation_fixture(tmp_path, monkeypatch)
+    calls = []
+    def sender(*a, **k):
+        calls.append(1)
+        if case == "exception":
+            raise OSError("fixture process error")
+        overrides = {"wrong_run": {"run_id": "another-run"}, "wrong_hash": {"operator_summary_sha256": "f"*64},
+                     "wrong_schema": {"schema_version": "wrong"}, "stale": {"recorded_at": "2020-01-01T00:00:00+00:00"}}
+        if case in overrides:
+            _delivery_receipt(kwargs, sent=True, override=overrides[case])
+        if case == "failure_false_receipt": _delivery_receipt(kwargs, sent=False)
+        return SimpleNamespace(returncode=1 if case.startswith("failure") else 0)
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", sender)
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "SEND_UNKNOWN"
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "PRIOR_ATTEMPT_BLOCKS_SEND"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("case", ["pointer_failed", "pointer_run", "no_action", "target_failed", "wrong_operator"])
+def test_late_confirmation_independently_requires_successful_current_run(tmp_path, monkeypatch, case):
+    kwargs, pointer = _confirmation_fixture(tmp_path, monkeypatch)
+    run_root = tmp_path / kwargs["outcome"].run_root
+    if case == "pointer_failed": pointer["status"] = "failed"
+    if case == "pointer_run": pointer["run_id"] = "wrong"
+    if case in {"no_action", "target_failed"}:
+        results = json.loads((run_root / "execution_results.json").read_text())
+        if case == "no_action": results["terminal_outcome"] = "AUTHORIZED_NO_TRADE"
+        else: results["execution_target_attainment_status"] = "FAIL"
+        (run_root / "execution_results.json").write_text(json.dumps(results))
+    if case == "wrong_operator": (run_root / "operator_summary.json").write_text("{}")
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", lambda *a, **k: pytest.fail("unconfirmed run sent"))
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "NOT_CONFIRMABLE"
+    assert not kwargs["confirmation_path"].exists()
+
+
+def test_legacy_ambiguous_attempt_marker_blocks_sender(tmp_path, monkeypatch):
+    kwargs, _ = _confirmation_fixture(tmp_path, monkeypatch)
+    kwargs["confirmation_path"].write_text(json.dumps({"status": "ATTEMPTING"}))
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", lambda *a, **k: pytest.fail("duplicate send risk"))
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "PRIOR_ATTEMPT_BLOCKS_SEND"
+
+
+def test_modified_no_send_receipt_does_not_authorize_retry(tmp_path, monkeypatch):
+    kwargs, _ = _confirmation_fixture(tmp_path, monkeypatch)
+    calls = []
+    def sender(*a, **k):
+        calls.append(1)
+        _delivery_receipt(kwargs, sent=False)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", sender)
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "SUPPRESSED"
+    _delivery_receipt(kwargs, sent=False)  # A different timestamp/hash is not that attempt's proof.
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "PRIOR_ATTEMPT_BLOCKS_SEND"
+    assert calls == [1]
+
+
+def test_exit_failure_after_valid_sent_receipt_does_not_duplicate(tmp_path, monkeypatch):
+    kwargs, _ = _confirmation_fixture(tmp_path, monkeypatch)
+    calls = []
+    def sender(*a, **k):
+        calls.append(1)
+        _delivery_receipt(kwargs, sent=True)
+        return SimpleNamespace(returncode=1)
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", sender)
+    result = paper_execution_retry._send_late_confirmation(**kwargs)
+    assert result["status"] == "SENT" and result["exit_code"] == 1
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["attempted"] is False
+    assert calls == [1]
+
+
+@pytest.mark.parametrize("field,value", [("terminal_status", "FAILED_RECONCILIATION"),
+    ("terminal_outcome", "SYSTEM_FAILURE"), ("reconciliation_status", "FAILED"), ("terminal_status", None)])
+def test_late_confirmation_requires_canonical_operator_terminal_truth(tmp_path, monkeypatch, field, value):
+    kwargs, _ = _confirmation_fixture(tmp_path, monkeypatch)
+    path = tmp_path / kwargs["outcome"].run_root / "operator_summary.json"
+    operator = json.loads(path.read_text())
+    if value is None: operator.pop(field)
+    else: operator[field] = value
+    path.write_text(json.dumps(operator))
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", lambda *a, **k: pytest.fail("contradictory operator sent"))
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "NOT_CONFIRMABLE"
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_late_confirmation_requires_integrity_ok(tmp_path, monkeypatch, missing):
+    kwargs, _ = _confirmation_fixture(tmp_path, monkeypatch)
+    path = tmp_path / kwargs["outcome"].run_root / "audit/execution_integrity.json"
+    if missing: path.unlink()
+    else: path.write_text(json.dumps({"status": "FAIL"}))
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", lambda *a, **k: pytest.fail("unverified integrity sent"))
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "NOT_CONFIRMABLE"
+
+
+@pytest.mark.parametrize("when", ["before_send", "after_send"])
+def test_receipt_io_failure_is_unknown_without_escaping_or_retrying(tmp_path, monkeypatch, when):
+    kwargs, _ = _confirmation_fixture(tmp_path, monkeypatch)
+    calls = []
+    actual_read = Path.read_bytes
+    fail_read = [when == "before_send"]
+    def read_bytes(path):
+        if path.name == "trading_confirmation_delivery.json" and fail_read[0]:
+            raise PermissionError("fixture receipt I/O failure")
+        return actual_read(path)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    def sender(*a, **k):
+        calls.append(1)
+        _delivery_receipt(kwargs, sent=True)
+        fail_read[0] = True
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(paper_execution_retry.subprocess, "run", sender)
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "SEND_UNKNOWN"
+    assert paper_execution_retry._send_late_confirmation(**kwargs)["status"] == "SEND_UNKNOWN"
+    assert len(calls) == (0 if when == "before_send" else 1)
