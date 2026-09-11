@@ -106,6 +106,7 @@ def _apply_aquila_quantity_authority(
     *, request: Any, allocation: Mapping[str, Any] | None,
     prices: Mapping[str, float], account_hash: str,
     broker_positions: list[dict[str, Any]], repo_root: Path,
+    recovery_context: Mapping[str, Any] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Revalue held shares without making a daily allocation decision for them."""
     contracts = (allocation or {}).get("quantity_contracts") or {}
@@ -140,6 +141,17 @@ def _apply_aquila_quantity_authority(
         if owner in current.setdefault(symbol, {}):
             raise RuntimeError("duplicate sleeve ownership row")
         current[symbol][owner] = quantity
+    bridge: dict[str, Any] = {}
+    if recovery_context is not None:
+        from core.aquila_recovery_ownership import build_orion_sell_recovery_bridge
+        current, bridge = build_orion_sell_recovery_bridge(
+            book=book, contract=contract, allocation=allocation, repo_root=repo_root,
+            recovery_policy=recovery_context["policy"], epoch=recovery_context["epoch"],
+            account_hash=account_hash, broker_positions=broker_positions,
+            broker_cash=recovery_context["cash"],
+            lookup_by_client_order_id=recovery_context["lookup"],
+            open_orders=recovery_context["open_orders"],
+        )
     actual = {row["symbol"]: float(row["quantity"]) for row in broker_positions}
     for symbol in set(actual) | set(current):
         if abs(actual.get(symbol, 0) - sum(current.get(symbol, {}).values())) > 1e-6:
@@ -199,6 +211,7 @@ def _apply_aquila_quantity_authority(
         "schema_version": "caerus.aquila_authorized_quantities.v1",
         "quantity_contract": contract,
         "ownership_snapshot_sha256": contract["ownership_snapshot_sha256"],
+        **({"recovery_ownership_bridge": bridge} if bridge else {}),
         "desired_quantities": desired,
         "signed_sleeve_demands": demands,
         "broker_sleeve_demands": broker_demands,
@@ -1146,6 +1159,7 @@ def authorize_exact_execution_plan(
     authorization_completed_at: str | None = None,
     regime_state_root: Path | None = None,
     drill_epoch: str | None = None,
+    drill_policy_path: Path | None = None,
     broker_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     trade_date = str(plan.get("trade_date") or "")
@@ -1563,11 +1577,28 @@ def authorize_exact_execution_plan(
     )
     regime_decision = regime_record.event.to_decision()
 
+    recovery_context = None
+    if drill_policy_path is not None:
+        recovery_policy = json.loads(Path(drill_policy_path).read_text(encoding="utf-8"))
+        if recovery_policy.get("ownership_bridge") is not None:
+            if not drill_epoch:
+                raise RuntimeError("ownership bridge requires an approved corrective epoch")
+            validate_drill_epoch(
+                drill_epoch, trade_date=trade_date, policy_path=drill_policy_path,
+                broker_paper=True, base_url=str(env.get("ALPACA_BASE_URL") or ""),
+            )
+            recovery_context = {
+                "policy": recovery_policy, "epoch": drill_epoch,
+                "cash": float(account["cash"]),
+                "lookup": getattr(broker, "find_order_by_client_id", None),
+                "open_orders": snapshot.get("open_orders"),
+            }
     request, quantity_authority = _apply_aquila_quantity_authority(
         request=request, allocation=portfolio_allocation_payload,
         prices=decision_prices,
         account_hash=str((account or {}).get("account_id_hash") or ""),
         broker_positions=_quantity_positions(snapshot), repo_root=quantity_repo_root,
+        recovery_context=recovery_context,
     )
     if quantity_authority:
         quantity_authority = {
@@ -2168,6 +2199,7 @@ def main(argv: list[str] | None = None) -> int:
             plan_path=args.plan,
             regime_state_root=resolved_regime_state_root,
             drill_epoch=drill_epoch,
+            drill_policy_path=args.drill_policy_config,
             broker_snapshot=preauthorization_snapshot,
         )
     except Exception as exc:
