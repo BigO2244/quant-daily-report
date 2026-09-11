@@ -143,8 +143,16 @@ def _apply_aquila_quantity_authority(
         current[symbol][owner] = quantity
     bridge: dict[str, Any] = {}
     if recovery_context is not None:
-        from core.aquila_recovery_ownership import build_orion_sell_recovery_bridge
-        current, bridge = build_orion_sell_recovery_bridge(
+        policy = recovery_context["policy"]
+        if policy.get("ownership_bridge_chain") is not None:
+            if policy.get("ownership_bridge") is not None:
+                raise RuntimeError("ambiguous ownership recovery policy")
+            from core.aquila_recovery_chain import build_aquila_recovery_chain
+            build_bridge = build_aquila_recovery_chain
+        else:
+            from core.aquila_recovery_ownership import build_orion_sell_recovery_bridge
+            build_bridge = build_orion_sell_recovery_bridge
+        current, bridge = build_bridge(
             book=book, contract=contract, allocation=allocation, repo_root=repo_root,
             recovery_policy=recovery_context["policy"], epoch=recovery_context["epoch"],
             account_hash=account_hash, broker_positions=broker_positions,
@@ -1580,7 +1588,8 @@ def authorize_exact_execution_plan(
     recovery_context = None
     if drill_policy_path is not None:
         recovery_policy = json.loads(Path(drill_policy_path).read_text(encoding="utf-8"))
-        if recovery_policy.get("ownership_bridge") is not None:
+        if (recovery_policy.get("ownership_bridge") is not None
+                or recovery_policy.get("ownership_bridge_chain") is not None):
             if not drill_epoch:
                 raise RuntimeError("ownership bridge requires an approved corrective epoch")
             validate_drill_epoch(

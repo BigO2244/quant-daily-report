@@ -51,6 +51,18 @@ def _quantities(rows):
 def build_orion_sell_recovery_bridge(*, book, contract, allocation, repo_root,
         recovery_policy, epoch, account_hash, broker_positions, broker_cash,
         lookup_by_client_order_id, open_orders):
+    return _build_orion_sell_recovery_bridge(
+        book=book, contract=contract, allocation=allocation, repo_root=repo_root,
+        recovery_policy=recovery_policy, epoch=epoch, account_hash=account_hash,
+        broker_positions=broker_positions, broker_cash=broker_cash,
+        lookup_by_client_order_id=lookup_by_client_order_id, open_orders=open_orders,
+        allowed_epoch_intents={},
+    )
+
+
+def _build_orion_sell_recovery_bridge(*, book, contract, allocation, repo_root,
+        recovery_policy, epoch, account_hash, broker_positions, broker_cash,
+        lookup_by_client_order_id, open_orders, allowed_epoch_intents):
     """Subtract only original-plan, fully proven Orion sells from the frozen book.
 
     All artifacts are read from their governed paths. The caller embeds the
@@ -129,7 +141,8 @@ def build_orion_sell_recovery_bridge(*, book, contract, allocation, repo_root,
     intents = sorted((wal / day / "intents").glob("*.json"))
     _require(bool(intents), "original durable intents missing")
     # Epoch WALs must not hide another same-day economic transition.
-    _require(not list((wal / "epochs").glob(f"*/{day}/intents/*.json")), "extra epoch intents prohibit bridge")
+    epoch_intents = {str(p.resolve()): _sha(p) for p in (wal / "epochs").glob(f"*/{day}/intents/*.json")}
+    _require(epoch_intents == allowed_epoch_intents, "extra epoch intents prohibit bridge")
     orders = {r["client_order_id"]: r for r in plan.orders}
     applied, receipts, common, common_hash = [], [], None, None
     for intent_file in intents:

@@ -46,6 +46,7 @@ from core.submission_wal import (
     broker_observation_detail,
     canonical_broker_fill_evidence,
     economic_reconciliation_proof,
+    durable_broker_observations,
     intent_path,
     new_resolution,
     prepare_order_intent,
@@ -844,7 +845,7 @@ def _broker_open_order_state(
             if (
                 not client_id or client_id in seen or confirmed is None
                 or not _is_filled(confirmed)
-                or _status(row) not in {"new", "accepted", "pending_new", "filled"}
+                or _status(row) not in {"new", "accepted", "pending_new", "partially_filled", "filled"}
             ):
                 return False, "unresolved_order"
             seen.add(client_id)
@@ -862,7 +863,8 @@ def _broker_open_order_state(
                 events = read_resolutions(
                     wal_root, trade_date=plan.trade_date, client_order_id=client_id,
                 )
-                if not any(event.state == ResolutionState.BROKER_OBSERVED for event in events):
+                durable_observations = durable_broker_observations(durable, events)
+                if not durable_observations or durable_observations[-1].status != "filled":
                     return False, "unresolved_order"
                 # The open list may lag fill state, but identity and authorized
                 # economics must still match. Never merge/overwrite stale fields
@@ -871,10 +873,14 @@ def _broker_open_order_state(
                 prior = validate_broker_order_evidence(
                     durable, confirmed, resolution_events=events,
                 )
+                if canonical_broker_fill_evidence(durable, prior) != canonical_broker_fill_evidence(durable, durable_observations[-1]):
+                    return False, "unresolved_order"
                 if stale.broker_order_id != prior.broker_order_id:
                     return False, "unresolved_order"
-                if 0 < stale.filled_quantity < float(durable.quantity) - 1e-9:
-                    return False, "unresolved_order"
+                # A stale open-list projection may retain an intermediate
+                # partial fill too. It never authorizes progress: durable full
+                # fill evidence AND a fresh identical per-order full fill are
+                # still mandatory, followed by an actually empty open list.
                 if deadline is not None and time.monotonic() >= deadline:
                     return False, "unresolved_order"
                 refreshed = broker.get_order(prior.broker_order_id)

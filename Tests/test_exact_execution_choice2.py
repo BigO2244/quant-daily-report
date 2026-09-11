@@ -5238,7 +5238,7 @@ class OwnFilledOpenListLagBroker(TrackingPaperBroker):
         return row
 
 
-@pytest.mark.parametrize("mutation", ["", "filled_row"])
+@pytest.mark.parametrize("mutation", ["", "filled_row", "partial"])
 def test_known_filled_open_list_lag_waits_for_empty_before_next_intent(orion_registry, tmp_path, monkeypatch, mutation):
     import execution.exact_executor as executor
     sleeps = []
@@ -5269,7 +5269,7 @@ def test_known_filled_open_list_lag_has_finite_attempt_budget(orion_registry, tm
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
 
 
-@pytest.mark.parametrize("mutation", ["identity", "quantity", "partial", "external", "lookup_error", "malformed", "per_order_error", "per_order_partial"])
+@pytest.mark.parametrize("mutation", ["identity", "quantity", "external", "lookup_error", "malformed", "per_order_error", "per_order_partial"])
 def test_open_list_lag_never_waits_on_unproven_order(orion_registry, tmp_path, monkeypatch, mutation):
     import execution.exact_executor as executor
     monkeypatch.setattr(executor.time, "sleep", lambda _: pytest.fail("unsafe retry"))
@@ -5330,3 +5330,67 @@ def test_quote_expiry_is_rechecked_after_open_list_wait(orion_registry, tmp_path
     assert result.reason_code == "exact_execution_price_freshness_failed:fixture_quote_expired_during_wait"
     assert broker.submit_calls == 1
     assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+
+
+@pytest.mark.parametrize("symbol,side,quantity,limit,fill_price,broker_id", [
+    ("WDC", "SELL", 2.2555, 455.31, 460.0, "3a6eb8f9-c537-485c-afe5-ec21365fad96"),
+    ("AMZN", "BUY", 2.08181, 259.02, 256.554804, "ce87d638-2776-419c-a409-82dc3a5d198e"),
+])
+@pytest.mark.parametrize("truth", ["durable_full", "true_partial", "regressed_per_id", "wal_partial_submitted_full", "wal_missing_full", "wal_no_observation"])
+def test_recorded_partial_open_list_shapes_require_durable_and_fresh_full_fill(
+    orion_registry, tmp_path, monkeypatch, symbol, side, quantity, limit, fill_price, broker_id, truth,
+):
+    # Numeric and normalized-enum shapes reproduce retained Sep11 original WDC
+    # and corrective AMZN snapshots. These are offline fixtures, no broker calls.
+    import execution.exact_executor as executor
+    from core.submission_wal import OrderIntent, prepare_order_intent, validate_broker_order_evidence
+    sleeps = []
+    monkeypatch.setattr(executor.time, "sleep", sleeps.append)
+    initial = _plan().to_dict()
+    row = dict(symbol=symbol, side=side, quantity=quantity, order_type="limit", expected_price=limit,
+               limit_price=limit, cap_enforcement_price=limit, notional=quantity*limit)
+    sell = side == "SELL"
+    plan = _rebuild_exact(initial, constraints={**initial["constraints"], "allow_fractional": True},
+                         starting_positions=[{"symbol": symbol, "quantity": quantity}] if sell else [],
+                         sell_orders=[row] if sell else [], buy_orders=[] if sell else [row],
+                         expected_posttrade_positions=[] if sell else [{"symbol": symbol, "quantity": quantity}],
+                         expected_posttrade_cash=900 + quantity*limit*(1 if sell else -1))
+    exact = plan.orders[0]
+    intent = OrderIntent(trade_date=plan.trade_date, plan_id=plan.plan_id, plan_hash=plan.content_hash,
+                         attempt_id="recorded-partial-fixture", order_id=exact["order_id"],
+                         client_order_id=exact["client_order_id"], symbol=symbol, side=side, quantity=quantity,
+                         order_type="limit", limit_price=limit, created_at=plan.created_at,
+                         starting_state_hash=plan.starting_state_hash)
+    wal = tmp_path / "wal"
+    intent = prepare_order_intent(wal, intent).intent
+    full = dict(id=broker_id, client_order_id=intent.client_order_id, symbol=symbol,
+                side="OrderSide." + side, status="OrderStatus.FILLED", qty=str(quantity),
+                filled_qty=str(quantity), filled_avg_price=str(fill_price))
+    stale = {**full, "status": "OrderStatus.PARTIALLY_FILLED", "filled_qty": "1",
+             "filled_avg_price": "460" if sell else "256.56"}
+    durable = stale if truth in {"true_partial", "wal_partial_submitted_full"} else full
+    if truth == "wal_missing_full":
+        durable = {**full, "status": "OrderStatus.PENDING_NEW", "filled_qty": "0", "filled_avg_price": None}
+    if truth != "wal_no_observation":
+        executor._append_broker_observation(wal, intent=intent,
+            evidence=validate_broker_order_evidence(intent, durable))
+    submitted = stale if truth == "true_partial" else full
+    before = {str(p): p.read_bytes() for p in wal.rglob("*.json")}
+    class Broker:
+        reads = 0
+        individual_reads = 0
+        def list_orders(self, **kwargs):
+            self.reads += 1
+            return [copy.deepcopy(stale)] if self.reads == 1 else []
+        def get_order(self, identifier):
+            assert identifier == broker_id
+            self.individual_reads += 1
+            return copy.deepcopy(stale if truth == "regressed_per_id" else full)
+    broker = Broker()
+    clear, reason = executor._broker_open_order_state(broker, plan=plan, submitted=[submitted], wal_root=wal)
+    assert clear is (truth == "durable_full")
+    assert reason == ("clear" if clear else "unresolved_order")
+    assert broker.reads == (2 if clear else 1)
+    assert sleeps == ([0.5] if clear else [])
+    assert broker.individual_reads == (1 if truth in {"durable_full", "regressed_per_id"} else 0)
+    assert before == {str(p): p.read_bytes() for p in wal.rglob("*.json")}
