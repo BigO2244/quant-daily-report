@@ -5196,3 +5196,137 @@ def test_authorizer_fails_closed_on_incomplete_or_stale_final_market_state(orion
             plan_path=tmp_path / "governed.json",
             created_at="2026-08-12T13:35:01+00:00",
         )
+
+
+class OwnFilledOpenListLagBroker(TrackingPaperBroker):
+    """Per-order fill truth leads the open-list projection, without new orders."""
+    def __init__(self, *, stale_reads=2, mutation=""):
+        super().__init__()
+        self.stale_reads = stale_reads
+        self.lag_reads = 0
+        self.mutation = mutation
+
+    def list_orders(self, status="open", limit=100, **kwargs):
+        if status != "open" or self.submit_calls != 1:
+            return super().list_orders(status=status, limit=limit, **kwargs)
+        self.lag_reads += 1
+        if self.mutation == "lookup_error":
+            raise RuntimeError("fixture broker lookup failed")
+        if self.mutation == "malformed":
+            return [None]
+        if self.lag_reads > self.stale_reads:
+            return []
+        row = copy.deepcopy(next(iter(self.orders.values())))
+        if self.mutation != "filled_row":
+            row.update(status="accepted", filled_qty="0", filled_avg_price=None)
+        if self.mutation == "identity":
+            row["id"] = "wrong-broker-id"
+        elif self.mutation == "quantity":
+            row["qty"] = "999"
+        elif self.mutation == "partial":
+            row.update(status="partially_filled", filled_qty="0.5", filled_avg_price="100")
+        elif self.mutation == "external":
+            return [row, {**row, "client_order_id": "external-order", "id": "external"}]
+        return [row]
+
+    def get_order(self, order_id):
+        if self.mutation == "per_order_error":
+            raise RuntimeError("fixture per-order lookup failed")
+        row = super().get_order(order_id)
+        if self.mutation == "per_order_partial":
+            row.update(status="partially_filled", filled_qty="0.5")
+        return row
+
+
+@pytest.mark.parametrize("mutation", ["", "filled_row"])
+def test_known_filled_open_list_lag_waits_for_empty_before_next_intent(orion_registry, tmp_path, monkeypatch, mutation):
+    import execution.exact_executor as executor
+    sleeps = []
+    monkeypatch.setattr(executor.time, "sleep", sleeps.append)
+    broker = OwnFilledOpenListLagBroker(stale_reads=2, mutation=mutation)
+    result = execute_exact_plan(plan_payload=_plan().to_dict(), broker=broker,
+                               env=_execution_env(tmp_path), wal_root=tmp_path / "wal",
+                               attempt_id="own-fill-list-lag", dry_run=False)
+    assert result.reason_code == "exact_plan_submitted_filled_and_reconciled"
+    assert broker.lag_reads == 3
+    assert sleeps == [0.5, 0.5]
+    assert broker.submit_calls == len(_plan().orders)
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == broker.submit_calls
+
+
+def test_known_filled_open_list_lag_has_finite_attempt_budget(orion_registry, tmp_path, monkeypatch):
+    import execution.exact_executor as executor
+    sleeps = []
+    monkeypatch.setattr(executor.time, "sleep", sleeps.append)
+    broker = OwnFilledOpenListLagBroker(stale_reads=100)
+    result = execute_exact_plan(plan_payload=_plan().to_dict(), broker=broker,
+                               env=_execution_env(tmp_path), wal_root=tmp_path / "wal",
+                               attempt_id="persistent-list-lag", dry_run=False)
+    assert result.reason_code == "broker_open_order_unresolved_order:mid_batch_submission_halted"
+    assert broker.submit_calls == 1
+    assert broker.lag_reads == 6
+    assert len(sleeps) == 5
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+
+
+@pytest.mark.parametrize("mutation", ["identity", "quantity", "partial", "external", "lookup_error", "malformed", "per_order_error", "per_order_partial"])
+def test_open_list_lag_never_waits_on_unproven_order(orion_registry, tmp_path, monkeypatch, mutation):
+    import execution.exact_executor as executor
+    monkeypatch.setattr(executor.time, "sleep", lambda _: pytest.fail("unsafe retry"))
+    broker = OwnFilledOpenListLagBroker(mutation=mutation)
+    result = execute_exact_plan(plan_payload=_plan().to_dict(), broker=broker,
+                               env=_execution_env(tmp_path), wal_root=tmp_path / "wal",
+                               attempt_id=f"unproven-{mutation}", dry_run=False)
+    assert result.status == "FAILED_RECONCILIATION"
+    assert result.reason_code.endswith(":mid_batch_submission_halted")
+    assert broker.submit_calls == 1
+    assert broker.lag_reads == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1
+
+
+def test_open_list_lag_rejects_empty_response_after_deadline(orion_registry, tmp_path, monkeypatch):
+    import execution.exact_executor as executor
+    clock = [0.0]
+    monkeypatch.setattr(executor.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(executor.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+    class SlowClearingBroker(OwnFilledOpenListLagBroker):
+        def list_orders(self, **kwargs):
+            rows = super().list_orders(**kwargs)
+            if self.submit_calls == 1 and not rows:
+                clock[0] += 3.0
+            return rows
+    broker = SlowClearingBroker(stale_reads=1)
+    result = execute_exact_plan(plan_payload=_plan().to_dict(), broker=broker,
+                               env=_execution_env(tmp_path), wal_root=tmp_path / "wal",
+                               attempt_id="deadline-list-lag", dry_run=False)
+    assert result.reason_code == "broker_open_order_unresolved_order:mid_batch_submission_halted"
+    assert broker.submit_calls == 1
+    assert broker.lag_reads == 2
+
+
+def test_initial_empty_open_list_preserves_existing_slow_lookup_behavior(monkeypatch):
+    import execution.exact_executor as executor
+    clock = [0.0]
+    monkeypatch.setattr(executor.time, "monotonic", lambda: clock[0])
+    class SlowEmptyBroker:
+        def list_orders(self, **kwargs):
+            clock[0] += 4.0
+            return []
+    assert executor._broker_open_order_state(SlowEmptyBroker()) == (True, "clear")
+
+
+def test_quote_expiry_is_rechecked_after_open_list_wait(orion_registry, tmp_path, monkeypatch):
+    import execution.exact_executor as executor
+    slept = []
+    monkeypatch.setattr(executor.time, "sleep", slept.append)
+    original = executor._open_decision_prices_fresh_at
+    def quote_freshness(*a, **kw):
+        return (False, "fixture_quote_expired_during_wait") if slept else original(*a, **kw)
+    monkeypatch.setattr(executor, "_open_decision_prices_fresh_at", quote_freshness)
+    broker = OwnFilledOpenListLagBroker(stale_reads=1)
+    result = execute_exact_plan(plan_payload=_plan().to_dict(), broker=broker,
+                               env=_execution_env(tmp_path), wal_root=tmp_path / "wal",
+                               attempt_id="quote-expired-during-lag", dry_run=False)
+    assert result.reason_code == "exact_execution_price_freshness_failed:fixture_quote_expired_during_wait"
+    assert broker.submit_calls == 1
+    assert len(list((tmp_path / "wal").rglob("*/intents/*.json"))) == 1

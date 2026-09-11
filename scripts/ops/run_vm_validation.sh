@@ -92,6 +92,7 @@ echo "[VM_VALIDATION] targeted_pytest"
   Tests/test_trading_integrity_certification.py \
   Tests/test_broker_truth_ledger.py \
   Tests/test_accounting_precompute_recovery.py \
+  Tests/test_exact_execution_choice2.py \
   Tests/test_workflow_failure_email.py \
   -q
 

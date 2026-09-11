@@ -803,20 +803,93 @@ def _validated_broker_evidence(
     )
 
 
-def _broker_open_order_state(broker: Any) -> tuple[bool, str]:
-    """Return whether broker open-order truth permits a new WAL intent."""
+def _broker_open_order_state(
+    broker: Any,
+    *,
+    plan: ExactExecutionPlan | None = None,
+    submitted: Sequence[Mapping[str, Any]] = (),
+    wal_root: Path | str | None = None,
+) -> tuple[bool, str]:
+    """Require an empty open list; briefly wait only for proven own-fill lag.
 
-    try:
-        rows = broker.list_orders(status="open", limit=100)
-    except Exception:
-        return False, "lookup_failed"
-    if not isinstance(rows, list) or any(
-        not isinstance(row, Mapping) for row in rows
-    ):
-        return False, "response_malformed"
-    if rows:
-        return False, "unresolved_order"
-    return True, "clear"
+    Alpaca's per-order endpoint can confirm a full fill before its open-list
+    projection removes that order. This bounded read-only wait never admits a
+    live order or creates a new intent while the open list is nonempty.
+    """
+    deadline: float | None = None
+    known = {str(row.get("client_order_id") or ""): row for row in submitted}
+    for attempt in range(6):
+        if deadline is not None and time.monotonic() >= deadline:
+            return False, "unresolved_order"
+        try:
+            rows = broker.list_orders(status="open", limit=100)
+        except Exception:
+            return False, "lookup_failed"
+        if not isinstance(rows, list) or any(
+            not isinstance(row, Mapping) for row in rows
+        ):
+            return False, "response_malformed"
+        if deadline is not None and time.monotonic() >= deadline:
+            return False, "unresolved_order"
+        if not rows:
+            return True, "clear"
+        if deadline is None:
+            deadline = time.monotonic() + 3.0
+        if plan is None or wal_root is None or not known:
+            return False, "unresolved_order"
+        seen: set[str] = set()
+        for row in rows:
+            client_id = str(row.get("client_order_id") or "").strip()
+            confirmed = known.get(client_id)
+            if (
+                not client_id or client_id in seen or confirmed is None
+                or not _is_filled(confirmed)
+                or _status(row) not in {"new", "accepted", "pending_new", "filled"}
+            ):
+                return False, "unresolved_order"
+            seen.add(client_id)
+            try:
+                durable = OrderIntent.from_dict(json.loads(intent_path(
+                    wal_root, trade_date=plan.trade_date,
+                    client_order_id=client_id,
+                ).read_text(encoding="utf-8")))
+                if (
+                    durable.plan_id != plan.plan_id
+                    or durable.plan_hash != plan.content_hash
+                    or durable.trade_date != plan.trade_date
+                ):
+                    return False, "unresolved_order"
+                events = read_resolutions(
+                    wal_root, trade_date=plan.trade_date, client_order_id=client_id,
+                )
+                if not any(event.state == ResolutionState.BROKER_OBSERVED for event in events):
+                    return False, "unresolved_order"
+                # The open list may lag fill state, but identity and authorized
+                # economics must still match. Never merge/overwrite stale fields
+                # into the durable per-order fill observation.
+                stale = validate_broker_order_evidence(durable, row)
+                prior = validate_broker_order_evidence(
+                    durable, confirmed, resolution_events=events,
+                )
+                if stale.broker_order_id != prior.broker_order_id:
+                    return False, "unresolved_order"
+                if 0 < stale.filled_quantity < float(durable.quantity) - 1e-9:
+                    return False, "unresolved_order"
+                if deadline is not None and time.monotonic() >= deadline:
+                    return False, "unresolved_order"
+                refreshed = broker.get_order(prior.broker_order_id)
+                validate_broker_order_evidence(
+                    durable, refreshed, resolution_events=events,
+                )
+                if not _is_filled(refreshed):
+                    return False, "unresolved_order"
+            except Exception:
+                return False, "unresolved_order"
+        remaining = deadline - time.monotonic()
+        if attempt == 5 or remaining <= 0:
+            return False, "unresolved_order"
+        time.sleep(min(0.5, remaining))
+    return False, "unresolved_order"
 
 
 def _append_resolution(
@@ -2398,6 +2471,37 @@ def _execute_exact_plan_locked(
                 client_order_id=str(order["client_order_id"]),
             ).exists()
             if not order_has_wal:
+                open_order_clear, open_order_reason = _broker_open_order_state(
+                    broker, plan=plan, submitted=submitted, wal_root=wal_root,
+                )
+                if not open_order_clear:
+                    failure_positions, failure_cash = _best_effort_snapshot(
+                        broker
+                    )
+                    mutated = bool(submitted or recovered_evidence)
+                    return _outcome(
+                        plan,
+                        terminal=TerminalOutcome.SYSTEM_FAILURE,
+                        status=(
+                            "FAILED_RECONCILIATION" if mutated else "BLOCKED"
+                        ),
+                        reason=(
+                            "broker_open_order_"
+                            f"{open_order_reason}:mid_batch_submission_halted"
+                        ),
+                        submitted=submitted,
+                        filled=filled,
+                        rejected=rejected,
+                        final_positions=failure_positions,
+                        final_cash=failure_cash,
+                        reconciliation=(
+                            "FAILED_RECONCILIATION"
+                            if mutated
+                            else "FAILED_PRE_SUBMIT"
+                        ),
+                        failure_class=FailureClass.STATE_FAILURE,
+                    )
+                # Recheck quote expiry after any bounded open-list wait.
                 price_fresh, price_reason = _open_decision_prices_fresh_at(
                     plan,
                     now_et=now_et,
@@ -2428,36 +2532,6 @@ def _execute_exact_plan_locked(
                             else "FAILED_PRE_SUBMIT"
                         ),
                         failure_class=FailureClass.AUTHORIZATION_FAILURE,
-                    )
-                open_order_clear, open_order_reason = _broker_open_order_state(
-                    broker
-                )
-                if not open_order_clear:
-                    failure_positions, failure_cash = _best_effort_snapshot(
-                        broker
-                    )
-                    mutated = bool(submitted or recovered_evidence)
-                    return _outcome(
-                        plan,
-                        terminal=TerminalOutcome.SYSTEM_FAILURE,
-                        status=(
-                            "FAILED_RECONCILIATION" if mutated else "BLOCKED"
-                        ),
-                        reason=(
-                            "broker_open_order_"
-                            f"{open_order_reason}:mid_batch_submission_halted"
-                        ),
-                        submitted=submitted,
-                        filled=filled,
-                        rejected=rejected,
-                        final_positions=failure_positions,
-                        final_cash=failure_cash,
-                        reconciliation=(
-                            "FAILED_RECONCILIATION"
-                            if mutated
-                            else "FAILED_PRE_SUBMIT"
-                        ),
-                        failure_class=FailureClass.STATE_FAILURE,
                     )
             if not order_has_wal and not _exact_market_is_open(
                 trade_date=plan.trade_date, now_et=now_et
