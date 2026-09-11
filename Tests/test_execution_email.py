@@ -201,6 +201,7 @@ def test_execution_email_surfaces_reliability_and_target_attainment_artifacts(tm
                 "score": 84.5,
                 "top_failure_reason": "cash_target_drift",
                 "top_failure_invariant_id": "target_cash_drift",
+                "operator_action_required": True,
                 "trend_metrics": {"clean_run_streak": 2},
                 "recommended_operator_actions": ["Review target-attainment cash drift"],
             }
@@ -248,6 +249,7 @@ def test_execution_email_surfaces_reliability_and_target_attainment_artifacts(tm
 
     assert "EXECUTION RELIABILITY" in body
     assert "Classification | YELLOW" in body
+    assert "Operator action required | YES" in body
     assert "Top reason | cash_target_drift" in body
     assert "Recommended actions | Review target-attainment cash drift" in body
     assert "TARGET ATTAINMENT" in body

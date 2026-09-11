@@ -197,6 +197,15 @@ def execution_reliability_rows(
             _fmt_number(_first_present(context.get("execution_reliability_score"), artifact.get("score")), digits=1),
         ],
         [
+            "Operator action required",
+            _fmt_value(
+                _first_present(
+                    context.get("execution_reliability_operator_action_required"),
+                    artifact.get("operator_action_required"),
+                )
+            ),
+        ],
+        [
             "Top reason",
             _fmt_value(top_reason),
         ],
