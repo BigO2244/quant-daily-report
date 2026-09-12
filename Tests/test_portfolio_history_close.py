@@ -18,7 +18,7 @@ def _runner(returncodes: list[int], calls: list[list[str]]):
 
 def test_close_chain_runs_all_steps_when_green(monkeypatch) -> None:
     calls: list[list[str]] = []
-    monkeypatch.setattr(close.subprocess, "run", _runner([0, 0, 0], calls))
+    monkeypatch.setattr(close.subprocess, "run", _runner([0, 0, 0, 0], calls))
 
     result = close.run_close_chain(
         repo_root=Path("/tmp/caerus-close"),
@@ -35,7 +35,7 @@ def test_close_chain_runs_all_steps_when_green(monkeypatch) -> None:
 
 def test_close_chain_always_escalates_after_history_failure(monkeypatch) -> None:
     calls: list[list[str]] = []
-    monkeypatch.setattr(close.subprocess, "run", _runner([7, 0], calls))
+    monkeypatch.setattr(close.subprocess, "run", _runner([7, 0, 0], calls))
 
     result = close.run_close_chain(
         repo_root=Path("/tmp/caerus-close"),
@@ -47,13 +47,13 @@ def test_close_chain_always_escalates_after_history_failure(monkeypatch) -> None
     assert result["daily_audit_returncode"] is None
     assert result["escalation_returncode"] == 0
     assert result["returncode"] == 7
-    assert len(calls) == 2
-    assert "core.portfolio_history_escalation" in calls[-1]
+    assert len(calls) == 3
+    assert "core.portfolio_history_escalation" in calls[-2]
 
 
 def test_close_chain_always_escalates_and_fails_after_audit_failure(monkeypatch) -> None:
     calls: list[list[str]] = []
-    monkeypatch.setattr(close.subprocess, "run", _runner([0, 9, 0], calls))
+    monkeypatch.setattr(close.subprocess, "run", _runner([0, 9, 0, 0], calls))
 
     result = close.run_close_chain(
         repo_root=Path("/tmp/caerus-close"),
@@ -64,12 +64,12 @@ def test_close_chain_always_escalates_and_fails_after_audit_failure(monkeypatch)
     assert result["daily_audit_returncode"] == 9
     assert result["escalation_returncode"] == 0
     assert result["returncode"] == 9
-    assert "core.portfolio_history_escalation" in calls[-1]
+    assert "core.portfolio_history_escalation" in calls[-2]
 
 
 def test_close_chain_propagates_escalation_failure(monkeypatch) -> None:
     calls: list[list[str]] = []
-    monkeypatch.setattr(close.subprocess, "run", _runner([0, 0, 4], calls))
+    monkeypatch.setattr(close.subprocess, "run", _runner([0, 0, 4, 0], calls))
 
     result = close.run_close_chain(
         repo_root=Path("/tmp/caerus-close"),
@@ -78,3 +78,11 @@ def test_close_chain_propagates_escalation_failure(monkeypatch) -> None:
     )
 
     assert result["returncode"] == 4
+
+
+def test_daily_remediation_failure_propagates_even_after_success(monkeypatch):
+    calls = []
+    monkeypatch.setattr(close.subprocess, "run", _runner([0, 0, 0, 1], calls))
+    result = close.run_close_chain(repo_root=Path("/tmp/caerus-close"), trade_date="2026-09-11", send_escalation=False)
+    assert result["returncode"] == 1
+    assert "scripts/build_remediation_reports.py" in calls[-1]

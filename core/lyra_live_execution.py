@@ -7,6 +7,7 @@ import datetime as dt
 import fcntl
 import hashlib
 import json
+import math
 import os
 import stat
 import time
@@ -21,6 +22,9 @@ from core.lyra_live_portfolio import (
     content_hash,
     validate_owner_decision,
     validate_plan,
+    validate_broker_snapshot,
+    _finite,
+    _timestamp,
 )
 
 
@@ -84,6 +88,8 @@ def _mutation_context(plan: Mapping[str, Any], order: Mapping[str, Any]) -> dict
         "order_type": "market", "time_in_force": "day", "extended_hours": False,
         "fractional_shares": True,
         "factual_equity_usd": plan["factual_equity_usd"],
+        "max_live_capital_usd": plan["max_live_capital_usd"],
+        "sizing_basis_usd": plan["sizing_basis_usd"],
         "factual_cash_usd": plan["factual_cash_usd"],
         "factual_buying_power_usd": plan["factual_buying_power_usd"],
         "maximum_gross_usd": plan["maximum_gross_usd"],
@@ -117,6 +123,73 @@ def _poll_terminal(broker: Any, order: Mapping[str, Any], *, timeout_seconds: in
     return observed
 
 
+def _posttrade_reconciliation(plan, snapshot, expected_positions):
+    """Reconcile actual account/position truth independently of quote-mark targets."""
+    result = {'status': 'NOT_ALIGNED', 'reasons': [], 'snapshot_hash': snapshot['content_hash']}
+    try:
+        if snapshot['capture_errors']:
+            raise LyraLiveExecutionError('posttrade capture contains invalid or missing data')
+        started = _timestamp(snapshot['capture_started_at'], label='posttrade capture start')
+        completed = _timestamp(snapshot['capture_completed_at'], label='posttrade capture end')
+        if (not 0 <= (completed-started).total_seconds() <= 120
+                or completed.astimezone(ZoneInfo('America/New_York')).date().isoformat() != plan['execution_session']):
+            raise LyraLiveExecutionError('posttrade snapshot stale or outside session')
+        account = snapshot['account']
+        if account.get('id_hash') != plan['account_id_hash']:
+            raise LyraLiveExecutionError('posttrade broker account identity differs from exact plan')
+        equity = _finite(account.get('equity'), label='posttrade equity', positive=True)
+        cash = _finite(account.get('cash'), label='posttrade cash')
+        positions = snapshot['positions']
+        if not isinstance(positions, list):
+            raise LyraLiveExecutionError('posttrade positions missing')
+        quantities, market_values = {}, {}
+        for row in positions:
+            symbol = str(row.get('symbol') or '').upper()
+            if not symbol or symbol in quantities:
+                raise LyraLiveExecutionError('posttrade positions duplicate or missing symbol')
+            quantities[symbol] = _finite(row.get('qty'), label=symbol+' posttrade quantity')
+            market_values[symbol] = _finite(row.get('market_value'), label=symbol+' broker market value')
+        deltas = {s: quantities.get(s, 0)-expected_positions.get(s, 0)
+                  for s in sorted(set(quantities)|set(expected_positions))
+                  if abs(quantities.get(s, 0)-expected_positions.get(s, 0)) > 1e-8}
+        broker_position_value = sum(market_values.values())
+        nav_delta = equity-(cash+broker_position_value)
+        # Same cent-level account NAV tolerance as canonical economic reconciliation.
+        nav_abs = .01
+        symbols = sorted(set(quantities)|set(plan['target_weights']))
+        prices = {}
+        for symbol in symbols:
+            quote = snapshot['latest_trades'][symbol]
+            stamped = _timestamp(quote.get('timestamp'), label=symbol+' posttrade quote timestamp')
+            if not 0 <= (completed-stamped).total_seconds() <= 120:
+                raise LyraLiveExecutionError(symbol+' posttrade quote stale')
+            prices[symbol] = _finite(quote.get('price'), label=symbol+' posttrade price', positive=True)
+        target_values = {symbol: plan['sizing_basis_usd']*.95*float(weight)
+                         for symbol, weight in plan['target_weights'].items()}
+        actual_values = {symbol: quantities.get(symbol, 0)*prices[symbol] for symbol in target_values}
+        errors = {symbol: actual_values[symbol]-target_values[symbol] for symbol in target_values}
+        tolerance = max(2., equity*.01)
+        reserve = max(plan['required_cash_reserve_usd'], equity*.05)
+        unexpected = sorted(s for s, qty in quantities.items() if qty > 0 and s not in target_values)
+        result.update(target_values_usd=target_values, actual_values_usd=actual_values,
+            value_errors_usd=errors, tolerance_usd=tolerance, cash_usd=cash,
+            minimum_cash_reserve_usd=reserve, unexpected_positions=unexpected,
+            expected_positions=expected_positions, actual_positions=quantities, quantity_deltas=deltas,
+            account_nav_reconciliation={'alpaca_equity_usd': equity, 'alpaca_cash_usd': cash,
+                'alpaca_position_market_value_usd': broker_position_value, 'delta_usd': nav_delta,
+                'tolerance_usd': nav_abs},
+            quote_marked_position_value_usd=sum(quantities[s]*prices[s] for s in quantities))
+        if deltas: result['reasons'].append('confirmed_fill_quantity_mismatch')
+        if abs(nav_delta) > nav_abs: result['reasons'].append('alpaca_cash_positions_NAV_mismatch')
+        if unexpected: result['reasons'].append('unexpected_positions')
+        if any(abs(error) > tolerance for error in errors.values()): result['reasons'].append('target_value_mismatch')
+        if cash+.01 < reserve: result['reasons'].append('cash_reserve_mismatch')
+        if not result['reasons']: result['status'] = 'ALIGNED'
+    except (LyraLivePortfolioError, LyraLiveExecutionError, KeyError, TypeError, ValueError, AttributeError) as exc:
+        result['reasons'].append(str(exc))
+    return result
+
+
 def execute_portfolio_plan(
     *, owner_decision: Mapping[str, Any], plan: Mapping[str, Any], broker: Any,
     state_root: Path | str, executed_at: str, submit_enabled: bool,
@@ -125,6 +198,7 @@ def execute_portfolio_plan(
 
     owner = validate_owner_decision(owner_decision)
     checked = validate_plan(plan, owner_decision=owner)
+    execution_started = time.monotonic()
     try:
         executed = dt.datetime.fromisoformat(executed_at.replace("Z", "+00:00"))
     except ValueError as exc:
@@ -172,6 +246,7 @@ def execute_portfolio_plan(
         if not (dt.time(9, 35) <= local.time() < dt.time(9, 50)):
             raise LyraLiveExecutionError("submission is outside the 09:35-09:50 ET window")
         receipts: list[dict[str, Any]] = []
+        expected_positions = dict(checked["starting_positions"])
         for order in checked["orders"]:
             context = _mutation_context(checked, order)
             _write_exclusive(
@@ -179,6 +254,38 @@ def execute_portfolio_plan(
             )
             recovered = broker.find_order_by_client_id(order["client_order_id"])
             if recovered is None:
+                validation_time = executed + dt.timedelta(seconds=time.monotonic()-execution_started)
+                validate_broker_snapshot(checked['broker_pretrade_snapshot'],
+                    account_id_hash=checked['account_id_hash'], execution_session=checked['execution_session'],
+                    as_of=validation_time.isoformat())
+                fresh = broker.get_account()
+                if fresh.get('id_hash') != checked['account_id_hash']:
+                    raise LyraLiveExecutionError('broker account identity differs from exact plan')
+                if (str(fresh.get('status') or '').upper().split('.')[-1] != 'ACTIVE'
+                        or fresh.get('trading_blocked') is True or fresh.get('account_blocked') is True):
+                    raise LyraLiveExecutionError('broker account is not active/unblocked')
+                actual_positions = {str(p["symbol"]).upper(): _finite(p.get("qty", p.get("quantity")), label='broker quantity')
+                                    for p in broker.get_positions()}
+                if any(not math.isfinite(q) or q < 0 for q in actual_positions.values()) or any(
+                    abs(actual_positions.get(s, 0) - expected_positions.get(s, 0)) > 1e-8
+                    for s in set(actual_positions) | set(expected_positions)
+                ):
+                    raise LyraLiveExecutionError("broker positions changed outside the exact plan; reconciliation required")
+                fresh_cash = _finite(fresh.get('cash'), label='broker cash')
+                fresh_equity = _finite(fresh.get('equity'), label='broker equity', positive=True)
+                if not math.isfinite(fresh_equity) or fresh_equity <= 0 or not math.isfinite(fresh_cash) or fresh_cash < 0:
+                    raise LyraLiveExecutionError("broker cash/NAV is invalid")
+                if not receipts and (abs(fresh_equity - checked["factual_equity_usd"]) > .01 or abs(fresh_cash - checked["factual_cash_usd"]) > .01):
+                    raise LyraLiveExecutionError("saved plan broker NAV/cash is stale; replan required")
+                if checked["maximum_gross_usd"] > fresh_equity * .95 + .01:
+                    raise LyraLiveExecutionError("current broker NAV cannot support saved plan; replan required")
+                if order["side"] == "BUY":
+                    # Rebudget against confirmed broker cash after completed sells.
+                    if not all(math.isfinite(x) and x >= 0 for x in (fresh_cash, fresh_equity)):
+                        raise LyraLiveExecutionError("broker cash/NAV is invalid")
+                    reserve = max(checked["required_cash_reserve_usd"], fresh_equity * .05)
+                    if fresh_cash - reserve + .01 < float(order["notional"]):
+                        raise LyraLiveExecutionError("confirmed broker cash cannot fund exact buy; replan required")
                 recovered = broker.submit_lyra_live_portfolio_market_order(
                     symbol=order["symbol"], side=order["side"],
                     client_order_id=order["client_order_id"], qty=order["quantity"],
@@ -197,33 +304,47 @@ def execute_portfolio_plan(
             receipt["content_hash"] = content_hash(receipt)
             _write_exclusive(session_root / f"receipt-{order['order_index']:02d}.json", receipt)
             receipts.append(receipt)
+            quantity = float(safe["filled_qty"])
+            if not math.isfinite(quantity) or quantity < 0:
+                raise LyraLiveExecutionError("invalid broker fill quantity")
+            expected_positions[order["symbol"]] = expected_positions.get(order["symbol"], 0) + quantity * (1 if order["side"] == "BUY" else -1)
+        capture_started = dt.datetime.now(dt.timezone.utc).isoformat()
         account = broker.get_account()
         positions = broker.get_positions()
-        symbols = sorted(checked["target_weights"])
-        latest = broker.get_latest_trades(symbols)
-        prices = {symbol: float(latest[symbol]["price"]) for symbol in symbols}
-        equity = float(account["equity"])
-        post = {str(row.get("symbol") or "").upper(): float(row.get("qty") or 0) for row in positions}
-        target_values = {
-            symbol: equity * 0.95 * float(weight)
-            for symbol, weight in checked["target_weights"].items()
+        symbols = sorted(set(checked['target_weights']) | {
+            str(row.get('symbol') or '').upper() for row in positions if isinstance(row, Mapping)
+        }) if isinstance(positions, list) else sorted(checked['target_weights'])
+        capture_errors = []
+        try:
+            latest = broker.get_latest_trades(symbols)
+        except Exception as exc:
+            latest = {}
+            capture_errors.append('posttrade_quote_capture_failed:'+type(exc).__name__)
+        capture_completed = dt.datetime.now(dt.timezone.utc).isoformat()
+        def evidence_value(value, path):
+            if isinstance(value, float) and not math.isfinite(value):
+                capture_errors.append('nonfinite_numeric_value:'+path)
+                return str(value)
+            if isinstance(value, Mapping):
+                return {k:evidence_value(v, path+'.'+str(k)) for k,v in value.items()}
+            if isinstance(value, list):
+                return [evidence_value(v, path+'.'+str(i)) for i,v in enumerate(value)]
+            return value
+        snapshot = {
+            'schema_version': 'caerus.lyra_broker_snapshot.v1', 'execution_session': checked['execution_session'],
+            'captured_at': capture_completed, 'capture_started_at': capture_started,
+            'capture_completed_at': capture_completed, 'source': 'ALPACA_LIVE_GET',
+            'plan_hash': checked['content_hash'], 'account_id_hash': checked['account_id_hash'],
+            'account': evidence_value({key:account.get(key) for key in
+                ('id_hash','equity','cash','buying_power','status')}, 'account'),
+            'positions': evidence_value(positions, 'positions'),
+            'fills': [r['broker_order'] for r in receipts],
+            'latest_trades': evidence_value(latest, 'latest_trades'),
+            'capture_errors': capture_errors,
         }
-        actual_values = {symbol: post.get(symbol, 0.0) * prices[symbol] for symbol in symbols}
-        errors = {symbol: actual_values[symbol] - target_values[symbol] for symbol in symbols}
-        tolerance = max(2.0, equity * 0.01)
-        unexpected = sorted(symbol for symbol, qty in post.items() if qty > 0 and symbol not in symbols)
-        cash = float(account["cash"])
-        reconciliation = {
-            "target_values_usd": target_values, "actual_values_usd": actual_values,
-            "value_errors_usd": errors, "tolerance_usd": tolerance,
-            "cash_usd": cash, "minimum_cash_reserve_usd": equity * 0.05,
-            "unexpected_positions": unexpected,
-            "status": "ALIGNED" if (
-                not unexpected
-                and all(abs(error) <= tolerance for error in errors.values())
-                and cash + 0.01 >= equity * 0.05
-            ) else "NOT_ALIGNED",
-        }
+        snapshot['content_hash'] = content_hash(snapshot)
+        _write_exclusive(session_root/'broker_posttrade_snapshot.json', snapshot)
+        reconciliation = _posttrade_reconciliation(checked, snapshot, expected_positions)
         body = {
             "schema_version": RESULT_SCHEMA, "execution_session": checked["execution_session"],
             "mode": checked["mode"],

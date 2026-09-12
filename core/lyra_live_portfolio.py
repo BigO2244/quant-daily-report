@@ -24,6 +24,9 @@ INITIALIZATION_SIGNAL = "2026-08-17"
 INITIALIZATION_TARGET_SHA256 = (
     "6c6378a534bf88cc6d8ef90e26688dd0694ed55bc4651bdbdcad177c3e118bf9"
 )
+INITIAL_FUNDED_CAPITAL = 500.0  # Historical funding, never a sizing ceiling.
+CAPITAL_POLICY = "MAX_LIVE_CAPITAL_EQUALS_CURRENT_ALPACA_ACCOUNT_NAV"
+
 LYRA_VARIANT = "h1_weekly_h6_top5"
 TARGET_SYMBOLS = frozenset({"DELL", "INTC", "MU", "STX", "WDC"})
 
@@ -206,6 +209,58 @@ def _floor_quantity(value: float) -> float:
     return float(Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_DOWN))
 
 
+def validate_broker_snapshot(snapshot, *, account_id_hash, execution_session, as_of):
+    """Validate the account-specific factual input without a model/NAV fallback."""
+    if (not isinstance(snapshot, Mapping)
+            or snapshot.get('schema_version') != 'caerus.lyra_broker_snapshot.v1'
+            or snapshot.get('source') != 'ALPACA_LIVE_GET'
+            or snapshot.get('execution_session') != execution_session
+            or snapshot.get('content_hash') != content_hash(snapshot)):
+        raise LyraLivePortfolioError('broker snapshot identity or hash differs')
+    captured = _timestamp(snapshot.get('captured_at'), label='broker snapshot captured_at')
+    completed = _timestamp(snapshot.get('capture_completed_at'), label='broker snapshot capture_completed_at')
+    started = _timestamp(snapshot.get('capture_started_at'), label='broker snapshot capture_started_at')
+    observed = _timestamp(as_of, label='broker snapshot validation time')
+    from zoneinfo import ZoneInfo
+    if (captured != completed or not 0 <= (captured-started).total_seconds() <= 120
+            or not 0 <= (observed-captured).total_seconds() <= 120
+            or captured.astimezone(ZoneInfo('America/New_York')).date().isoformat() != execution_session):
+        raise LyraLivePortfolioError('broker snapshot is stale or outside its session')
+    account = snapshot.get('account')
+    if (not isinstance(account, Mapping) or account.get('id_hash') != account_id_hash
+            or not isinstance(account_id_hash, str) or len(account_id_hash) != 64
+            or any(c not in '0123456789abcdef' for c in account_id_hash)
+            or str(account.get('status') or '').upper().split('.')[-1] != 'ACTIVE'
+            or account.get('trading_blocked') is True or account.get('account_blocked') is True):
+        raise LyraLivePortfolioError('broker snapshot account differs or is inactive')
+    values = {field: _finite(account.get(field), label=field, positive=field == 'equity')
+              for field in ('equity', 'cash', 'buying_power')}
+    if values['buying_power'] > values['equity'] + .01:
+        raise LyraLivePortfolioError('broker buying power implies leverage')
+    if snapshot.get('open_orders') != []:
+        raise LyraLivePortfolioError('broker open orders must be clear')
+    rows = snapshot.get('positions')
+    if not isinstance(rows, list):
+        raise LyraLivePortfolioError('broker snapshot positions missing')
+    positions = {}
+    for row in rows:
+        symbol = str(row.get('symbol') or '').upper()
+        if not symbol or symbol in positions:
+            raise LyraLivePortfolioError('broker snapshot positions malformed')
+        positions[symbol] = _finite(row.get('qty', row.get('quantity')), label=symbol+' quantity')
+    values['positions'] = dict(sorted(positions.items()))
+    marks = snapshot.get('latest_trades')
+    if not isinstance(marks, Mapping) or not marks:
+        raise LyraLivePortfolioError('broker snapshot price marks missing')
+    values['prices'] = {}
+    for symbol, mark in marks.items():
+        stamped = _timestamp(mark.get('timestamp'), label=symbol+' price timestamp')
+        if not 0 <= (observed-stamped).total_seconds() <= 120:
+            raise LyraLivePortfolioError(symbol+' latest trade is stale')
+        values['prices'][symbol] = _finite(mark.get('price'), label=symbol+' price', positive=True)
+    return values
+
+
 def build_portfolio_plan(
     *, owner_decision: Mapping[str, Any], raw_target_source: bytes,
     mode: str, execution_session: str, planned_at: str,
@@ -213,6 +268,7 @@ def build_portfolio_plan(
     buying_power_usd: float, positions: Sequence[Mapping[str, Any]],
     open_orders: Sequence[Mapping[str, Any]], assets: Mapping[str, Mapping[str, Any]],
     latest_prices: Mapping[str, float], deployed_sha: str,
+    broker_snapshot: Mapping[str, Any],
 ) -> dict[str, Any]:
     owner = validate_owner_decision(owner_decision)
     target = validate_target_source(
@@ -239,10 +295,17 @@ def build_portfolio_plan(
         current[symbol] = quantity
     if mode == "initialization" and any(quantity > 0 for quantity in current.values()):
         raise LyraLivePortfolioError("initialization requires an empty Live account")
+    factual = validate_broker_snapshot(broker_snapshot, account_id_hash=account_id_hash,
+        execution_session=execution_session, as_of=planned_at)
+    if (factual['equity'] != equity or factual['cash'] != cash
+            or factual['buying_power'] != buying_power or factual['positions'] != current):
+        raise LyraLivePortfolioError('plan inputs differ from factual broker snapshot')
     symbols = sorted(set(current) | set(target["weights"]))
     prices: dict[str, float] = {}
     for symbol in symbols:
         prices[symbol] = _finite(latest_prices.get(symbol), label=f"{symbol} price", positive=True)
+    if factual['prices'] != prices:
+        raise LyraLivePortfolioError('plan prices differ from factual broker snapshot')
     for symbol in target["weights"]:
         asset = assets.get(symbol)
         if (
@@ -253,8 +316,10 @@ def build_portfolio_plan(
         ):
             raise LyraLivePortfolioError(f"{symbol} is not active/tradable/fractionable")
 
-    gross_cap = equity * 0.95
-    reserve = equity * 0.05
+    ceiling = equity  # Owner policy: derived evidence, never a configurable cap.
+    sizing_basis = equity
+    gross_cap = sizing_basis * 0.95
+    reserve = equity - gross_cap
     target_values = {
         symbol: gross_cap * weight for symbol, weight in target["weights"].items()
     }
@@ -297,7 +362,8 @@ def build_portfolio_plan(
         "execution_session": execution_session, "mode": mode,
         "owner_decision_hash": owner["content_hash"],
         "target_source_hash": target["source_hash"], "account_id_hash": account_id_hash,
-        "equity_usd": equity, "cash_usd": cash, "positions": dict(sorted(current.items())),
+        "equity_usd": equity, "max_live_capital_usd": ceiling, "cash_usd": cash, "positions": dict(sorted(current.items())),
+        "capital_policy": CAPITAL_POLICY,
         "orders": orders,
     }
     seed_hash = hashlib.sha256(canonical_json(order_seed).encode()).hexdigest()
@@ -314,6 +380,11 @@ def build_portfolio_plan(
         "source_variant": target["source_variant"], "target_weights": target["weights"],
         "account_id_hash": account_id_hash, "deployed_sha": deployed_sha,
         "factual_equity_usd": equity, "factual_cash_usd": cash,
+        "capital_policy": CAPITAL_POLICY,
+        "broker_pretrade_snapshot": copy.deepcopy(dict(broker_snapshot)),
+        "broker_pretrade_snapshot_hash": broker_snapshot['content_hash'],
+        "initial_funded_capital_usd": INITIAL_FUNDED_CAPITAL,
+        "max_live_capital_usd": ceiling, "sizing_basis_usd": sizing_basis,
         "factual_buying_power_usd": buying_power,
         "maximum_gross_usd": gross_cap, "required_cash_reserve_usd": reserve,
         "expected_sell_notional_usd": expected_sell_notional,
@@ -338,6 +409,23 @@ def validate_plan(payload: Mapping[str, Any], *, owner_decision: Mapping[str, An
         raise LyraLivePortfolioError("portfolio plan content hash differs")
     if payload.get("owner_decision_hash") != owner["content_hash"]:
         raise LyraLivePortfolioError("portfolio plan owner lineage differs")
+    equity = _finite(payload.get("factual_equity_usd"), label="equity", positive=True)
+    if payload.get('capital_policy') != CAPITAL_POLICY:
+        raise LyraLivePortfolioError('portfolio plan capital policy differs')
+    factual = validate_broker_snapshot(payload.get('broker_pretrade_snapshot'),
+        account_id_hash=payload.get('account_id_hash'), execution_session=payload.get('execution_session'),
+        as_of=payload.get('planned_at'))
+    if (payload.get('broker_pretrade_snapshot_hash') != payload['broker_pretrade_snapshot']['content_hash']
+            or factual['equity'] != equity or factual['cash'] != payload.get('factual_cash_usd')
+            or factual['buying_power'] != payload.get('factual_buying_power_usd')
+            or factual['positions'] != payload.get('starting_positions')
+            or factual['prices'] != payload.get('latest_prices')):
+        raise LyraLivePortfolioError('portfolio plan differs from factual broker snapshot')
+    basis = equity
+    for field, expected in {"max_live_capital_usd": equity, "sizing_basis_usd": basis, "maximum_gross_usd": basis * .95,
+                            "required_cash_reserve_usd": equity - basis * .95}.items():
+        if abs(_finite(payload.get(field), label=field) - expected) > 1e-8:
+            raise LyraLivePortfolioError(f"portfolio plan {field} differs from governed NAV")
     orders = payload.get("orders")
     if not isinstance(orders, list) or len(orders) > int(payload.get("maximum_orders", -1)):
         raise LyraLivePortfolioError("portfolio plan order count differs")

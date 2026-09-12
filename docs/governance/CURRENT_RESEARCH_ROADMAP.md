@@ -1,3 +1,5 @@
+> **September 11 remediation priority:** NAV governance first, Execution Certification, complete Shadow observability, and the three-mandate Atlas research program. Unrelated work is backlogged. Local implementation does not change deployed capital, paused Live state or promotion authority. [Current contract](REMEDIATION_20260911.md).
+
 # CURRENT RESEARCH ROADMAP — Caerus Source of Truth
 
 > **Aquila owner decision — 2026-09-08.** Brett authorized activation of Caerus Aquila in the existing Alpaca PAPER account at 50%. This revision configures an experimental TOP10_EQUAL monthly sleeve: 50% Aquila,45% Orion,5% cash at formation; Aquila shares remain fixed between formations. Orion retains the account risk-history identity. Deployment receipts determine runtime activation, and the existing emergency cooldown still controls buying. This authorization does not establish alpha or change Lyra Live. See `docs/governance/AQUILA_PAPER.md` for the contract.

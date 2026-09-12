@@ -1,3 +1,5 @@
+> **September 11 remediation priority:** NAV governance first, Execution Certification, complete Shadow observability, and the three-mandate Atlas research program. Unrelated work is backlogged. Local implementation does not change deployed capital, paused Live state or promotion authority. [Current contract](docs/governance/REMEDIATION_20260911.md).
+
 # Alpha Stack
 
 > **Owner eligibility amendment — 2026-09-09.** Brett excludes AZO from prospective Aquila eligibility. The collector retains full membership but omits this explicitly excluded issuer before quote requests; every remaining eligible issuer must validate. Existing evidence/backtests remain unchanged. See `docs/governance/AQUILA_PAPER.md`; deployment receipts govern activation.

@@ -100,3 +100,16 @@ If these conflict, stop and reconcile before changing production-adjacent code.
   commits land in seven days, an execution incident occurs, or the same workflow
   requires multiple hot fixes. Link each commit to operational impact,
   validation, rollback, and canonical documents.
+
+## September 11 remediation source update
+
+See [the owner-authorized remediation contract](governance/REMEDIATION_20260911.md).
+The close-chain source now generates certification, parity and Shadow health
+reports unconditionally; any failed evidence gate returns nonzero. This source
+change is not deployed by the implementation task. Live remains paused. Brett
+has specified that MAX_LIVE_CAPITAL equals current Alpaca account NAV.
+Alpaca is canonical actual-trading truth per account; no deployment, reactivation
+or promotion is authorized by this local source update. Both submission wrappers
+contain the new pretrade parity guard in source.
+Complete normalized pretrade inputs and deployment validation remain required;
+diagnostics do not grant execution authority.

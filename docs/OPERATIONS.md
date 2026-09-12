@@ -389,3 +389,16 @@ the rejected pair, use a fresh coherent broker capture, rebuild ownership and
 valuation, and validate before using them. The 05:00 admission policy and
 09:35 prohibition on precompute rebuilding remain binding. Offline replay
 success does not establish successful scheduled operation.
+
+## September 11 remediation source update
+
+See [the owner-authorized remediation contract](governance/REMEDIATION_20260911.md).
+The close-chain source now generates certification, parity and Shadow health
+reports unconditionally; any failed evidence gate returns nonzero. This source
+change is not deployed by the implementation task. Live remains paused. Brett
+has specified that MAX_LIVE_CAPITAL equals current Alpaca account NAV.
+Alpaca is canonical actual-trading truth per account; no deployment, reactivation
+or promotion is authorized by this local source update. Both submission wrappers
+contain the new pretrade parity guard in source.
+Complete normalized pretrade inputs and deployment validation remain required;
+diagnostics do not grant execution authority.

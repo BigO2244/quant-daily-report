@@ -3981,6 +3981,12 @@ def test_fresh_broker_decision_seals_transition_before_executor(orion_registry, 
     authorized = _finalize_direct_authorization(regime_state_root, authorized)
     exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
     assert authorized["execution_authority"] == "exact_execution_plan_only"
+    from core.execution_certification import canonical_hash, decision_nav_provenance
+    assert exact.source_artifact_hashes['broker_state_at_decision'] == canonical_hash(
+        authorized['broker_state_at_decision'])
+    # A bounded drill is not evidence of full-account PAPER sizing.
+    assert not decision_nav_provenance(plan=exact.to_dict(), payload=authorized,
+                                       trade_date='2026-08-12')
     assert authorized["precompute_execution_authority"] is False
     assert [row["side"] for row in exact.orders] == ["SELL", "BUY"]
     assert [row["symbol"] for row in exact.orders] == ["OLD", "AAPL"]
@@ -4013,7 +4019,7 @@ def test_fresh_broker_decision_seals_transition_before_executor(orion_registry, 
     )
 
 
-def test_authorizer_sizes_target_from_full_current_broker_account(orion_registry, tmp_path: Path):
+def test_authorizer_sizes_target_from_full_current_broker_account(orion_registry, tmp_path: Path, monkeypatch):
     broker = TrackingPaperBroker()
     broker.cash = 1100.0
     source = tmp_path / "full-account-target-plan.json"
@@ -4072,6 +4078,9 @@ def test_authorizer_sizes_target_from_full_current_broker_account(orion_registry
     exact = exact_execution_plan_from_dict(authorized["exact_execution_plan"])
 
     assert exact.portfolio_nav == pytest.approx(1200.0)
+    from core.execution_certification import decision_nav_provenance
+    assert decision_nav_provenance(plan=exact.to_dict(), payload=authorized,
+                                   trade_date='2026-08-12')
     assert exact.risk_state["decision_nav_reconstruction"][
         "authoritative_account_nav"
     ] == pytest.approx(1200.0)
@@ -4079,6 +4088,13 @@ def test_authorizer_sizes_target_from_full_current_broker_account(orion_registry
     assert exact.buy_orders[0]["quantity"] == pytest.approx(23.0)
     assert exact.constraints["capital_cap_usd"] == pytest.approx(1200.0)
 
+    import core.paper_live_parity as parity
+    parity_inputs = []
+    original_parity = parity.require_pretrade_parity
+    def capture_parity(**kwargs):
+        parity_inputs.append(kwargs)
+        return original_parity(**kwargs)
+    monkeypatch.setattr(parity, 'require_pretrade_parity', capture_parity)
     result = run_live_pilot(
         plan=authorized,
         broker=broker,
@@ -4095,6 +4111,9 @@ def test_authorizer_sizes_target_from_full_current_broker_account(orion_registry
         ).read_text()
     )
     assert result["terminal_status"] == "SUBMITTED"
+    assert len(parity_inputs) == 1
+    assert parity_inputs[0]['actual_paper_plan'] == exact.to_dict()
+    assert parity_inputs[0]['plan_hash'] == exact.content_hash
     assert result["execution_target_attainment_status"] in {
         "OK_TARGET_ATTAINED",
         "OK_NEAREST_FEASIBLE",

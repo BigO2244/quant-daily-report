@@ -319,3 +319,16 @@ historical rows. Use PAPER-only snapshot capture; the broker-ledger cron wrapper
 also reads Live and must not be used for a PAPER-only activation operation.
 Rollback source with a scoped git revert; retain immutable new receipts and
 opening evidence. Never relabel historical returns or delete fills on rollback.
+
+## September 11 remediation source update
+
+See [the owner-authorized remediation contract](governance/REMEDIATION_20260911.md).
+The close-chain source now generates certification, parity and Shadow health
+reports unconditionally; any failed evidence gate returns nonzero. This source
+change is not deployed by the implementation task. Live remains paused. Brett
+has specified that MAX_LIVE_CAPITAL equals current Alpaca account NAV.
+Alpaca is canonical actual-trading truth per account; no deployment, reactivation
+or promotion is authorized by this local source update. Both submission wrappers
+contain the new pretrade parity guard in source.
+Complete normalized pretrade inputs and deployment validation remain required;
+diagnostics do not grant execution authority.

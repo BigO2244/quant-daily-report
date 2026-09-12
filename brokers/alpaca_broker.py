@@ -1125,6 +1125,7 @@ class AlpacaBroker:
             "order_type", "time_in_force", "extended_hours",
             "fractional_shares", "factual_equity_usd", "factual_cash_usd",
             "factual_buying_power_usd", "maximum_gross_usd",
+            "max_live_capital_usd", "sizing_basis_usd",
             "required_cash_reserve_usd", "maximum_buy_notional_usd",
             "total_buy_notional_usd", "projected_gross_usd",
             "content_hash", "capability_signature",
@@ -1164,6 +1165,8 @@ class AlpacaBroker:
             raise RuntimeError("Lyra Live deployment pin is invalid")
         try:
             equity = float(mutation_context["factual_equity_usd"])
+            ceiling = float(mutation_context["max_live_capital_usd"])
+            basis = float(mutation_context["sizing_basis_usd"])
             cash = float(mutation_context["factual_cash_usd"])
             buying_power = float(mutation_context["factual_buying_power_usd"])
             gross_cap = float(mutation_context["maximum_gross_usd"])
@@ -1176,14 +1179,15 @@ class AlpacaBroker:
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError("Lyra Live capital context is invalid") from exc
         if not all(math.isfinite(value) for value in (
-            equity, cash, buying_power, gross_cap, reserve, maximum_buy,
+            equity, ceiling, basis, cash, buying_power, gross_cap, reserve, maximum_buy,
             total_buy, projected_gross,
         )):
             raise RuntimeError("Lyra Live capital context is non-finite")
         if (
             equity <= 0 or cash < 0 or buying_power < 0 or buying_power > equity + 0.01
-            or abs(gross_cap - equity * 0.95) > 1e-8
-            or abs(reserve - equity * 0.05) > 1e-8
+            or ceiling <= 0 or abs(basis - min(equity, ceiling)) > 1e-8
+            or abs(gross_cap - basis * 0.95) > 1e-8
+            or abs(reserve - (equity - basis * 0.95)) > 1e-8
             or total_buy > maximum_buy + 1e-9
             or projected_gross > gross_cap + 0.01
             or maximum_orders not in {5, 10}

@@ -4122,6 +4122,11 @@ def _run_exact_execution_path(
             )
 
     try:
+        if not dry_run:
+            from core.paper_live_parity import require_pretrade_parity
+            require_pretrade_parity(repo_root=REPO_ROOT, trade_date=trade_date,
+                                   lane="paper", plan_hash=bound.content_hash,
+                                   actual_paper_plan=bound.to_dict())
         outcome = execute_exact_plan(
             plan_payload=package,
             broker=broker,

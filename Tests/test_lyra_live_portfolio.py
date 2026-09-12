@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import sys
 import types
+import copy
 from pathlib import Path
 
 import pytest
@@ -43,7 +44,30 @@ def _args(**changes):
         deployed_sha="b" * 40,
     )
     base.update(changes)
+    if 'broker_snapshot' not in changes:
+        snapshot = {'schema_version': 'caerus.lyra_broker_snapshot.v1', 'source': 'ALPACA_LIVE_GET',
+            'execution_session': base['execution_session'], 'captured_at': base['planned_at'],
+            'capture_started_at': base['planned_at'], 'capture_completed_at': base['planned_at'],
+            'account': {'id_hash': base['account_id_hash'], 'equity': base['equity_usd'],
+                        'cash': base['cash_usd'], 'buying_power': base['buying_power_usd'], 'status': 'ACTIVE'},
+            'positions': copy.deepcopy(base['positions']), 'open_orders': copy.deepcopy(base['open_orders']),
+            'latest_trades': {symbol: {'price': price, 'timestamp': base['planned_at']}
+                              for symbol, price in base['latest_prices'].items()}}
+        snapshot['content_hash'] = subject.content_hash(snapshot)
+        base['broker_snapshot'] = snapshot
     return base
+
+
+@pytest.fixture
+def execution_clock(monkeypatch):
+    import core.lyra_live_execution as execution
+    captured = dt.datetime.fromisoformat('2026-08-25T13:36:01+00:00')
+    class Clock(dt.datetime):
+        @classmethod
+        def now(cls, tz=None): return captured
+    monkeypatch.setattr(execution, 'dt', types.SimpleNamespace(datetime=Clock,
+        timezone=dt.timezone, timedelta=dt.timedelta, time=dt.time))
+    return captured
 
 
 def test_owner_decision_is_exact_and_hashed():
@@ -102,7 +126,9 @@ def test_dry_run_persists_intent_without_broker_write(tmp_path):
     assert (tmp_path / "2026-08-25" / "intent.json").exists()
 
 
-def test_full_fake_fill_path_reconciles_scaled_target(tmp_path):
+@pytest.mark.parametrize('corruption', [None, 'nav', 'market_value', 'quantity', 'missing_marks',
+                                      'missing_market_value', 'duplicate', 'stale_marks', 'nonfinite_market_value'])
+def test_full_fake_fill_path_reconciles_scaled_target(tmp_path, execution_clock, corruption):
     plan = subject.build_portfolio_plan(**_args())
 
     class Broker:
@@ -130,22 +156,43 @@ def test_full_fake_fill_path_reconciles_scaled_target(tmp_path):
             raise AssertionError("filled market receipt should not need polling")
 
         def get_account(self):
-            return {"equity": "460.90", "cash": str(self.cash)}
+            equity = '461.90' if corruption == 'nav' and len(self.positions) == 5 else '460.90'
+            return {"id_hash": 'a'*64, 'status': 'ACTIVE', "equity": equity, "cash": str(self.cash)}
 
         def get_positions(self):
-            return [{"symbol": symbol, "qty": str(quantity)} for symbol, quantity in self.positions.items()]
+            rows = [{"symbol": symbol, "qty": str(quantity), 'market_value': str(quantity*100),
+                     'current_price':'100'} for symbol, quantity in self.positions.items()]
+            if len(rows) == 5:
+                if corruption == 'quantity': rows[0]['qty'] = str(float(rows[0]['qty'])+.001)
+                elif corruption == 'market_value': rows[0]['market_value'] = str(float(rows[0]['market_value'])+1)
+                elif corruption == 'missing_market_value': rows[0].pop('market_value')
+                elif corruption == 'duplicate': rows.append(dict(rows[0]))
+                elif corruption == 'nonfinite_market_value': rows[0]['market_value'] = 'nan'
+            return rows
 
         def get_latest_trades(self, symbols):
-            return {symbol: {"price": 100.0} for symbol in symbols}
+            stamp = execution_clock-dt.timedelta(seconds=180) if corruption == 'stale_marks' else execution_clock
+            rows = {symbol: {"price": 100.0, 'timestamp':stamp.isoformat()} for symbol in symbols}
+            if corruption == 'missing_marks': rows.pop(symbols[0])
+            return rows
 
     result = execute_portfolio_plan(
         owner_decision=OWNER, plan=plan, broker=Broker(), state_root=tmp_path,
         executed_at="2026-08-25T09:36:00-04:00", submit_enabled=True,
     )
-    assert result["status"] == "COMPLETE"
+    assert result["status"] == ('COMPLETE' if corruption is None else 'BLOCKED_RECONCILIATION')
     assert result["broker_write_performed"] is True
     assert len(result["submitted_orders"]) == 5
-    assert result["posttrade_reconciliation"]["status"] == "ALIGNED"
+    assert result["posttrade_reconciliation"]["status"] == ('ALIGNED' if corruption is None else 'NOT_ALIGNED')
+    snapshot = json.loads((tmp_path/'2026-08-25/broker_posttrade_snapshot.json').read_text())
+    assert snapshot['content_hash'] == subject.content_hash(snapshot)
+    assert snapshot['capture_started_at'] == snapshot['capture_completed_at'] == execution_clock.isoformat()
+    assert snapshot['fills'] and snapshot['positions'] and snapshot['latest_trades']
+    if corruption is None:
+        assert abs(result['posttrade_reconciliation']['account_nav_reconciliation']['delta_usd']) <= .01
+        assert result['posttrade_reconciliation']['quantity_deltas'] == {}
+    else:
+        assert result['posttrade_reconciliation']['reasons']
 
 
 def test_initialization_is_hash_and_symbol_pinned(monkeypatch):
@@ -276,3 +323,182 @@ def test_cron_contains_one_time_initialization_and_tuesday_cadence():
     assert WEEKLY_LINE in installed
     assert render(installed, install=True) == installed
     assert render(installed, install=False) == ""
+
+
+@pytest.mark.parametrize("nav", [300, 463.28, 517.42, 750, 2000])
+def test_governed_current_nav_numeric_proof(nav):
+    plan = subject.build_portfolio_plan(**_args(equity_usd=nav, cash_usd=nav,
+        buying_power_usd=nav))
+    assert plan['capital_policy'] == subject.CAPITAL_POLICY
+    assert plan['max_live_capital_usd'] == plan["sizing_basis_usd"] == nav
+    assert plan["maximum_gross_usd"] == pytest.approx(nav * .95)
+    assert plan["required_cash_reserve_usd"] == pytest.approx(nav * .05)
+    assert plan["total_buy_notional_usd"] <= nav * .95
+    assert subject.validate_plan(plan, owner_decision=OWNER) == plan
+
+
+@pytest.mark.parametrize("nav", [None, 0, -1, float("nan"), float("inf"), True])
+def test_missing_invalid_broker_nav_fails_closed(nav):
+    args = _args()
+    args['equity_usd'] = nav
+    with pytest.raises(subject.LyraLivePortfolioError):
+        subject.build_portfolio_plan(**args)
+
+
+def test_rehashed_wrong_sizing_basis_rejected():
+    plan = subject.build_portfolio_plan(**_args())
+    plan["sizing_basis_usd"] = 500
+    plan["content_hash"] = subject.content_hash(plan)
+    with pytest.raises(subject.LyraLivePortfolioError, match="governed NAV"):
+        subject.validate_plan(plan, owner_decision=OWNER)
+
+
+def test_short_confirmed_cash_stops_before_buy(tmp_path):
+    plan = subject.build_portfolio_plan(**_args())
+    class Broker:
+        def find_order_by_client_id(self, _): return None
+        def get_account(self): return {"id_hash": 'a'*64, 'status': 'ACTIVE', "cash": "23", "equity": "460.90"}
+        def get_positions(self): return []
+        def submit_lyra_live_portfolio_market_order(self, **_):
+            raise AssertionError("cash gate must prevent submission")
+    with pytest.raises(RuntimeError, match="saved plan broker NAV/cash"):
+        execute_portfolio_plan(owner_decision=OWNER, plan=plan, broker=Broker(),
+            state_root=tmp_path, executed_at="2026-08-25T13:35:00+00:00", submit_enabled=True)
+
+
+@pytest.mark.parametrize('nav,cash,quantity', [(700, 23, 6.77), (300, 15, 2.85),
+                                             (1000, 600, 4.), (300, 0, 3.)])
+def test_gains_losses_deposits_withdrawals_use_whole_live_nav(nav, cash, quantity):
+    plan = subject.build_portfolio_plan(**_args(equity_usd=nav, cash_usd=cash,
+        buying_power_usd=nav, positions=[{'symbol': 'AAA', 'qty': quantity}]))
+    assert plan['max_live_capital_usd'] == plan['sizing_basis_usd'] == nav
+    assert plan['maximum_gross_usd'] == pytest.approx(nav*.95)
+    assert plan['required_cash_reserve_usd'] == pytest.approx(nav*.05)
+    assert plan['projected_gross_usd'] <= nav*.95+.01
+
+
+def test_fixed_ceiling_parameter_is_not_an_authority():
+    with pytest.raises(TypeError, match='max_live_capital_usd'):
+        subject.build_portfolio_plan(**_args(), max_live_capital_usd=500)
+
+
+@pytest.mark.parametrize('old_policy', [None, 'MIN_BROKER_NAV_MAX_LIVE_CAPITAL', subject.CAPITAL_POLICY])
+def test_rehashed_old_fixed_cap_plan_rejected(old_policy):
+    plan = subject.build_portfolio_plan(**_args(equity_usd=750, cash_usd=750, buying_power_usd=750))
+    plan.update(capital_policy=old_policy, max_live_capital_usd=500, sizing_basis_usd=500,
+                maximum_gross_usd=475, required_cash_reserve_usd=275)
+    plan['content_hash'] = subject.content_hash(plan)
+    with pytest.raises(subject.LyraLivePortfolioError, match='capital policy|governed NAV'):
+        subject.validate_plan(plan, owner_decision=OWNER)
+
+
+@pytest.mark.parametrize('defect', ['missing', 'source', 'account', 'capture', 'future', 'old',
+    'quote_missing', 'quote_stale', 'snapshot_nav', 'snapshot_boolean', 'positions'])
+def test_snapshot_defects_fail_even_if_rehashed(defect):
+    args = _args()
+    snapshot = args['broker_snapshot']
+    if defect == 'missing': args['broker_snapshot'] = None
+    elif defect == 'source': snapshot['source'] = 'SHADOW_NAV'
+    elif defect == 'account': snapshot['account']['id_hash'] = 'c'*64
+    elif defect == 'capture': snapshot['capture_started_at'] = '2026-08-25T09:30:00-04:00'
+    elif defect == 'future': snapshot['captured_at'] = snapshot['capture_completed_at'] = '2026-08-25T09:36:00-04:00'
+    elif defect == 'old': snapshot['captured_at'] = snapshot['capture_completed_at'] = snapshot['capture_started_at'] = '2026-08-25T09:30:00-04:00'
+    elif defect == 'quote_missing': snapshot['latest_trades']['AAA'].pop('timestamp')
+    elif defect == 'quote_stale': snapshot['latest_trades']['AAA']['timestamp'] = '2026-08-25T09:30:00-04:00'
+    elif defect == 'snapshot_nav': snapshot['account']['equity'] = 500
+    elif defect == 'snapshot_boolean': snapshot['account']['equity'] = True
+    elif defect == 'positions': snapshot['positions'] = [{'symbol': 'AAA', 'qty': 1}]
+    snapshot['content_hash'] = subject.content_hash(snapshot)
+    with pytest.raises(subject.LyraLivePortfolioError):
+        subject.build_portfolio_plan(**args)
+
+
+@pytest.mark.parametrize('fresh', [{'id_hash': 'c'*64}, {}, {'status': 'INACTIVE'},
+    {'trading_blocked': True}, {'account_blocked': True}, {'equity': True}, {'equity': float('nan')}])
+def test_new_submission_rejects_wrong_account_status_or_nav(tmp_path, fresh):
+    plan = subject.build_portfolio_plan(**_args())
+    class Broker:
+        def find_order_by_client_id(self, _): return None
+        def get_account(self):
+            if not fresh: return {'equity':460.9, 'cash':460.9, 'status':'ACTIVE'}
+            return {'id_hash':'a'*64, 'equity':460.9, 'cash':460.9, 'status':'ACTIVE', **fresh}
+        def get_positions(self): return []
+        def submit_lyra_live_portfolio_market_order(self, **_): raise AssertionError('must not submit')
+    with pytest.raises((RuntimeError, subject.LyraLivePortfolioError)):
+        execute_portfolio_plan(owner_decision=OWNER, plan=plan, broker=Broker(), state_root=tmp_path,
+            executed_at='2026-08-25T09:35:01-04:00', submit_enabled=True)
+
+
+def test_stale_snapshot_stops_before_new_submission_account_read(tmp_path):
+    plan = subject.build_portfolio_plan(**_args())
+    class Broker:
+        def find_order_by_client_id(self, _): return None
+        def get_account(self): raise AssertionError('snapshot must block new submissions first')
+    with pytest.raises(subject.LyraLivePortfolioError, match='stale'):
+        execute_portfolio_plan(owner_decision=OWNER, plan=plan, broker=Broker(), state_root=tmp_path,
+            executed_at='2026-08-25T09:38:00-04:00', submit_enabled=True)
+
+
+@pytest.mark.parametrize('identity', [None, 'c'*64])
+def test_posttrade_reconciliation_rejects_other_account(tmp_path, identity, execution_clock):
+    plan = subject.build_portfolio_plan(**_args(equity_usd=500, cash_usd=25, buying_power_usd=500,
+        positions=[{'symbol': s, 'qty':.95} for s in ['AAA','BBB','CCC','DDD','EEE']]))
+    assert plan['orders'] == []
+    class Broker:
+        def get_account(self): return {'id_hash':identity,'equity':500,'cash':25}
+        def get_positions(self): return []
+        def get_latest_trades(self, symbols): return {}
+    result = execute_portfolio_plan(owner_decision=OWNER, plan=plan, broker=Broker(), state_root=tmp_path,
+        executed_at='2026-08-25T09:35:01-04:00', submit_enabled=True)
+    assert result['status'] == 'BLOCKED_RECONCILIATION'
+    assert 'posttrade broker account identity' in result['posttrade_reconciliation']['reasons'][0]
+
+
+@pytest.mark.parametrize('nav', [True, float('nan'), 0])
+def test_posttrade_reconciliation_rejects_invalid_nav(tmp_path, nav, execution_clock):
+    positions = [{'symbol': s, 'qty':.95} for s in ['AAA','BBB','CCC','DDD','EEE']]
+    plan = subject.build_portfolio_plan(**_args(equity_usd=500, cash_usd=25, buying_power_usd=500,
+                                               positions=positions))
+    class Broker:
+        def get_account(self): return {'id_hash':'a'*64,'equity':nav,'cash':25}
+        def get_positions(self): return positions
+        def get_latest_trades(self, symbols): return {s:{'price':100} for s in symbols}
+    result = execute_portfolio_plan(owner_decision=OWNER, plan=plan, broker=Broker(), state_root=tmp_path,
+        executed_at='2026-08-25T09:35:01-04:00', submit_enabled=True)
+    assert result['status'] == 'BLOCKED_RECONCILIATION'
+    assert result['posttrade_reconciliation']['reasons']
+
+
+@pytest.mark.parametrize('legacy_env', [None, '500', 'not-a-number'])
+def test_runtime_ignores_legacy_env_and_preserves_capture_timestamps(tmp_path, monkeypatch, legacy_env):
+    import scripts.run_lyra_live_portfolio as runtime
+    original_datetime = dt.datetime
+    start = original_datetime.fromisoformat('2026-08-25T13:35:00+00:00')
+    ticks = iter([start, start+dt.timedelta(seconds=2), start+dt.timedelta(seconds=3)])
+    class Clock(original_datetime):
+        @classmethod
+        def now(cls, tz=None): return next(ticks)
+    monkeypatch.setattr(runtime, 'dt', types.SimpleNamespace(datetime=Clock, timezone=dt.timezone))
+    monkeypatch.setattr(runtime, '_require_runtime', lambda **kwargs: None)
+    monkeypatch.setattr(runtime.subprocess, 'run', lambda *args, **kwargs: types.SimpleNamespace(stdout='b'*40))
+    class Broker:
+        paper = False
+        base_url = 'https://api.alpaca.markets'
+        def get_account(self): return {'id_hash':'a'*64,'equity':750.,'cash':750.,'buying_power':750.,'status':'ACTIVE'}
+        def get_positions(self): return []
+        def list_orders(self, **kwargs): return []
+        def get_asset(self, symbol): return {'status':'active','tradable':True,'fractionable':True}
+        def get_latest_trades(self, symbols): return {s:{'price':100.,'timestamp':start.isoformat()} for s in symbols}
+    monkeypatch.setattr(runtime.AlpacaBroker, 'from_env', lambda: Broker())
+    if legacy_env is None: monkeypatch.delenv('MAX_LIVE_CAPITAL', raising=False)
+    else: monkeypatch.setenv('MAX_LIVE_CAPITAL', legacy_env)
+    target = tmp_path/'target.json'; target.write_bytes(_target())
+    owner = tmp_path/'owner.json'; owner.write_text(json.dumps(OWNER))
+    result = runtime.run(mode='recurring', execution_session='2026-08-25', target_source_path=target,
+        owner_decision_path=owner, state_root=tmp_path/'state', submit=False, now=start)
+    plan = result['plan']; snapshot = plan['broker_pretrade_snapshot']
+    assert plan['max_live_capital_usd'] == plan['sizing_basis_usd'] == 750
+    assert snapshot['capture_started_at'] == start.isoformat()
+    assert snapshot['capture_completed_at'] == (start+dt.timedelta(seconds=2)).isoformat()
+    assert plan['planned_at'] == (start+dt.timedelta(seconds=3)).isoformat()
+    assert snapshot['latest_trades']['AAA']['timestamp'] == start.isoformat()

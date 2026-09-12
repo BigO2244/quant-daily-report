@@ -58,12 +58,17 @@ def run_close_chain(
         escalation_command.append("--send")
     escalation = subprocess.run(escalation_command, cwd=root, check=False)
 
+    remediation = subprocess.run(
+        [python, "scripts/build_remediation_reports.py", "--repo-root", str(root),
+         "--trade-date", trade_date], cwd=root, check=False,
+    )
+
     if history.returncode != 0:
         returncode = history.returncode
     elif audit_returncode not in {None, 0}:
         returncode = audit_returncode
     else:
-        returncode = escalation.returncode
+        returncode = escalation.returncode or remediation.returncode
 
     result: dict[str, int | None | str] = {
         "schema_version": "caerus.portfolio_history_close.v1",
@@ -71,6 +76,7 @@ def run_close_chain(
         "portfolio_history_returncode": history.returncode,
         "daily_audit_returncode": audit_returncode,
         "escalation_returncode": escalation.returncode,
+        "remediation_returncode": remediation.returncode,
         "returncode": returncode,
     }
     print(json.dumps(result, sort_keys=True))

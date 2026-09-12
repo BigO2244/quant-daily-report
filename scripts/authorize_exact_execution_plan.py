@@ -1876,6 +1876,9 @@ def authorize_exact_execution_plan(
         market_state_evidence
     )
     source_hashes: dict[str, str] = {}
+    # Bind the original Decision input, not the later submission snapshot.
+    # Existing sealed handoffs retain their original lineage when recovered.
+    source_hashes["broker_state_at_decision"] = _canonical_hash(snapshot)
     if plan_path is not None and plan_path.exists():
         source_hashes[str(plan_path)] = _hash_file(plan_path)
     decision_source = plan.get("decision_source_artifact")

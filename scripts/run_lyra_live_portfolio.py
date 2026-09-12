@@ -141,9 +141,10 @@ def run(
     broker = AlpacaBroker.from_env()
     if broker.paper or str(broker.base_url).rstrip("/") != "https://api.alpaca.markets":
         raise RuntimeError("Lyra Live factual read requires canonical Alpaca Live")
+    capture_started_at = dt.datetime.now(dt.timezone.utc).isoformat()
     account = broker.get_account()
     if (
-        not str(account.get("status") or "").upper().endswith("ACTIVE")
+        str(account.get("status") or "").upper().split('.')[-1] != "ACTIVE"
         or account.get("trading_blocked") is True
         or account.get("account_blocked") is True
     ):
@@ -153,6 +154,7 @@ def run(
     symbols = sorted(set(target["weights"]) | {str(row.get("symbol") or "").upper() for row in positions})
     assets = {symbol: broker.get_asset(symbol) for symbol in target["weights"]}
     latest = broker.get_latest_trades(symbols)
+    capture_completed_at = dt.datetime.now(dt.timezone.utc).isoformat()
     prices = {symbol: float(latest[symbol]["price"]) for symbol in symbols}
     deployed_repo = Path(os.environ.get("CAERUS_LYRA_LIVE_DEPLOYED_REPO", str(ROOT))).resolve()
     if submit and deployed_repo != ROOT.resolve():
@@ -161,10 +163,20 @@ def run(
         ["git", "rev-parse", "HEAD"], cwd=deployed_repo, check=True,
         capture_output=True, text=True,
     ).stdout.strip()
-    planned_at = (
-        observed.isoformat(timespec="seconds") if observed.date().isoformat() == execution_session
-        else f"{execution_session}T09:35:00-04:00"
-    )
+    planned_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    snapshot = {
+        "schema_version": "caerus.lyra_broker_snapshot.v1",
+        "captured_at": capture_completed_at, "capture_started_at": capture_started_at,
+        "capture_completed_at": capture_completed_at,
+        "source": "ALPACA_LIVE_GET", "execution_session": execution_session,
+        "account": {key: account.get(key) for key in
+                    ("id_hash", "equity", "cash", "buying_power", "status", "trading_blocked", "account_blocked")},
+        "positions": positions, "open_orders": open_orders,
+        "latest_trades": {symbol: {'price': latest[symbol].get('price'),
+                                    'timestamp': latest[symbol].get('timestamp')} for symbol in symbols},
+    }
+    snapshot["content_hash"] = content_hash(snapshot)
+    _write_exclusive(session_root / ("broker_pretrade_snapshot-" + snapshot["content_hash"] + ".json"), snapshot)
     plan_path = session_root / "plan.json"
     if plan_path.exists():
         plan = validate_plan(_read_json(plan_path), owner_decision=owner)
@@ -181,10 +193,11 @@ def run(
             owner_decision=owner, raw_target_source=raw_target, mode=mode,
             execution_session=execution_session, planned_at=planned_at,
             account_id_hash=str(account.get("id_hash") or ""),
-            equity_usd=float(account["equity"]), cash_usd=float(account["cash"]),
-            buying_power_usd=float(account["buying_power"]), positions=positions,
+            equity_usd=account["equity"], cash_usd=account["cash"],
+            buying_power_usd=account["buying_power"], positions=positions,
             open_orders=open_orders, assets=assets, latest_prices=prices,
             deployed_sha=deployed_sha,
+            broker_snapshot=snapshot,
         )
         _write_exclusive(plan_path, plan)
     if submit:
@@ -198,9 +211,13 @@ def run(
             stamp = dt.datetime.fromisoformat(str(latest[symbol]["timestamp"]).replace("Z", "+00:00"))
             if abs((observed - stamp.astimezone(observed.tzinfo)).total_seconds()) > 120:
                 raise RuntimeError(f"{symbol} latest trade is stale")
+    if submit:
+        from core.paper_live_parity import require_pretrade_parity
+        require_pretrade_parity(repo_root=ROOT, trade_date=execution_session,
+                               lane="live", plan_hash=plan["content_hash"])
     result = execute_portfolio_plan(
         owner_decision=owner, plan=plan, broker=broker,
-        state_root=state_root, executed_at=observed.isoformat(timespec="seconds"),
+        state_root=state_root, executed_at=(now or dt.datetime.now(dt.timezone.utc)).isoformat(),
         submit_enabled=submit,
     )
     return {"plan": plan, "execution": result}
