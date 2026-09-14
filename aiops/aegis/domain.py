@@ -7,6 +7,16 @@ import json
 from enum import Enum
 from typing import Any
 
+ENTITY_TYPES = {"DOMAIN", "PROGRAM", "INITIATIVE", "MISSION", "TASK", "ARTIFACT", "DECISION", "EXTERNAL_RECORD", "DATASET", "MODEL"}
+RELATIONSHIP_TYPES = {
+    "PARENT_OF", "DEPENDS_ON", "BLOCKED_BY", "IMPLEMENTS", "VALIDATES", "REVIEWS",
+    "PRODUCES", "CONSUMES", "DERIVED_FROM", "SUPERSEDES", "DUPLICATES",
+    "RELATED_TO", "REQUIRES_DECISION", "RESOLVED_BY", "TRACKED_BY_PR",
+    "TRACKED_BY_ISSUE", "USES_DATASET", "EVALUATES_MODEL",
+}
+ACYCLIC_RELATIONSHIPS = {"PARENT_OF", "DEPENDS_ON", "DERIVED_FROM", "SUPERSEDES"}
+CERTAINTY_CLASSES = {"HIGH", "MEDIUM", "LOW", "INSUFFICIENT_EVIDENCE"}
+
 
 class MissionState(str, Enum):
     DRAFT = "DRAFT"
@@ -73,3 +83,7 @@ def validate_transition(current: str, target: str, transitions: dict[Enum, set[E
         raise ValueError(f"Unknown lifecycle state: {current!r} -> {target!r}") from exc
     if requested not in allowed:
         raise ValueError(f"Invalid lifecycle transition: {current} -> {target}")
+
+
+def normalize_text(value: str) -> str:
+    return " ".join(value.casefold().split())

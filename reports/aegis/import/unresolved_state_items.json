@@ -1,0 +1,8 @@
+[
+  {
+    "entity_id": "entity_aa2fcc888155adc66b6c",
+    "name": "Atlas",
+    "reason": "No current repository evidence found at configured evidence paths",
+    "review_required": true
+  }
+]

@@ -1,0 +1,15 @@
+[
+  {
+    "category": "PROBABLE_DUPLICATE",
+    "entity_id": "entity_9a348f0e3295a1ffa07a",
+    "evidence": {
+      "jaccard": 0.75,
+      "threshold": 0.75
+    },
+    "explanation": "Token similarity exceeded deterministic threshold",
+    "id": "recon_16c0fe641fda33e0dcc7",
+    "recommended_action": "Review only; no automatic merge",
+    "related_entity_id": "task_9a1520126bd209a570e6",
+    "status": "PENDING_APPROVAL"
+  }
+]
