@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from Tests.fixtures.orion_registry import orion_registry
+
 import subprocess
 import sys
 from pathlib import Path
@@ -19,7 +21,7 @@ def test_bundle_status_missing_requires_rebuild(tmp_path: Path, monkeypatch) -> 
     assert status["bundle_should_rebuild"] is True
 
 
-def test_bundle_status_valid_reuses_existing_bundle(tmp_path: Path, monkeypatch) -> None:
+def test_bundle_status_valid_reuses_existing_bundle(orion_registry, tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     write_precompute_bundle(
         trade_date="2026-03-18",
@@ -50,7 +52,7 @@ def test_bundle_status_valid_reuses_existing_bundle(tmp_path: Path, monkeypatch)
     assert status["bundle_should_rebuild"] is False
 
 
-def test_bundle_status_force_refresh_marks_refresh_requested(tmp_path: Path, monkeypatch) -> None:
+def test_bundle_status_force_refresh_marks_refresh_requested(orion_registry, tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     write_precompute_bundle(
         trade_date="2026-03-18",

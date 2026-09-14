@@ -124,3 +124,39 @@ def test_missing_duplicate_or_wrong_date_session_still_fails():
     assert current_session_status(c,'2026-09-14')=='FAILED'
     c['sessions']=[row];c['through_date']='2026-09-11'
     assert current_session_status(c,'2026-09-14')=='FAILED'
+
+
+def extend_reviewed_bridge(r):
+    path = r / BRIDGE_PATH
+    prior = json.loads(path.read_text())
+    old_head = git(r, 'rev-parse', 'HEAD')
+    (r / 'recovered_parent_reader.py').write_text('CLOSED_CHAIN=True\n')
+    git(r, 'add', '.')
+    prior['intermediate_shas'] = [prior['parent_sha']]
+    prior['parent_sha'] = old_head
+    prior['runtime_content_sha256'] = content_digest(r, git(r, 'write-tree'))
+    _write_json(path, prior)
+    git(r, 'add', '.'); git(r, 'commit', '-qm', 'Reviewed exact successor')
+    _write_json(r / 'outputs/deploy_state.json', state(git(r, 'rev-parse', 'HEAD')))
+    return prior
+
+
+def test_exact_reviewed_successor_preserves_friday_producer(ready_repo):
+    r = ready_repo
+    marker = r / 'outputs/price_hydration/2026-09-11/orion_decision_ready.json'
+    before = marker.read_bytes()
+    extend_reviewed_bridge(r)
+    assert result(r)['status'] == 'READY'
+    assert marker.read_bytes() == before
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'wrong', 'duplicate', 'too_long', 'not_list'])
+def test_reviewed_successor_rejects_inexact_ancestor_chain(ready_repo, mutation):
+    r = ready_repo; bridge = extend_reviewed_bridge(r)
+    bad = {'missing': [], 'wrong': ['0'*40], 'duplicate': [bridge['parent_sha']],
+           'too_long': ['0'*40]*9, 'not_list': bridge['producer_sha']}[mutation]
+    bridge['intermediate_shas'] = bad
+    _write_json(r / BRIDGE_PATH, bridge)
+    git(r, 'add', '.'); git(r, 'commit', '--amend', '--no-edit', '-q')
+    _write_json(r / 'outputs/deploy_state.json', state(git(r, 'rev-parse', 'HEAD')))
+    assert result(r)['status'] == 'BLOCKED'

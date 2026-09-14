@@ -2,12 +2,15 @@
   "decision_lineage_hash": "4f9d8797748ebbd43b2ad82a01d955635ac9decd02b9c47a97e4cb2c4676e20d",
   "effective_trade_date": "2026-09-11",
   "hydration_sha256": "1f37fd9e3b19abb7f55144481e86f2109d718438caf0bae9feff6ddb07876a49",
+  "intermediate_shas": [
+    "7b8648a3ce2cfbffd98c230eea0aeeeb3c958ef5"
+  ],
   "marker_sha256": "014a95d6094cabd243f2202cf7d25bfbfd258a89032fcc76e034f70f9c5ee0fd",
-  "parent_sha": "7b8648a3ce2cfbffd98c230eea0aeeeb3c958ef5",
+  "parent_sha": "ba747a853e38c489f1dd2a17d717a2d5886ca14b",
   "producer_sha": "47873b54516cfd81da47f0ee48cb2edc02cc8f32",
   "report_date": "2026-09-14",
-  "review": "Brett authorized Sept14 repair; Atlas and Data Foundry reviewed exact release content, unchanged Orion producer and preserved immutable Friday evidence. No manual precompute or trading authority.",
-  "runtime_content_sha256": "ec68f7d14e021a3596a4db072455d8e783b81ae6eb460193cf948050f58b6fed",
+  "review": "Brett authorizes Sept14 recovery and plumbing test; Atlas and independent specialists reviewed exact Aquila closed-parent reader and complete release ancestry. Friday Orion producer/evidence unchanged. Existing PAPER authority and failed-day classification preserved.",
+  "runtime_content_sha256": "6ad2dcee7ec10ea08849b0f5e502f44cf65a1f3e428fea9445597f1851b00e73",
   "schema_version": "caerus.orion_release_bridge.v1",
   "source_sha256": "c07d3fa57798d78299e79d238c0165d9ed3d88530c72c41b46a6cdea23df8374"
 }

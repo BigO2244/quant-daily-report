@@ -10,6 +10,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from core.aquila_monthly import AquilaContractError, build_aquila_source
+from core.aquila_recovery_closure import (
+    AquilaRecoveryClosureError,
+    verified_recovery_closure,
+)
 from core.portfolio_operating_model import content_hash, file_hash
 from core.price_hydration import DEFAULT_CACHE_PATH
 from paper.trading_calendar import prev_trading_day
@@ -90,7 +94,32 @@ def _monthly_state(root: Path, ownership: dict, quantities: dict, generated_at: 
         if success:
             successes.append(item)
     completed = {item["plan"]["content_hash"] for item in successes}
-    if any(not ok and digest not in completed for digest, ok, _ in attempts):
+    closed_by_successor = {}
+    closure_evidence = []
+    for item in successes:
+        try:
+            closure = verified_recovery_closure(
+                    repo_root=root,
+                    successful_plan=item["plan"],
+                    trade_date=item["trade_date"],
+            )
+            if closure is not None:
+                for digest in closure.parent_plan_hashes:
+                    prior = closed_by_successor.get(digest)
+                    closed_by_successor[digest] = (
+                        item["timestamp"] if prior is None else min(prior, item["timestamp"])
+                    )
+                closure_evidence.extend(closure.evidence_paths)
+        except AquilaRecoveryClosureError as exc:
+            # A malformed claimed recovery is not an ordinary historical
+            # failure.  It must be investigated rather than ignored.
+            raise AquilaContractError("invalid governed Aquila recovery closure") from exc
+    if any(
+        not ok
+        and digest not in completed
+        and (digest not in closed_by_successor or stamp >= closed_by_successor[digest])
+        for digest, ok, stamp in attempts
+    ):
         raise AquilaContractError("unresolved Aquila execution requires explicit recovery")
     if not successes:
         if quantities:
@@ -113,7 +142,7 @@ def _monthly_state(root: Path, ownership: dict, quantities: dict, generated_at: 
     if latest_c["action"] == "HOLD_NO_REBALANCE" and latest_c.get("monthly_plan_sha256") != formation["plan"]["content_hash"]:
         raise AquilaContractError("hold receipt diverges from originating formation")
     evidence = [{"path": str(path.relative_to(root)), "sha256": file_hash(path)}
-                for path in dict.fromkeys(formation["paths"] + latest["paths"])]
+                for path in dict.fromkeys(formation["paths"] + latest["paths"] + closure_evidence)]
     return dict(status="RECONCILED", formation_month=formation["trade_date"][:7],
                 formation_id=c["formation_id"], formation_hash=c["formation_hash"],
                 formation_session=c["formation_session"], monthly_plan_sha256=formation["plan"]["content_hash"],

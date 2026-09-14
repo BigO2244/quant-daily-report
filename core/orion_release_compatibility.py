@@ -39,7 +39,7 @@ def verify_bridge(*, runtime_root: Path, evidence_root: Path, report_date: str,
                      'producer_sha', 'parent_sha', 'runtime_content_sha256',
                      'marker_sha256', 'source_sha256', 'hydration_sha256',
                      'decision_lineage_hash', 'review'}
-    if set(bridge) != expected_keys or bridge['schema_version'] != SCHEMA:
+    if set(bridge) not in (expected_keys, expected_keys | {'intermediate_shas'}) or bridge['schema_version'] != SCHEMA:
         raise ValueError('schema')
     if report_date != bridge['report_date'] or marker['effective_trade_date'] != bridge['effective_trade_date']:
         raise ValueError('date')
@@ -50,8 +50,18 @@ def verify_bridge(*, runtime_root: Path, evidence_root: Path, report_date: str,
             raise ValueError('invalid_sha')
     if _git(runtime_root, 'show', '-s', '--format=%P', head) != bridge['parent_sha']:
         raise ValueError('runtime_parent')
-    if _git(runtime_root, 'show', '-s', '--format=%P', bridge['parent_sha']) != bridge['producer_sha']:
-        raise ValueError('producer_parent')
+    intermediates = bridge.get('intermediate_shas', [])
+    if (not isinstance(intermediates, list) or len(intermediates) > 8
+            or any(not isinstance(v, str) or len(v) != 40
+                   or any(c not in '0123456789abcdef' for c in v)
+                   for v in intermediates)):
+        raise ValueError('intermediate_shas')
+    chain = [bridge['parent_sha'], *intermediates, bridge['producer_sha']]
+    if len(chain) != len(set(chain)):
+        raise ValueError('duplicate_release_ancestor')
+    for child, parent in zip(chain, chain[1:]):
+        if _git(runtime_root, 'show', '-s', '--format=%P', child) != parent:
+            raise ValueError('producer_parent')
     if content_digest(runtime_root) != bridge['runtime_content_sha256']:
         raise ValueError('runtime_content')
     day = bridge['effective_trade_date']
