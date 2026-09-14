@@ -164,6 +164,8 @@ def _deploy_integration_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], s
     (prod / ".gitignore").write_text(
         "outputs/\n__pycache__/\n.pytest_cache/\n", encoding="utf-8"
     )
+    (prod / "core/deployment_precompute_dependency.py").write_text(
+        'def validate_candidate_dependency(**kwargs):\n    return {"status": "READY", "fixture": True}\n', encoding="utf-8")
     (prod / "initial.txt").write_text("initial\n", encoding="utf-8")
     _git(prod, "add", "-A")
     _git(prod, "commit", "-q", "-m", "initial")

@@ -174,3 +174,27 @@ This shadow lane writes target books and comparison artifacts for Polaris, Orion
 ## Precompute timing — September 9 repair
 
 Canonical PAPER precompute starts at 05:00 America/New_York, with security-master refresh at 04:45. Admission is limited to the 05:00 minute; admitted work can finish later. Execution at 09:35 consumes the sealed bundle and cannot rebuild it. Dashboard refresh yields 04:35–06:00. Deployment receipts and installed cron establish activation; this source change alone does not prove deployment.
+
+
+## September 14 deployment dependency repair
+
+Deployment finalization now runs the candidate Orion guard against the real
+production completed-session evidence before publishing or attesting success.
+A failed handoff preserves production HEAD and its prior attestation. The
+calendar selects Friday for a weekend/Monday-morning deployment and respects
+early closes. Candidate validation is diagnostic and cannot submit orders.
+
+The exact September14 compatibility bridge preserves Friday's original
+readiness, source, hydration and lineage hashes. It admits only its reviewed
+producer/parent/release tree and date; clean runtime plus full current PASS
+attestation remain mandatory. Every tracked file is bound except the bridge
+config itself, whose bytes are covered by the deployed commit. No generic
+ancestor, stale-input, clock, or environment override exists. Future unmatched
+revisions fail before publication and require their own reviewed handoff.
+
+Monday's scheduled failure remains failed and cannot count as clean after repair.
+The read-only Caerus scheduled-run monitor checks every five minutes and reports
+failed, overdue, unverified and recovered states separately. Five-session
+certification remains independent: nightly OBSERVING is nonfatal only when the
+current session is fully clean; all parity, Shadow and current-session defects
+remain fatal. Missing delivery evidence never proves successful delivery.

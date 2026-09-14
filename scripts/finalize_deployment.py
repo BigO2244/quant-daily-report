@@ -86,6 +86,7 @@ def finalize_deployment(
     source_ref: str = "origin/main",
     deploy_state_path: Path | None = None,
     validation_script: Path | None = None,
+    runtime_root: Path | None = None,
 ) -> Path:
     repo_root = repo_root.resolve()
     deploy_state_path = deploy_state_path or repo_root / "outputs" / "deploy_state.json"
@@ -125,6 +126,17 @@ def finalize_deployment(
         expected_branch=expected_branch,
         source_ref=source_ref,
     )
+    dependency = None
+    if runtime_root is not None:
+        from core.deployment_precompute_dependency import validate_candidate_dependency
+        dependency = validate_candidate_dependency(
+            runtime_root=repo_root, evidence_root=runtime_root.resolve(), candidate_sha=candidate_after)
+        if dependency["status"] != "READY":
+            raise DeploymentAttestationError(
+                "actual precompute dependency failed; production and prior attestation preserved: "
+                + json.dumps(dependency, sort_keys=True))
+        _verify_candidate(repo_root, expected_sha=candidate_after,
+                          expected_branch=expected_branch, source_ref=source_ref)
     try:
         validation_command = str(validation_script.relative_to(repo_root))
     except ValueError:
@@ -134,6 +146,7 @@ def finalize_deployment(
         candidate_after,
         branch=expected_branch or "main",
         metadata={
+            "precompute_dependency": dependency,
             "schema_version": "caerus.deploy_state.v2",
             "source_ref": source_ref,
             "validated_sha": candidate_after,
@@ -153,6 +166,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source-ref", default="origin/main")
     parser.add_argument("--deploy-state", default="")
     parser.add_argument("--validation-script", default="")
+    parser.add_argument("--runtime-root", default=str(Path.home() / "quant-daily-report"))
     return parser.parse_args(argv)
 
 
@@ -162,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         path = finalize_deployment(
             repo_root=repo_root,
+            runtime_root=Path(args.runtime_root),
             expected_sha=args.expected_sha,
             expected_branch=args.expected_branch,
             source_ref=args.source_ref,

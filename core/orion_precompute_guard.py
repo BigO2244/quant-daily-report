@@ -53,10 +53,14 @@ def validate_orion_precompute_dependency(
     *,
     repo_root: Path,
     report_date: str,
+    runtime_root: Path | None = None,
+    candidate_deploy_state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Require the successful post-close chain for the last completed session."""
 
     root = Path(repo_root).resolve()
+    code_root = Path(runtime_root).resolve() if runtime_root else root
+    compatibility = None
     effective_date = latest_completed_xnys_session(report_date)
     marker_path = (
         root
@@ -204,25 +208,41 @@ def validate_orion_precompute_dependency(
             failures.append("orion_dependency:deployed_git_sha_invalid")
         else:
             try:
-                head_sha = require_clean_git_sha(root)
+                head_sha = require_clean_git_sha(code_root)
+                state_path = root / "outputs" / "deploy_state.json"
+                state = dict(candidate_deploy_state) if candidate_deploy_state is not None else (
+                    _read_object(state_path) if state_path.is_file() else None
+                )
+                if state is not None and str(state.get("deployed_sha") or "") != head_sha:
+                    failures.append("orion_dependency:deploy_state_sha_mismatch")
                 if deployed_sha != head_sha:
-                    failures.append("orion_dependency:repo_head_sha_mismatch")
+                    # An exact reviewed bridge may replace only the cross-release
+                    # SHA equality; every existing evidence check must already pass.
+                    attested = state is not None and all(
+                        state.get(k) == head_sha for k in ("deployed_sha", "validated_sha", "target_sha")
+                    ) and state.get("validation_status") == "PASS" and state.get("schema_version") == "caerus.deploy_state.v2"
+                    if not attested or failures:
+                        failures.append("orion_dependency:repo_head_sha_mismatch")
+                    else:
+                        try:
+                            from core.orion_release_compatibility import verify_bridge
+                            compatibility = verify_bridge(
+                                runtime_root=code_root, evidence_root=root,
+                                report_date=report_date, marker_path=marker_path,
+                                marker=marker, head=head_sha,
+                            )
+                        except Exception as exc:
+                            failures.append("orion_dependency:repo_head_sha_mismatch")
+                            failures.append("orion_dependency:release_bridge_invalid:" + type(exc).__name__)
             except ValueError:
                 failures.append("orion_dependency:repo_runtime_not_clean_or_unavailable")
-            deploy_state_path = root / "outputs" / "deploy_state.json"
-            if deploy_state_path.is_file():
-                try:
-                    deploy_state_sha = str(
-                        _read_object(deploy_state_path).get("deployed_sha") or ""
-                    )
-                    if deploy_state_sha != deployed_sha:
-                        failures.append("orion_dependency:deploy_state_sha_mismatch")
-                except Exception:
-                    failures.append("orion_dependency:deploy_state_invalid")
+            except Exception:
+                failures.append("orion_dependency:deploy_state_invalid")
 
     status = "READY" if not failures else "BLOCKED"
     return {
         "schema_version": "caerus.orion_precompute_dependency_guard.v1",
+        "release_compatibility": compatibility,
         "status": status,
         "report_date": report_date,
         "required_effective_trade_date": effective_date,

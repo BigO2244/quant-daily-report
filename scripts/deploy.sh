@@ -115,6 +115,7 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         Tests/test_paper_target_authority.py \
         Tests/test_orion_upstream_freshness.py \
         Tests/test_orion_downstream_freshness.py \
+        Tests/test_orion_release_compatibility.py \
         Tests/test_price_cache_only_hydrator.py \
         Tests/test_paper_execution_real_chain.py \
         Tests/test_portfolio_history_builder.py \
@@ -148,6 +149,7 @@ git worktree add --detach "${VALIDATION_WORKTREE}" "${TARGET_SHA}" >/dev/null
         --strict >/dev/null
     python3 scripts/finalize_deployment.py \
         --repo-root "${VALIDATION_WORKTREE}" \
+        --runtime-root "${REPO}" \
         --expected-sha "${TARGET_SHA}" \
         --expected-branch "" \
         --source-ref origin/main \

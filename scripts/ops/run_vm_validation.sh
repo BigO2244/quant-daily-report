@@ -99,6 +99,7 @@ echo "[VM_VALIDATION] targeted_pytest"
   Tests/test_aquila_recovery_authorization.py \
   Tests/test_aquila_recovery_chain.py \
   Tests/test_workflow_failure_email.py \
+  Tests/test_orion_release_compatibility.py \
   -q
 
 echo "[VM_VALIDATION] operating_truth"

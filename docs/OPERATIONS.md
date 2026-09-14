@@ -402,3 +402,27 @@ or promotion is authorized by this local source update. Both submission wrappers
 contain the new pretrade parity guard in source.
 Complete normalized pretrade inputs and deployment validation remain required;
 diagnostics do not grant execution authority.
+
+
+## September 14 deployment dependency repair
+
+Deployment finalization now runs the candidate Orion guard against the real
+production completed-session evidence before publishing or attesting success.
+A failed handoff preserves production HEAD and its prior attestation. The
+calendar selects Friday for a weekend/Monday-morning deployment and respects
+early closes. Candidate validation is diagnostic and cannot submit orders.
+
+The exact September14 compatibility bridge preserves Friday's original
+readiness, source, hydration and lineage hashes. It admits only its reviewed
+producer/parent/release tree and date; clean runtime plus full current PASS
+attestation remain mandatory. Every tracked file is bound except the bridge
+config itself, whose bytes are covered by the deployed commit. No generic
+ancestor, stale-input, clock, or environment override exists. Future unmatched
+revisions fail before publication and require their own reviewed handoff.
+
+Monday's scheduled failure remains failed and cannot count as clean after repair.
+The read-only Caerus scheduled-run monitor checks every five minutes and reports
+failed, overdue, unverified and recovered states separately. Five-session
+certification remains independent: nightly OBSERVING is nonfatal only when the
+current session is fully clean; all parity, Shadow and current-session defects
+remain fatal. Missing delivery evidence never proves successful delivery.
